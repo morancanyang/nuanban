@@ -1,0 +1,142 @@
+/* 暖伴 · 日出暖光背景（欢迎页 ambient--full / 工作区 ambient）
+   只动画 transform 与 opacity，避免大面积 filter 与重绘。 */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  --ambient-grain: .022;
+  --ambient-peak: .22;
+  --sun-base: .2;
+  --sun-peak: .3;
+  --rays-opacity: 0;
+}
+
+/* 暖阳：底部中央的大圆，靠径向渐变自带柔边 */
+.ambient-sun {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -60vh;
+  width: 120vw;
+  aspect-ratio: 1;
+  margin-inline: auto;
+  border-radius: 50%;
+  z-index: 0;
+  background: radial-gradient(circle, rgba(255, 203, 138, .4) 0%, rgba(255, 226, 186, .18) 34%, rgba(255, 240, 220, 0) 58%);
+  animation: sun-breathe 10s ease-in-out infinite;
+}
+
+/* 光束：以暖阳为圆心的极慢旋转 */
+.ambient-rays {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10vh;
+  width: 160vw;
+  height: 120vh;
+  margin-inline: auto;
+  z-index: 1;
+  opacity: var(--rays-opacity);
+  transform-origin: 50% 100%;
+  background: repeating-conic-gradient(from 0deg at 50% 100%, rgba(255, 214, 160, .16) 0deg 2.5deg, rgba(255, 214, 160, 0) 2.5deg 12deg);
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, .9), transparent 72%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, .9), transparent 72%);
+  animation: rays-turn 90s linear infinite;
+}
+
+/* 纸纹压在暖阳之上，保留纸的质感 */
+.ambient::before {
+  content: '';
+  position: absolute;
+  inset: -10%;
+  z-index: 3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  opacity: var(--ambient-grain);
+  mix-blend-mode: multiply;
+}
+
+/* 扫光：斜向掠过一次 */
+.ambient::after {
+  content: '';
+  position: absolute;
+  top: -30vh;
+  left: 0;
+  z-index: 2;
+  width: 46vw;
+  height: 160vh;
+  background: linear-gradient(105deg, transparent 0%, rgba(255, 236, 208, .7) 45%, transparent 100%);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ambient-sweep 22s linear infinite;
+}
+
+.ambient--full {
+  --ambient-grain: .05;
+  --ambient-peak: .58;
+  --sun-base: .55;
+  --sun-peak: .72;
+  --rays-opacity: .65;
+}
+
+.ambient--full::after {
+  animation-duration: 14s;
+}
+
+@keyframes sun-breathe {
+  0%, 100% { transform: scale(1); opacity: var(--sun-base); }
+  50% { transform: scale(1.06); opacity: var(--sun-peak); }
+}
+
+@keyframes rays-turn {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ambient-sweep {
+  0% { transform: rotate(12deg) translate3d(-70vw, 0, 0); opacity: 0; }
+  18% { opacity: var(--ambient-peak); }
+  70% { opacity: var(--ambient-peak); }
+  100% { transform: rotate(12deg) translate3d(130vw, 0, 0); opacity: 0; }
+}
+
+/* 减少动态：伪元素不会被 .reduce-motion 的 * 规则命中，这里显式停掉扫光 */
+.reduce-motion .ambient::after {
+  animation: none;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* 工作区内容始终压在背景层之上；侧边栏自身 z-index:40 不变 */
+.workspace {
+  position: relative;
+  z-index: 1;
+}
+
+/* 应用内不启动光束动画，避免白耗一个合成层 */
+.ambient:not(.ambient--full) .ambient-rays {
+  display: none;
+}
+
+/* 小屏只留暖阳：省电，也避免光束在窄屏显得晃动 */
+@media (max-width: 760px) {
+  .ambient-rays {
+    display: none;
+  }
+
+  .ambient-sun {
+    width: 180vw;
+  }
+
+  .ambient::after {
+    display: none;
+  }
+}

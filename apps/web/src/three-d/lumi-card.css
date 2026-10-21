@@ -1,32 +1,32 @@
 .lumi-card { display: grid; grid-template-columns: minmax(230px, .85fr) minmax(0, 1.15fr); gap: 32px; margin-bottom: 28px; padding: 20px; border-color: #d8c7ac; }
 .lumi-stage { position: relative; min-height: 420px; overflow: hidden; border-radius: 18px; background: radial-gradient(ellipse at 50% 90%, #cabb9f66, transparent 50%), #f1eadc; }
-.lumi-stage::before { content: '✧'; position: absolute; right: 18px; top: 54px; color: #baa57c; font-size: 38px; }
-.lumi-stage-tag { position: absolute; top: 16px; left: 18px; z-index: 1; display: flex; align-items: center; gap: 7px; color: #6f614e; font-size: 11px; letter-spacing: 1px; pointer-events: none; }
+.lumi-stage::before { content: '✧'; position: absolute; right: 18px; top: 54px; color: #baa57c; font-size: calc(38px * var(--font-scale, 1)); }
+.lumi-stage-tag { position: absolute; top: 16px; left: 18px; z-index: 1; display: flex; align-items: center; gap: 7px; color: #6f614e; font-size: calc(11px * var(--font-scale, 1)); letter-spacing: 1px; pointer-events: none; }
 .lumi-model-surface { position: absolute; inset: 32px 0 28px; }
 .lumi-model-surface canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 .lumi-poster { position: absolute; inset: 36px 0 28px; width: 100%; height: calc(100% - 64px); object-fit: contain; pointer-events: none; }
-.lumi-stage-caption { position: absolute; bottom: 16px; left: 12px; right: 12px; color: #766851; text-align: center; font-size: 12px; pointer-events: none; }
+.lumi-stage-caption { position: absolute; bottom: 16px; left: 12px; right: 12px; color: #766851; text-align: center; font-size: calc(12px * var(--font-scale, 1)); pointer-events: none; }
 .lumi-details { align-self: center; min-width: 0; padding: 12px 12px 12px 0; }
 .lumi-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.lumi-meta .eyebrow { font-size: 10px; letter-spacing: 1.2px; }
-.lumi-details h2 { display: flex; align-items: center; gap: 12px; margin: 18px 0 12px; font-size: 34px; color: #634b36; }
+.lumi-meta .eyebrow { font-size: calc(10px * var(--font-scale, 1)); letter-spacing: 1.2px; }
+.lumi-details h2 { display: flex; align-items: center; gap: 12px; margin: 18px 0 12px; font-size: calc(34px * var(--font-scale, 1)); color: #634b36; }
 .lumi-details h2 span { font-family: Georgia, serif; font-weight: 400; font-style: italic; color: #8a7561; }
 .lumi-details h2 svg { margin-left: auto; color: #ad8e54; }
-.lumi-description { font-size: 15px; line-height: 1.9; color: #786754; max-width: 540px; }
-.lumi-facts { display: flex; flex-wrap: wrap; gap: 9px 18px; padding: 18px 0; margin: 0 0 16px; border-bottom: 1px dashed #d7c9b4; color: #7a684f; font-size: 11px; }
+.lumi-description { font-size: calc(15px * var(--font-scale, 1)); line-height: 1.9; color: #786754; max-width: 540px; }
+.lumi-facts { display: flex; flex-wrap: wrap; gap: 9px 18px; padding: 18px 0; margin: 0 0 16px; border-bottom: 1px dashed #d7c9b4; color: #7a684f; font-size: calc(11px * var(--font-scale, 1)); }
 .lumi-facts span { display: inline-flex; align-items: center; gap: 6px; }
 .lumi-action-picker { min-width: 0; padding: 0; border: 0; margin: 0 0 22px; }
-.lumi-action-picker legend { margin-bottom: 12px; color: #6b563f; font-size: 13px; font-weight: 650; }
+.lumi-action-picker legend { margin-bottom: 12px; color: #6b563f; font-size: calc(13px * var(--font-scale, 1)); font-weight: 650; }
 .lumi-action-picker > div { display: flex; gap: 8px; flex-wrap: wrap; }
-.lumi-action-picker button { min-height: 40px; padding: 8px 12px; border: 1px solid #d8ccb9; border-radius: 10px; color: #715d48; background: #faf6ee; font-size: 12px; }
+.lumi-action-picker button { min-height: 40px; padding: 8px 12px; border: 1px solid #d8ccb9; border-radius: 10px; color: #715d48; background: #faf6ee; font-size: calc(12px * var(--font-scale, 1)); }
 .lumi-action-picker button[aria-pressed='true'] { background: #e6eddf; border-color: #a8b49b; color: #435a3a; }
 .lumi-action-picker button:disabled { opacity: .5; cursor: not-allowed; }
 .lumi-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
-.lumi-buttons .button { min-width: 0; font-size: 13px; }
-.lumi-local-note { display: flex; align-items: flex-start; gap: 6px; color: #76816a; font-size: 11px; line-height: 1.8; margin-top: 14px; }
+.lumi-buttons .button { min-width: 0; font-size: calc(13px * var(--font-scale, 1)); }
+.lumi-local-note { display: flex; align-items: flex-start; gap: 6px; color: #76816a; font-size: calc(11px * var(--font-scale, 1)); line-height: 1.8; margin-top: 14px; }
 .lumi-local-note svg { flex-shrink: 0; margin-top: 2px; }
-.lumi-platform-note { color: #826e56; font-size: 12px; line-height: 1.8; margin-top: 8px; }
-.lumi-notice { color: #4b6c55; font-size: 13px; line-height: 1.85; margin-top: 12px; }
+.lumi-platform-note { color: #826e56; font-size: calc(12px * var(--font-scale, 1)); line-height: 1.8; margin-top: 8px; }
+.lumi-notice { color: #4b6c55; font-size: calc(13px * var(--font-scale, 1)); line-height: 1.85; margin-top: 12px; }
 .lumi-card .inline-error { margin-top: 12px; }
 @media (max-width: 950px) { .lumi-card { grid-template-columns: minmax(0, 1fr); gap: 16px; } .lumi-stage { min-height: 350px; } .lumi-details { padding: 8px; } }
-@media (max-width: 440px) { .lumi-card { padding: 12px; } .lumi-stage { min-height: 320px; } .lumi-details h2 { font-size: 30px; } .lumi-buttons { flex-direction: column; } }
+@media (max-width: 440px) { .lumi-card { padding: 12px; } .lumi-stage { min-height: 320px; } .lumi-details h2 { font-size: calc(30px * var(--font-scale, 1)); } .lumi-buttons { flex-direction: column; } }

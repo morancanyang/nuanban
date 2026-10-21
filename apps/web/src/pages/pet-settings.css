@@ -1,24 +1,24 @@
 .pet-editor-grid { display: grid; grid-template-columns: minmax(260px, .9fr) minmax(0, 1.1fr); gap: 24px; margin-bottom: 28px; }
 .pet-editor-preview { display: grid; justify-items: center; text-align: center; align-content: start; }
 .pet-editor-current .pet { height: 150px; width: 150px; }
-.pet-editor-current p, .pet-editor-candidate p { color: var(--muted, #78634e); font-size: 14px; line-height: 1.8; }
+.pet-editor-current p, .pet-editor-candidate p { color: var(--muted, #78634e); font-size: calc(14px * var(--font-scale, 1)); line-height: 1.8; }
 .pet-editor-candidate { width: 100%; border-top: 1px dashed #d8c7ad; padding-top: 20px; margin-top: 20px; }
 .pet-editor-candidate .pet { display: block; width: min(240px, 100%); height: 240px; margin: 18px auto; }
-.pet-editor-controls h2 { font-size: 25px; line-height: 1.6; margin-bottom: 10px; }
-.pet-editor-controls p { font-size: 15px; line-height: 1.9; margin-bottom: 22px; }
+.pet-editor-controls h2 { font-size: calc(25px * var(--font-scale, 1)); line-height: 1.6; margin-bottom: 10px; }
+.pet-editor-controls p { font-size: calc(15px * var(--font-scale, 1)); line-height: 1.9; margin-bottom: 22px; }
 .pet-editor-controls fieldset { padding: 0; border: 0; margin: 24px 0; min-width: 0; }
 .pet-editor-controls legend { margin-bottom: 12px; font-weight: 700; }
 .pet-kind-options { display: flex; flex-wrap: wrap; gap: 10px; }
 .pet-tuning-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 22px; }
 .pet-tuning-fields label { display: flex; flex-direction: column; gap: 10px; font-weight: 600; }
 .pet-tuning-fields select, .pet-tuning-fields input { width: 100%; min-height: 52px; }
-.pet-editor-controls .small-note { font-size: 13px; color: #78634e; }
+.pet-editor-controls .small-note { font-size: calc(13px * var(--font-scale, 1)); color: #78634e; }
 .lili-resource-card { border: 1px solid #dec9a5; border-radius: 18px; background: #fff9ee; padding: 20px; margin-bottom: 24px; }
-.lili-resource-card h3 { font-size: 20px; line-height: 1.6; margin: 14px 0 10px; color: #69452f; }
+.lili-resource-card h3 { font-size: calc(20px * var(--font-scale, 1)); line-height: 1.6; margin: 14px 0 10px; color: #69452f; }
 .lili-resource-card p { margin-bottom: 14px; }
-.lili-resource-tags { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 14px; font-size: 13px; color: #69452f; }
+.lili-resource-tags { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 14px; font-size: calc(13px * var(--font-scale, 1)); color: #69452f; }
 .lili-resource-tags code { font-weight: 700; }
-.lili-resource-card .lili-call-status { font-size: 14px; margin: 12px 0 0; }
+.lili-resource-card .lili-call-status { font-size: calc(14px * var(--font-scale, 1)); margin: 12px 0 0; }
 .lili-call-status:empty { display: none; }
 .pet-tuning-fields :disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 850px) { .pet-editor-grid { grid-template-columns: minmax(0, 1fr); } }

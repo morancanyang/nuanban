@@ -26,7 +26,7 @@ test('旧场景查询参数不再改变业务或播种假资料', async ({ page 
   await page.goto('/?scenario=success#/notes');
   await expect(page.locator('.note-card')).toHaveCount(0);
   await page.goto('/?scenario=invite-expired#/family');
-  await expect(page.getByRole('heading', { name: '当前没有可用的家属服务' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '这个页面不在这里' })).toBeVisible();
   await expect(page.getByRole('button', { name: '添加演示家属' })).toHaveCount(0);
   await page.goto('/#/development/scenarios');
   await expect(page.getByRole('heading', { name: '开发验收场景' })).toHaveCount(0);

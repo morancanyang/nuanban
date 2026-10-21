@@ -21,8 +21,8 @@ function createStandaloneHost(options) {
   const petPath = path.join(__dirname, 'pet.html');
   const guidePath = path.join(__dirname, 'guide.html');
   const captionPath = path.join(__dirname, 'caption.html');
-  const managementRoutes = new Set(['/', '/chat/new', '/notes', '/todos', '/pets', '/pets/draw', '/family', '/settings']);
-  const petToolRoutes = new Set(['/chat/new', '/notes', '/todos', '/pets', '/pets/draw', '/pets/import-3d', '/family', '/settings', '/settings/status', '/onboarding/mode', '/onboarding/login', '/sync/conflicts']);
+  const managementRoutes = new Set(['/', '/chat/new', '/notes', '/todos', '/pets', '/pets/draw', '/settings']);
+  const petToolRoutes = new Set(['/chat/new', '/notes', '/todos', '/pets', '/pets/draw', '/pets/import-3d', '/settings', '/settings/status', '/onboarding/mode', '/onboarding/login', '/sync/conflicts']);
   let petWindow = null;
   let petDisplayCompatible = options.petDisplayCompatible === true;
   let petProtected;
@@ -591,7 +591,7 @@ function createStandaloneHost(options) {
       { label: '学习笔记与复习', click: () => showPetPanel({ section: 'learning' }) },
       { label: '学习档案', click: () => showPetPanel({ section: 'archive', focusInput: false }) },
       { label: '待办与复习', click: () => showPetPanel({ section: 'todos', focusInput: false }) },
-      ...[['文字与图片问答', '/chat/new'], ['我的小伙伴', '/pets'], ['本地 3D 桌宠', '/pets/import-3d'], ['画一画', '/pets/draw'], ['亲情陪伴（远程未接通）', '/family'], ['设置与隐私', '/settings'], ['接口与能力状态', '/settings/status'], ['陪伴与无障碍模式', '/onboarding/mode'], ['账号与设备（远程未接入）', '/onboarding/login'], ['资料冲突处理', '/sync/conflicts']].map(([label, route]) => ({ label, click: () => runAction(() => openPetTool(route)) })),
+      ...[['文字与图片问答', '/chat/new'], ['我的小伙伴', '/pets'], ['本地 3D 桌宠', '/pets/import-3d'], ['画一画', '/pets/draw'], ['设置与隐私', '/settings'], ['接口与能力状态', '/settings/status'], ['陪伴与无障碍模式', '/onboarding/mode'], ['账号与设备（远程未接入）', '/onboarding/login'], ['资料冲突处理', '/sync/conflicts']].map(([label, route]) => ({ label, click: () => runAction(() => openPetTool(route)) })),
       { label: '打开管理窗口', click: () => runAction(() => options.showManagement('/')) },
       { type: 'separator' }, { label: '停止观察、语音和发送', click: () => runAction(() => stop('user')) },
       { label: '关闭桌宠（停止所有采集）', click: () => runAction(closePetWindow) },

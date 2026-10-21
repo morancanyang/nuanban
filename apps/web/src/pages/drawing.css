@@ -1,20 +1,20 @@
 .drawing-flow { display: flex; flex-wrap: wrap; gap: 14px 36px; padding: 0; margin: 0 0 24px; list-style: none; color: #705b47; }
-.drawing-flow li { display: flex; align-items: center; gap: 10px; font-size: 16px; }
-.drawing-flow li > span { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #d9c5ae; border-radius: 50%; font-size: 12px; color: #a64b2a; }
-.drawing-local-notice { margin-top: 16px; color: #7c654e; font-size: 14px; line-height: 1.8; }
+.drawing-flow li { display: flex; align-items: center; gap: 10px; font-size: calc(16px * var(--font-scale, 1)); }
+.drawing-flow li > span { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #d9c5ae; border-radius: 50%; font-size: calc(12px * var(--font-scale, 1)); color: #a64b2a; }
+.drawing-local-notice { margin-top: 16px; color: #7c654e; font-size: calc(14px * var(--font-scale, 1)); line-height: 1.8; }
 .drawing-applied { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 24px; padding: 18px; border: 1px solid #d5ddc1; border-radius: 16px; background: #f4f5e9; }
 .drawing-applied > img { width: 76px; height: 76px; object-fit: contain; }
 .drawing-applied > div { flex: 1; min-width: 180px; }
-.drawing-applied strong { font-size: 17px; }
-.drawing-applied p { margin-top: 6px; font-size: 13px; line-height: 1.7; color: #6c725a; }
+.drawing-applied strong { font-size: calc(17px * var(--font-scale, 1)); }
+.drawing-applied p { margin-top: 6px; font-size: calc(13px * var(--font-scale, 1)); line-height: 1.7; color: #6c725a; }
 .drawing-optional { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 26px; padding-top: 18px; border-top: 1px dashed #dfd0bf; }
-.drawing-optional > p { width: 100%; margin-bottom: 5px; font-size: 13px; color: #968368; }
+.drawing-optional > p { width: 100%; margin-bottom: 5px; font-size: calc(13px * var(--font-scale, 1)); color: #968368; }
 .drawing-artwork-preview { display: grid; place-items: center; min-height: 220px; padding: 24px; margin: 20px 0 16px; border: 1px solid #dfd0bf; border-radius: 18px; background-color: #fffdf8; background-image: conic-gradient(#eee8db 25%, transparent 0 50%, #eee8db 0 75%, transparent 0); background-size: 24px 24px; }
 .drawing-artwork-preview > img { width: 100%; max-width: 320px; height: 230px; object-fit: contain; }
-.drawing-preview-note { font-size: 14px; line-height: 1.8; color: #7c654e; }
+.drawing-preview-note { font-size: calc(14px * var(--font-scale, 1)); line-height: 1.8; color: #7c654e; }
 @media (max-width: 600px) {
   .drawing-flow { gap: 9px 16px; }
-  .drawing-flow li { font-size: 13px; gap: 6px; }
+  .drawing-flow li { font-size: calc(13px * var(--font-scale, 1)); gap: 6px; }
   .drawing-flow li > span { width: 25px; height: 25px; }
   .drawing-bottom > .button { flex: 1 1 100%; }
   .drawing-artwork-preview { min-height: 170px; padding: 16px; }

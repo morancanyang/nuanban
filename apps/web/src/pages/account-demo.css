@@ -1,5 +1,5 @@
 .account-demo-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 24px; align-items: start; }
-.account-demo-layout h2 { font-size: 24px; line-height: 1.6; margin-bottom: 18px; }
+.account-demo-layout h2 { font-size: calc(24px * var(--font-scale, 1)); line-height: 1.6; margin-bottom: 18px; }
 .account-fixture-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
 .account-fixture-fields label { display: grid; gap: 10px; }
 .account-fixture-fields select { width: 100%; min-height: 52px; }
@@ -8,16 +8,16 @@
 .account-methods label { display: flex; gap: 14px; align-items: center; border: 1px solid #d9c9b0; border-radius: 14px; padding: 18px; cursor: pointer; }
 .account-methods label.selected { background: #f2f1df; border-color: #8b9d73; }
 .account-methods strong, .account-methods small { display: block; line-height: 1.8; }
-.account-methods strong { font-size: 17px; }
-.account-methods small { font-size: 13px; color: #79634c; }
-.account-check { display: flex; align-items: flex-start; gap: 12px; font-size: 16px; line-height: 1.9; margin: 18px 0; }
+.account-methods strong { font-size: calc(17px * var(--font-scale, 1)); }
+.account-methods small { font-size: calc(13px * var(--font-scale, 1)); color: #79634c; }
+.account-check { display: flex; align-items: flex-start; gap: 12px; font-size: calc(16px * var(--font-scale, 1)); line-height: 1.9; margin: 18px 0; }
 .account-check input { flex-shrink: 0; margin-top: 5px; }
-.account-boundary { padding: 16px; background: #fff1dc; border-radius: 12px; line-height: 1.9; font-size: 15px; }
+.account-boundary { padding: 16px; background: #fff1dc; border-radius: 12px; line-height: 1.9; font-size: calc(15px * var(--font-scale, 1)); }
 .account-demo-options details { margin: 22px 0; line-height: 1.9; }
 .account-demo-status { position: sticky; top: 24px; }
 .account-demo-status > svg { color: #72865f; margin-bottom: 14px; }
 .account-demo-status > .badge { display: table; margin-bottom: 20px; }
-.account-demo-status > p { font-size: 16px; line-height: 1.9; margin-bottom: 22px; }
+.account-demo-status > p { font-size: calc(16px * var(--font-scale, 1)); line-height: 1.9; margin-bottom: 22px; }
 .account-demo-status > .button { margin-top: 14px; }
 @media (max-width: 900px) { .account-demo-layout { grid-template-columns: minmax(0, 1fr); } .account-demo-status { position: static; } }
 @media (max-width: 450px) { .account-fixture-fields { grid-template-columns: minmax(0, 1fr); } }

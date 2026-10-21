@@ -2285,7 +2285,7 @@ describe('围绕桌宠展开的功能首页', () => {
     const harness = petHarness();
     await settle();
     const routes = harness.document.tools.map(button => button.dataset.tool);
-    expect(routes).toEqual(['/chat/new', '/family', '/pets', '/pets/draw', '/pets/import-3d', '/onboarding/mode', '/settings', '/settings/status', '/onboarding/login', '/sync/conflicts']);
+    expect(routes).toEqual(['/chat/new', '/pets', '/pets/draw', '/pets/import-3d', '/onboarding/mode', '/settings', '/settings/status', '/onboarding/login', '/sync/conflicts']);
     for (const button of harness.document.tools) { dispatch(button, 'click'); await settle(); }
     expect(harness.bridge.openTool.mock.calls.map(([route]) => route)).toEqual(routes);
     expect(harness.bridge.openMain).not.toHaveBeenCalled();

@@ -783,7 +783,7 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     await current.host.initialize();
     const markup = readFileSync(new URL('../../apps/desktop/pet.html', import.meta.url), 'utf8');
     const routes = [...markup.matchAll(/data-tool="([^"]+)"/g)].map(match => match[1]);
-    expect(routes).toHaveLength(10);
+    expect(routes).toHaveLength(9);
     for (const route of routes) expect(await current.invoke('nuanban:pet:open-tool', route)).toBe(true);
     expect(current.showPetTool.mock.calls).toHaveLength(routes.length);
     for (const [route, section] of [['/notes', 'archive'], ['/todos', 'todos']]) {

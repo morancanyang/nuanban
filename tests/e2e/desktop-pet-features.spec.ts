@@ -196,7 +196,7 @@ test('档案与待办切页不丢编辑草稿，到期入口只打开桌宠待�
 test('桌宠功能首页列全入口，光标指引置顶且不会因为浏览功能而启动采集', async ({ page }) => {
   await featureFixture(page);
   await expect(page.getByRole('heading', { name: '暖暖的功能小屋' })).toBeVisible();
-  await expect(page.locator('#feature-home [data-tool]')).toHaveCount(10);
+  await expect(page.locator('#feature-home [data-tool]')).toHaveCount(9);
   await expect(page.locator('#question-form')).toBeHidden();
   await expect(page.getByRole('button', { name: /AI 生成桌宠/ })).toBeDisabled();
   await page.locator('#feature-guidance').click();
