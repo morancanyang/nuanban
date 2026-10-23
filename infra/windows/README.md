@@ -185,9 +185,9 @@ node infra/windows/tools/push-downloads.mjs --instance i-2zedkag2x1e9e610v8jh
 
 | 产物 | URL | 大小（字节） | SHA256 |
 | --- | --- | --- | --- |
-| Windows 桌面便携包（未签名） | `http://59.110.19.225/downloads/NuanbanDemo-0.1.0-win32-x64-portable-20261023-r14.zip` | 182,120,166 | `7f0196e797b264e75c7439894bfe13e9ff1dc42379e7ee4371294775abfce817` |
-| Android 普通客户端（debug） | `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` | 5,132,288 | `6906304045fed55b8d15597359bb6b30e4b9860e921ba5a8c4b366cda3762982` |
-| Android 独立桌宠（debug） | `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk` | 88,010,860 | `c6b1a6f36561b3b66535b29fc69fa57938cea29b3564a628b0540dfabeb22cff` |
+| Windows 桌面便携包（未签名） | `http://59.110.19.225/downloads/NuanbanDemo-0.1.0-win32-x64-portable-20261023-r15.zip` | 182,120,748 | `5f547288f2da5cbe5dbe5e8a601a6f9e584801acbecc83a704c36e29cc642e8d` |
+| Android 普通客户端（debug） | `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` | 7,570,810 | `5ae9627325135efb74281dae8dda2883c97355dae924be109e66aec9817545f9` |
+| Android 独立桌宠（debug） | `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk` | 90,449,913 | `1428ceb8c6a021d212b7789bffb7e3e3897f465476afbd1ed9249db6b042e6db` |
 | 下载页 | `http://59.110.19.225/downloads/` | — | 页面内联同样哈希 |
 
 注意：产物**未签名、未做真机/安装验收**；Windows 会有 SmartScreen 警告；不要把下载目录当可执行目录（IIS 只做静态读取）。上传通道是一次性的，成功/失败都会自动关闭，不要把它当成长期上传入口。
