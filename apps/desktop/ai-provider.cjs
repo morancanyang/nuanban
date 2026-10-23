@@ -22,6 +22,12 @@ function checkedConfiguration(value) {
   return { endpoint: endpoint.href, model: value.model, apiKey: value.apiKey };
 }
 
+function checkedTimeout(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 60000 ? parsed : undefined;
+}
+
 async function readReply(response, signal) {
   if (!response.body) throw new ProviderFailure('PROVIDER_UNAVAILABLE', true);
   const reader = response.body.getReader();
@@ -51,7 +57,7 @@ async function readReply(response, signal) {
 function createOpenAiCompatibleProvider(options) {
   const configuration = checkedConfiguration(options);
   const fetchRequest = options.fetch ?? globalThis.fetch;
-  const timeoutMs = options.timeoutMs ?? 45000;
+  const timeoutMs = options.timeoutMs === undefined ? 60000 : options.timeoutMs;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   return Object.freeze({
     status() { return { available: true }; },
@@ -123,7 +129,8 @@ function decryptCredential(encrypted, { spawnProcess = spawn, timeoutMs = 5000 }
 async function loadConfiguredProvider(options = {}) {
   const env = options.env ?? process.env;
   if (env.NUANBAN_AI_BASE_URL || env.NUANBAN_AI_MODEL || env.NUANBAN_AI_API_KEY) {
-    return createOpenAiCompatibleProvider({ baseUrl: env.NUANBAN_AI_BASE_URL, model: env.NUANBAN_AI_MODEL, apiKey: env.NUANBAN_AI_API_KEY, fetch: options.fetch });
+    return createOpenAiCompatibleProvider({ baseUrl: env.NUANBAN_AI_BASE_URL, model: env.NUANBAN_AI_MODEL, apiKey: env.NUANBAN_AI_API_KEY,
+      timeoutMs: checkedTimeout(env.NUANBAN_AI_TIMEOUT_MS), fetch: options.fetch });
   }
   const configurationPath = options.configurationPath ?? path.join(env.LOCALAPPDATA ?? '', 'Nuanban', 'ai-provider.json');
   let content;
@@ -134,7 +141,8 @@ async function loadConfiguredProvider(options = {}) {
   if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration) || configuration.version !== 1 || configuration.credentialFormat !== 'windows-dpapi-v1' || typeof configuration.encryptedKey !== 'string'
     || !/^[A-Za-z0-9+/]{20,24000}={0,2}$/.test(configuration.encryptedKey)) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   const apiKey = await (options.decrypt ?? decryptCredential)(configuration.encryptedKey);
-  return createOpenAiCompatibleProvider({ baseUrl: configuration.baseUrl, model: configuration.model, apiKey, fetch: options.fetch });
+  return createOpenAiCompatibleProvider({ baseUrl: configuration.baseUrl, model: configuration.model, apiKey,
+    timeoutMs: checkedTimeout(configuration.timeoutMs), fetch: options.fetch });
 }
 
 module.exports = { ProviderFailure, createOpenAiCompatibleProvider, loadConfiguredProvider };

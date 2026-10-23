@@ -521,7 +521,8 @@ function createDesktopRuntime(options) {
       && isAdmittedFrame(frame, frame.capturedAt, maxAgeMs);
   }
 
-  const analysisImageLimitBytes = 1_400_000;
+  const { createAnalysisImageScaler, ANALYSIS_IMAGE_LIMIT_BYTES: analysisImageLimitBytes } = require('./analysis-image.cjs');
+  const scaleAnalysisImage = createAnalysisImageScaler({ nativeImage: options.nativeImage });
 
   function analysisImageFor(frame) {
     if (typeof options.resizeAnalysisImage === 'function') {
@@ -530,29 +531,12 @@ function createDesktopRuntime(options) {
         if (provided && typeof provided.image?.bytes?.length === 'number' && provided.image.bytes.length <= 2_000_000) return provided;
       } catch {}
     }
-    const png = frame?.sanitizedPng;
-    if (!png || png.length <= analysisImageLimitBytes) return null;
-    try {
-      // The main process has electron; tests inject options.resizeAnalysisImage instead.
-      const { nativeImage } = require('electron');
-      let image = nativeImage.createFromBuffer(png);
-      let { width, height } = image.getSize();
-      if (!width || !height) return null;
-      let scale = Math.min(1, 1600 / Math.max(width, height));
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        const resized = image.resize({ width: Math.max(1, Math.round(width * scale)), quality: 'good' });
-        const bytes = resized.toPNG();
-        const size = resized.getSize();
-        if (bytes.length <= analysisImageLimitBytes) {
-          traceGuidance('analysis_image_scaled', { originalBytes: png.length, bytes: bytes.length, width: size.width, height: size.height });
-          return { image: { mime: 'image/png', bytes, width: size.width, height: size.height } };
-        }
-        scale *= 0.78;
-      }
-      return null;
-    } catch {
-      return null;
+    const prepared = scaleAnalysisImage(frame?.sanitizedPng);
+    if (prepared) {
+      traceGuidance('analysis_image_scaled', { originalBytes: frame.sanitizedPng.length, bytes: prepared.image.bytes.length,
+        width: prepared.image.width, height: prepared.image.height });
     }
+    return prepared;
   }
 
   function installableOnLatest(job) {

@@ -219,3 +219,35 @@ describe('可信 preload 单帧接口', () => {
     expect(invoke).toHaveBeenCalledOnce();
   });
 });
+
+describe('单帧大图降采样与模型超时提示', () => {
+  it('模型超时映射为中文提示，不再透传 TIMEOUT', async () => {
+    const failure = Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' });
+    const provider = { answer: vi.fn(async () => { throw failure; }) };
+    const current = fixture({ provider });
+    const captured = await current.service.capture() as { preview: { id: string } };
+    await expect(current.service.analyze({ previewId: captured.preview.id, question: '帮我找到设置' }))
+      .rejects.toThrow('模型响应超时');
+    expect(current.onTarget).not.toHaveBeenCalled();
+  });
+
+  it('大图发送缩放副本，模型返回的缩放坐标按原图恢复后再核验绘制', async () => {
+    const uploaded: Buffer[] = [];
+    const provider = { answer: vi.fn(async (input: { image: { bytes: Buffer } }) => {
+      uploaded.push(Buffer.from(input.image.bytes));
+      return { text: JSON.stringify({ ...step, rect: { x: 50, y: 60, width: 30, height: 25 } }) };
+    }) };
+    const scaled = Buffer.from(syntheticPng(48, 320, 240));
+    const expectedUpload = Buffer.from(scaled);
+    const current = fixture({ provider, resizeAnalysisImage: () => ({ image: { mime: 'image/png', bytes: scaled, width: 320, height: 240 } }) });
+    const captured = await current.service.capture() as { preview: { id: string } };
+    const result = await current.service.analyze({ previewId: captured.preview.id, question: '帮我找到设置' });
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0]!.equals(expectedUpload)).toBe(true);
+    // 800×600 原图 / 320×240 上传：坐标与尺寸各放大 2.5 倍后映射到负原点、125% DPI 的屏幕 DIP。
+    expect(current.onTarget).toHaveBeenLastCalledWith(expect.objectContaining({
+      visible: true, label: '微信', rect: { x: -1500, y: -80, width: 60, height: 50 },
+    }));
+    expect(result).toMatchObject({ state: 'shown' });
+  });
+});

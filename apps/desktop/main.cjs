@@ -78,7 +78,7 @@ function registerBridge() {
   registerManagementVoiceBridge({ ipcMain, isTrusted: trusted, getHost: () => standaloneHost,
     openMicrophoneSettings: () => electron.shell.openExternal('ms-settings:privacy-microphone') });
   imageQuestionBridge = registerManagementImageQuestionBridge({ ipcMain, isTrusted: trusted,
-    service: createImageQuestionService({ nativeImage: electron.nativeImage, provider: aiProvider, timeoutMs: 45000 }) });
+    service: createImageQuestionService({ nativeImage: electron.nativeImage, provider: aiProvider, timeoutMs: 60000 }) });
   textQuestionBridge = registerManagementTextQuestionBridge({ ipcMain, isTrusted: trusted, provider: aiProvider });
   modelValidator = createLocalModelValidator({ BrowserWindow, ipcMain });
   modelBridge = registerLocalModelBridge({ ipcMain, dialog,

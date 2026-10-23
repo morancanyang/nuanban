@@ -132,3 +132,18 @@ describe('桌面密钥配置', () => {
     expect(decrypt).not.toHaveBeenCalled();
   });
 });
+
+describe('模型超时上限与可配置超时', () => {
+  it('模型超时上限提高到 60 秒，配置文件可下调超时并如实返回 TIMEOUT', async () => {
+    const source = await readFile(new URL('../../apps/desktop/ai-provider.cjs', import.meta.url), 'utf8');
+    expect(source).toContain('options.timeoutMs === undefined ? 60000');
+    const file = await configurationFile({ version: 1, credentialFormat: 'windows-dpapi-v1', encryptedKey: 'A'.repeat(32),
+      baseUrl: configuration.baseUrl, model: configuration.model, timeoutMs: 20 });
+    const fetchRequest = vi.fn<typeof fetch>((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }));
+    const provider = await loadConfiguredProvider({ env: {}, configurationPath: file, decrypt: async () => configuration.apiKey, fetch: fetchRequest });
+    expect(provider).toBeDefined();
+    await expect(provider!.answer({ question: '请解释' })).rejects.toMatchObject({ code: 'TIMEOUT' });
+  });
+});
