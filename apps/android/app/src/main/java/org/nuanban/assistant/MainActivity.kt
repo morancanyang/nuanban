@@ -1,8 +1,17 @@
 package org.nuanban.assistant
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -27,6 +36,7 @@ import org.nuanban.assistant.nativehost.AndroidHostRuntime
 import org.nuanban.assistant.nativehost.NativeDeviceAuth
 import org.nuanban.assistant.nativehost.Top20FlowRegistry
 import java.io.ByteArrayInputStream
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -42,6 +52,10 @@ class MainActivity : Activity() {
     @Volatile private var destroyed = false
     @Volatile private var webViewReady = false
     private var pendingReminderDeepLink: String? = null
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    @Volatile private var textToSpeech: TextToSpeech? = null
+    @Volatile private var ttsReady = false
+    private var ttsBridgeFallbackScript: String? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         webView = WebView(this)
@@ -56,7 +70,36 @@ class MainActivity : Activity() {
         webView.settings.allowFileAccess = false
         webView.settings.allowContentAccess = false
         webView.settings.setSupportMultipleWindows(false)
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: WebChromeClient.FileChooserParams?,
+            ): Boolean {
+                val callback = filePathCallback ?: return false
+                val params = fileChooserParams ?: return false
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = callback
+                return try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(Intent.createChooser(fileChooserIntent(params), "选择图片"), FILE_CHOOSER_REQUEST)
+                    true
+                } catch (_: ActivityNotFoundException) {
+                    fileChooserCallback = null
+                    callback.onReceiveValue(null)
+                    false
+                }
+            }
+
+            override fun onPermissionRequest(request: PermissionRequest) {
+                request.deny()
+            }
+        }
+        installSpeechBridge()
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                ttsBridgeFallbackScript?.let { script -> view.evaluateJavascript(script, null) }
+            }
             override fun onPageFinished(view: WebView, url: String) {
                 webViewReady = true
                 dispatchPendingReminder()
@@ -200,6 +243,105 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun fileChooserIntent(params: WebChromeClient.FileChooserParams): Intent {
+        val accepts = params.acceptTypes
+            .map { it.trim().lowercase(Locale.ROOT) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        val imageOnly = accepts.isNotEmpty() && accepts.all { it.startsWith("image/") }
+        return Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = if (imageOnly) "image/*" else "*/*"
+            if (accepts.isNotEmpty()) putExtra(Intent.EXTRA_MIME_TYPES, accepts.toTypedArray())
+            if (params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+    }
+
+    private fun installSpeechBridge() {
+        webView.addJavascriptInterface(SpeechJavascriptBridge(), "nuanbanTts")
+        textToSpeech = TextToSpeech(this) { status ->
+            var ready = status == TextToSpeech.SUCCESS
+            val engine = textToSpeech
+            if (ready && engine != null) {
+                val language = engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                ready = language != TextToSpeech.LANG_MISSING_DATA && language != TextToSpeech.LANG_NOT_SUPPORTED
+            }
+            if (!ready) {
+                runCatching { textToSpeech?.shutdown() }
+                textToSpeech = null
+            }
+            ttsReady = ready
+            if (ready) {
+                engine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+                    override fun onDone(utteranceId: String?) = emitSpeechEvent(utteranceId, true)
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) = emitSpeechEvent(utteranceId, false)
+                    override fun onError(utteranceId: String?, errorCode: Int) = emitSpeechEvent(utteranceId, false)
+                })
+            }
+        }
+        val script = SPEECH_BRIDGE_SCRIPT
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("https://appassets.androidplatform.net"))
+        } else {
+            ttsBridgeFallbackScript = script
+        }
+    }
+
+    private fun emitSpeechEvent(utteranceId: String?, ok: Boolean) {
+        val safeId = utteranceId ?: return
+        if (!::webView.isInitialized || destroyed) return
+        webView.post {
+            if (!destroyed) {
+                runCatching { webView.evaluateJavascript("window.__nuanbanTtsEvent(" + JSONObject.quote(safeId) + "," + ok + ")", null) }
+            }
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == FILE_CHOOSER_REQUEST) {
+            val callback = fileChooserCallback
+            fileChooserCallback = null
+            if (callback != null) {
+                callback.onReceiveValue(if (resultCode == RESULT_OK) WebChromeClient.FileChooserParams.parseResult(resultCode, data) else null)
+                return
+            }
+        }
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    inner class SpeechJavascriptBridge {
+        @JavascriptInterface
+        fun ready(): Boolean = ttsReady
+
+        @JavascriptInterface
+        fun speak(utteranceId: String?, text: String?, rate: Float): Boolean {
+            if (!ttsReady) return false
+            val safeId = utteranceId ?: return false
+            val safeText = text ?: return false
+            if (!safeId.matches(Regex("[A-Za-z0-9-]{1,64}")) || safeText.isBlank() || safeText.length > 12000) return false
+            val engine = textToSpeech ?: return false
+            val safeRate = rate.coerceIn(0.1f, 3f)
+            webView.post {
+                if (!destroyed && ttsReady) {
+                    runCatching {
+                        engine.setSpeechRate(safeRate)
+                        engine.speak(safeText, TextToSpeech.QUEUE_FLUSH, null, safeId)
+                    }
+                }
+            }
+            return true
+        }
+
+        @JavascriptInterface
+        fun cancel() {
+            webView.post { if (!destroyed) runCatching { textToSpeech?.stop() } }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -279,6 +421,12 @@ class MainActivity : Activity() {
         webViewReady = false
         runCatching { nativeAuth.cancel() }
         dispatchLifecycleEvent("nuanban:management-destroy")
+        fileChooserCallback?.onReceiveValue(null)
+        fileChooserCallback = null
+        runCatching { textToSpeech?.stop() }
+        runCatching { textToSpeech?.shutdown() }
+        textToSpeech = null
+        ttsReady = false
         webView.stopLoading()
         webView.destroy()
         synchronized(bridgeLifecycleLock) {
@@ -286,6 +434,84 @@ class MainActivity : Activity() {
             if (::reminderDatabase.isInitialized) reminderDatabase.close()
         }
         super.onDestroy()
+    }
+
+    private companion object {
+        private const val FILE_CHOOSER_REQUEST = 41234
+        private val SPEECH_BRIDGE_SCRIPT = """
+            (function () {
+              if (window.__nuanbanTtsShim) return;
+              var host = window.nuanbanTts;
+              if (!host) return;
+              if (typeof window.SpeechSynthesisUtterance !== 'function') {
+                window.SpeechSynthesisUtterance = function (text) {
+                  this.text = String(text === undefined || text === null ? '' : text);
+                  this.lang = '';
+                  this.rate = 1;
+                  this.pitch = 1;
+                  this.volume = 1;
+                  this.onend = null;
+                  this.onerror = null;
+                  this.onstart = null;
+                };
+              }
+              var sequence = 0;
+              var current = null;
+              var api = {
+                speaking: false,
+                pending: false,
+                paused: false,
+                speak: function (utterance) {
+                  if (!utterance || typeof utterance.text !== 'string' || !utterance.text) return;
+                  var id = 'utt-' + (++sequence);
+                  current = { id: id, utterance: utterance };
+                  var started = false;
+                  try {
+                    started = host.speak(id, utterance.text.slice(0, 12000), typeof utterance.rate === 'number' ? utterance.rate : 1) === true;
+                  } catch (error) {
+                    started = false;
+                  }
+                  if (!started) {
+                    current = null;
+                    var failed = utterance;
+                    window.setTimeout(function () {
+                      if (typeof failed.onerror === 'function') failed.onerror({ error: 'synthesis-unavailable' });
+                    }, 0);
+                  }
+                },
+                cancel: function () {
+                  current = null;
+                  try { host.cancel(); } catch (error) {}
+                },
+                pause: function () {},
+                resume: function () {},
+                getVoices: function () { return []; },
+                addEventListener: function () {},
+                removeEventListener: function () {},
+                dispatchEvent: function () { return false; }
+              };
+              Object.defineProperty(window, 'speechSynthesis', {
+                configurable: true,
+                enumerable: true,
+                get: function () {
+                  try { return host.ready() === true ? api : undefined; } catch (error) { return undefined; }
+                }
+              });
+              window.__nuanbanTtsEvent = function (id, ok) {
+                var active = current;
+                if (!active || active.id !== id) return;
+                current = null;
+                try {
+                  if (ok === true) {
+                    if (typeof active.utterance.onend === 'function') active.utterance.onend({});
+                  } else if (typeof active.utterance.onerror === 'function') {
+                    active.utterance.onerror({ error: 'synthesis-failed' });
+                  }
+                } catch (error) {}
+              };
+              window.__nuanbanTtsShim = true;
+            })();
+        """.trimIndent()
     }
 }
 
