@@ -1,5 +1,8 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-23 r16：** 在 r15 之后落地的提交一并打包，并修复"截图/录屏拍不到桌宠和界面"。内容：`5e15bc9`（Lili 小鹿模型，包内 `ui/models/lili/Lili_Independent_Deer.glb` 等 3 个资源）、`9dfa22e`/`77516be`（Android WebView 文件选择、本地 TTS 与内置形象）、`89fa899`（模型网关可恢复失败的有界重试）以及本次 `731b2fd`：Windows `setContentProtection` 会经 `SetWindowDisplayAffinity` 把窗口排除出截图/录屏，旧默认只有启动参数才可见，直接运行 `nuanban.exe` 时桌宠与管理界面会从 Snipping Tool / Game Bar / OBS 里消失。新的 `capture-visibility.cjs` 让桌宠、工具小屋、语音气泡与管理界面**默认可被截图和录屏捕获**，屏幕观察/单帧采集活动时自动恢复保护；`--protect-pet`/`--protect-client`/`--protect-display` 保留旧行为，字幕与指引箭头仍始终保护。构建来自独立干净工作树（HEAD `731b2fd`），r15→r16 的 zip 条目差异为 `resources/app.asar` 与新增的 Lili 资源；相关测试 619/619（17 个文件）通过。Android 两包与最新 Web 产物逐文件一致（14/14，含 Lili 与 Lumi），未重出，哈希保持不变。旧 r15 包已从下载目录移除。
+
+
 > **2026-10-23 r15：** 修复"云分析服务暂不可用"。现场 trace 显示请求 11 秒后以 `providerCode=PROVIDER_UNAVAILABLE` 失败，而同一分钟本机实测网关 `GET /models` 与连续三次对话请求均 200（另有 GitHub TLS 握手失败），属于**偶发 5xx/网络抖动**。模型端口现在只对**可恢复失败**做有界重试：网络异常、HTTP 429/5xx、响应中断最多重试 2 次（退避 0.6s/1.6s，共享原有 60s 超时预算）；鉴权失败、非法请求、取消与超时仍只尝试一次。文案与 trace 会说明"已做有界自动重试"并记录 `attempts`；`retryAttempts`/`retryDelaysMs` 可配置。验证：17 个相关测试文件 **1178/1178** 通过、`tsc --noEmit` 0、打包校验 `matches: true`，r14→r15 的 zip 条目仅 `resources/app.asar`（+2,130 字节）变化。旧 r14 包已从下载目录移除。
 >
 > **同批 Android 包（2026-10-23 21:24 最终发布，从 HEAD `9dfa22e` 干净构建）：** 独立桌宠包修复"打开桌宠只有'微光指引'四个字、没有形象"——悬浮层由 `TextView` 改为 `ImageView` 并随包携带产品默认"花环水獭"本地静态形象（`res/drawable-nodpi/nuanban_pet_preview.png`，只进独立源集，普通包不携带）；两包同时恢复 WebView 宿主能力：`onShowFileChooser`（系统文件选择器，零权限）与系统 `TextToSpeech` 注入的 `speechSynthesis` 垫片（无网络、无麦克风，引擎不可用时保持降级）；并纳入已提交的 Lili/Lumi 模型与最新共享 UI。
@@ -65,7 +68,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r15.zip` | 182,120,748 字节（173.652 MiB） | `5f547288f2da5cbe5dbe5e8a601a6f9e584801acbecc83a704c36e29cc642e8d` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip` | 184,256,921 字节（175.721 MiB） | `89c5b670d24812b7aff4e85b1444cb476e151f745cd8100f74f840eb04b1204e` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -110,7 +113,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r15.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -174,11 +177,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r15.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r15.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
