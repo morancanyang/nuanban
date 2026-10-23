@@ -21,10 +21,23 @@ const browserLabels = new Set(['书签', '收藏', '收藏夹', '添加书签', 
 const editorLabels = new Set(['文件', '编辑', '查看', '视图', '格式', '工具', '新建', '撤销', '重做', '自动换行', '另存为', '对齐', '加粗', '斜体', '下划线', '居中', '项目符号',
   'file', 'edit', 'view', 'format', 'tools', 'new', 'undo', 'redo', 'word wrap', 'save as', 'alignment', 'bold', 'italic', 'underline', 'center', 'bullets']);
 const desktopLabels = new Set(['此电脑', '这台电脑', '我的电脑', '回收站', '控制面板', 'this pc', 'my computer', 'recycle bin', 'control panel']);
+// 常见应用与入口名。用户最常问"帮我打开浏览器/微信"，但 OCR 读到的桌面或任务栏快捷方式文字
+// （Google Chrome、Microsoft Edge、浏览器…）原先不在词表里，会被当成未知正文整条丢弃，于是本机
+// 报"尚未识别出可指引操作的入口"。这些是应用名而非用户内容，加入词表后即可作为普通控件指引。
+const applicationLabels = new Set([
+  '浏览器', '谷歌浏览器', '谷歌', '谷歌chrome', '微软edge', '微软浏览器', '火狐浏览器', '火狐', '360浏览器', '360安全浏览器', 'qq浏览器', '搜狗浏览器', '搜狗高速浏览器', '百度浏览器', '夸克浏览器', '夸克', '欧朋浏览器',
+  'chrome', 'google chrome', 'google', 'edge', 'microsoft edge', 'internet explorer', 'firefox', 'mozilla firefox', 'opera', 'brave', 'safari',
+  '企业微信', 'wecom', 'qq', 'tim', '钉钉', 'dingtalk', '飞书', 'feishu', 'lark', '腾讯会议', '网易云音乐', 'qq音乐', '酷狗音乐', '迅雷',
+  'wps', 'wps office', 'word', 'excel', 'powerpoint', 'office', '记事本', 'notepad', '计算器', 'calculator', '画图', 'paint',
+  '命令提示符', 'powershell', '任务管理器', 'task manager', '截图工具', 'snipping tool', '相机', 'camera', '时钟', 'clock', '日历', 'calendar', '便签', 'sticky notes',
+  '文件夹', 'folder', '新建文件夹', '压缩文件', '文本文档', '快捷方式', '我的文档', '此电脑图标', '网络邻居',
+]);
 const explorerLabels = new Set(['文件资源管理器', '资源管理器', '此电脑', '这台电脑', '快速访问', '文件夹选项', 'file explorer', 'this pc', 'quick access', 'folder options']);
 const fileColumns = new Set(['名称', '修改日期', '类型', '大小', 'name', 'date modified', 'type', 'size']);
 const fileActions = new Set(['新建', '剪切', '复制', '粘贴', '排序', '布局', '查看', '删除', '重命名', 'new', 'cut', 'copy', 'paste', 'sort', 'layout', 'view', 'delete', 'rename']);
-for (const label of [...desktopLabels, ...explorerLabels, ...fileColumns, ...fileActions, '下载', '文档', '图片', '音乐', '视频', '本地磁盘', '导航窗格', 'downloads', 'documents', 'pictures', 'music', 'videos', 'local disk', 'navigation pane']) genericLabels.add(label);
+for (const label of [...desktopLabels, ...explorerLabels, ...fileColumns, ...fileActions, ...applicationLabels, '下载', '文档', '图片', '音乐', '视频', '本地磁盘', '导航窗格', 'downloads', 'documents', 'pictures', 'music', 'videos', 'local disk', 'navigation pane']) genericLabels.add(label);
+// 应用入口与桌面图标一起用于桌面场景判定，避免桌面画面因缺少"设置类"词而落进 unknown。
+for (const label of applicationLabels) desktopLabels.add(label);
 
 function normalizeLabel(value) {
   return typeof value === 'string' ? value.normalize('NFKC').replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F]/g, '').trim().replace(/\s+/g, ' ').toLowerCase() : '';

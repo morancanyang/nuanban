@@ -85,6 +85,8 @@ function createProviderAnalysisClient({ provider, now = Date.now } = {}) {
         + '若用户所问功能尚未出现，但对应软件入口已在elements中，先指引本人打开该软件；不要因内部功能暂不可见而否认已识别的软件入口，不得编造未出现的菜单或坐标。'
         + '元素surface为taskbar表示本机已核验的任务栏按钮，通常请本人单击打开；desktop表示桌面入口，通常请本人双击。不要把没有文字的已核验图标说成未识别。'
         + 'surface为visual且label为“未标注图标”的元素是本地从脱敏图片提取的图形候选，不是已确认的按钮。请结合真实截图中的图形、所在软件和周围布局判断用途，不能只寻找功能名称文字；矩形使用上下文width/height的像素坐标，图片若缩放请按相对位置对应。'
+        + '用户常说的“浏览器入口”一类目标可能以应用名出现在elements中（浏览器、Chrome、Edge、Firefox、微信等）；桌面上也可能只有图形没有可读名称。此时应在surface为visual的候选或surface为desktop/application的条目里按位置给出指引，不要因为缺少功能名称文字就只回答“识别范围有限”。'
+        + '只有elements里既没有同名应用条目、也没有可用的图形候选时，才说明识别范围有限，并建议重新识别当前画面或把观察范围对准桌面快捷方式。'
         + '例如寻找微信朋友圈时，应检查微信内实际可见的无文字导航图标；不得依赖固定的第几个按钮、手机界面记忆或虚构位置。能从画面判断时选择对应候选id，presentation必须为uncertain_candidate，说明可能用途并请本人核对。看不清或没有合适候选才澄清，不要因缺少“朋友圈”文字就要求反复重新识别。'
         + '需要用户操作时格式为{"kind":"step","instruction":"只讲一步，提醒本人操作","target_id":"从elements选择实际id","presentation":"confirmed或uncertain_candidate","expected_labels":["下一画面可核验的通用标签"]}。'
         + '看不清或目标缺失时格式为{"kind":"clarify","instruction":"请说明目标"}；不支持时kind为unsupported。'

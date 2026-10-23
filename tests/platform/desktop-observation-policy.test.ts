@@ -36,6 +36,21 @@ describe('独立桌宠本地帧门控（合成单测，不是真实外部软件�
     expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'pause', reason: 'unredacted_frame' });
   });
 
+  it('桌面浏览器与应用快捷方式成为可指引条目，不再当成未知正文丢弃', () => {
+    const frame = syntheticFrame();
+    const labels = ['Google Chrome', 'Microsoft Edge', '浏览器', '回收站'];
+    const shared = evaluateLocalFrame(frame, syntheticDetection(frame, labels), { authorizedSharing: true });
+    expect(shared).toMatchObject({ decision: 'allow', scene: 'authorized_sharing' });
+    if (shared.decision !== 'allow') throw new Error('expected authorized sharing');
+    expect(shared.elements.map(element => element.label)).toEqual(labels);
+    const desktop = evaluateLocalFrame(frame, syntheticDetection(frame, labels.slice(0, 3)));
+    expect(desktop).toMatchObject({ decision: 'allow', scene: 'desktop_controls' });
+    if (desktop.decision !== 'allow') throw new Error('expected desktop controls');
+    expect(desktop.elements.map(element => element.label)).toEqual(labels.slice(0, 3));
+    expect(evaluateLocalFrame(frame, syntheticDetection(frame, ['任意新软件', '未知图标甲', '未知图标乙'])))
+      .toMatchObject({ decision: 'pause', reason: 'unclassified_screen' });
+  });
+
   it('已授权共享接纳无文字图标候选，但普通控件布局不向模型暴露真实图形', () => {
     const frame = syntheticFrame();
     const visualControls = [{ label: '未标注图标' as const, surface: 'visual' as const,

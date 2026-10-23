@@ -22,6 +22,21 @@ function ring(bitmap: Buffer, width: number, rect: Rect, shade = 70) {
   }
 }
 
+function wallpaper(width: number, height: number) {
+  const bitmap = Buffer.alloc(width * height * 4, 200);
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const offset = (row * width + column) * 4;
+      const shade = Math.max(0, Math.min(255, Math.round(150 + 80 * Math.sin(column / 9 + row / 17))));
+      bitmap[offset] = shade;
+      bitmap[offset + 1] = shade;
+      bitmap[offset + 2] = shade;
+      bitmap[offset + 3] = 255;
+    }
+  }
+  return bitmap;
+}
+
 function covers(outer: Rect, inner: Rect) {
   return outer.x <= inner.x && outer.y <= inner.y
     && outer.x + outer.width >= inner.x + inner.width && outer.y + outer.height >= inner.y + inner.height;
@@ -53,6 +68,27 @@ describe('无文字图标的本地图形候选（合成画面，不代表微信�
     const controls = extractVisualControls({ bitmap, width: 800, height: 600, exclusions });
     expect(controls).toHaveLength(1);
     expect(covers(controls[0].rect, icons[2])).toBe(true);
+  });
+
+  it('壁纸背景上成列的桌面快捷方式图标仍能作为候选指引', () => {
+    const bitmap = wallpaper(800, 600);
+    const icons = [60, 140, 220].map(y => ({ x: 60, y, width: 24, height: 24 }));
+    for (const rect of icons) ring(bitmap, 800, rect);
+    const controls = extractVisualControls({ bitmap, width: 800, height: 600 });
+    // 壁纸渐变会让图标边缘弧段不完整，矩形不保证完全包住图标；指引只需候选中心对准图标。
+    for (const rect of icons) {
+      const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      expect(controls.some(control => Math.hypot(control.rect.x + control.rect.width / 2 - center.x,
+        control.rect.y + control.rect.height / 2 - center.y) <= 8)).toBe(true);
+    }
+    expect(controls.length).toBeGreaterThanOrEqual(icons.length);
+    expect(controls.every(control => control.label === '未标注图标' && control.surface === 'visual')).toBe(true);
+  });
+
+  it('壁纸上的孤立图形不当作按钮，避免把照片纹理当成图标', () => {
+    const bitmap = wallpaper(800, 600);
+    ring(bitmap, 800, { x: 60, y: 60, width: 24, height: 24 });
+    expect(extractVisualControls({ bitmap, width: 800, height: 600 })).toEqual([]);
   });
 
   it('空白、整片背景纹理、过大的窗口边框不伪造成按钮', () => {

@@ -94,6 +94,7 @@ function extractVisualControls({ bitmap, width, height, exclusions = [], signal 
       }
     }
     const candidates = [];
+    const gridCandidates = [];
     const maximumSize = Math.min(192, Math.max(48, Math.min(width, height) * 0.18));
     for (let start = 0; start < pixels; start += 1) {
       if (start % 65536 === 0) checkAborted(signal);
@@ -132,10 +133,26 @@ function extractVisualControls({ bitmap, width, height, exclusions = [], signal 
       if (rect.x < 0 || rect.y < 0 || rect.x + rect.width >= width || rect.y + rect.height >= height
         || rect.width < 10 || rect.height < 10 || rect.width > maximumSize || rect.height > maximumSize
         || rect.width / rect.height < 0.3 || rect.width / rect.height > 3
-        || exclusions.some(excluded => overlaps(rect, excluded)) || !flatSurround(bitmap, width, rect)) continue;
-      if (candidates.length < 2048) candidates.push(rect);
+        || exclusions.some(excluded => overlaps(rect, excluded))) continue;
+      if (flatSurround(bitmap, width, rect)) {
+        if (candidates.length < 2048) candidates.push(rect);
+        continue;
+      }
+      // 壁纸/照片背景上的桌面快捷方式四周不是纯色，flatSurround 会否掉它们，用户因此只会看到
+      // "尚未识别出入口"。额外收集"图标网格"候选，但只在与至少一个同列、同尺寸量级且间距像图标
+      // 网格的邻居成对出现时才接受，避免把整片照片纹理当成按钮。
+      if (rect.width >= 16 && rect.height >= 16 && gridCandidates.length < 512) gridCandidates.push(rect);
     }
-    const ranked = candidates.map(rect => ({ rect, alignment: candidates.filter(other => other !== rect
+    const alignedPeers = candidate => gridCandidates.filter(other => other !== candidate
+      && Math.abs(other.x + other.width / 2 - candidate.x - candidate.width / 2) <= Math.max(6, candidate.width / 3)
+      && other.width >= candidate.width / 2 && other.width <= candidate.width * 2
+      && Math.abs(other.y - candidate.y) >= Math.min(other.height, candidate.height) * 0.8
+      && Math.abs(other.y - candidate.y) <= Math.max(other.height, candidate.height) * 8).length;
+    const gridAccepted = gridCandidates.filter(candidate => alignedPeers(candidate) >= 1
+      || candidates.some(flat => Math.abs(flat.x + flat.width / 2 - candidate.x - candidate.width / 2) <= Math.max(6, candidate.width / 3)
+        && flat.width >= candidate.width / 2 && flat.width <= candidate.width * 2));
+    const all = [...candidates, ...gridAccepted].slice(0, 2048);
+    const ranked = all.map(rect => ({ rect, alignment: all.filter(other => other !== rect
       && Math.abs(other.x + other.width / 2 - rect.x - rect.width / 2) <= Math.max(6, rect.width / 3)
       && other.width >= rect.width / 2 && other.width <= rect.width * 2
       && Math.abs(other.y - rect.y) <= Math.max(rect.height, other.height) * 8).length }));
