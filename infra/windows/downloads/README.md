@@ -1,5 +1,16 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-23 r18：** 把 r17 之后**已提交**的 Win 侧修复全部打进安装包，仍从独立干净工作树构建（HEAD `3b108d0`）。内容：`f17e5a1` 恢复原始 Blender 小鹿作为桌面形象（含更大的原始 GLB）、`89b2728` 隔离共享查看器与未完成 studio 改动；r15 起的有界重试与单帧超时修复一并保留。
+>
+> **核验**：包内模型与仓库跟踪文件**逐字节一致**（`Lumi_Magical_Kitten.glb` 5,411,364 B sha256 `3ec165a2…`、`Lili_Independent_Deer.glb` 7,171,212 B sha256 `8b5b3adc…`；两者的 `character_manifest.json` 仅压缩格式不同、字段值一致）；r17→r18 的 zip 条目**仅 `resources/app.asar` 变化**（36,860,498 → 45,685,329，+8.8 MB，来自原始模型与相关资源）；打包脚本（含 UI/ASAR 字节核对）exit 0。
+>
+> **未包含（有意）**：当前仍**未提交**的 studio 相关改动（`apps/web/src/three-d/viewer.ts`、未跟踪的 `lumi-studio.ts`）不在包内——按惯例不打包半成品；待其提交后可出 r19。
+>
+> **发布方式改进**：`infra/windows/tools/push-downloads.mjs` 新增 `--keep-published`（Windows-only 发布时在服务器端列出目录并对**每个文件**做 SHA256，页面保留已发布的 Android 行、不重传 APK），并在生成页面时跳过 `.html` 自身条目。本次发布后下载页为 3 行（Windows r18 + 两个 Android debug 包），旧的 r17 已从下载目录移除。
+>
+> **边界**：仍未做代码签名与安装/真机验收；Android 两个 APK 仍是 2026-10-23 21:24 那一版（本次未重编、未上传）。
+
+
 > **2026-10-23 r17：** 修复"模型只认文字、认不出图标，浏览器入口报未识别"。两处断点：① 本机控件词表里没有任何应用名，OCR 读到的 `Google Chrome` / `Microsoft Edge` / `浏览器` 被当成未知正文整条丢弃；② 无文字图标的候选要求四周接近纯色（`flatSurround`），壁纸上的桌面快捷方式因此全部被否掉。现在词表加入浏览器、微信/QQ/钉钉、Office/WPS、记事本/计算器/任务管理器等常见应用与入口名，并参与桌面场景判定；视觉候选新增"图标网格"通道，只有与同列、同尺寸量级、间距像图标网格的邻居成对出现时才接受，照片纹理仍被拒绝。提示词同时要求模型优先使用 `surface=visual` / 应用名条目按位置指引，不再直接回答"识别范围有限"。构建来自独立干净工作树（HEAD `8e088e4`），`tsc --noEmit` 退出 0，相关测试 424/424（9 个文件）通过；包内已确认含新词表、网格候选与提示词。Android 两包与最新 Web 产物仍逐文件一致（14/14），未重出。旧 r16 包已从下载目录移除。
 
 
@@ -71,7 +82,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip` | 184,258,378 字节（175.722 MiB） | `1fc9ac0cde1a3baff3ea7c922ef70d240f44ff04b2e3eb1d45fd527d01420322` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r18.zip` | 192,303,142 字节（183.395 MiB） | `39f57469641c37a75500bd0ed53cf78294dba5f378588cb35ce1ca897083fcdb` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -116,7 +127,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r18.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -180,11 +191,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r18.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r18.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 

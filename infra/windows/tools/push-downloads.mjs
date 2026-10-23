@@ -11,7 +11,7 @@
 //
 // Usage:
 //   node infra/windows/tools/push-downloads.mjs --instance i-xxx [--port 80]
-//        [--skip-desktop] [--skip-android] [--keep-files]
+//        [--skip-desktop] [--skip-android] [--keep-files] [--keep-published]
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -61,12 +61,19 @@ function parseArgs(argv) {
       case '--skip-desktop': args.skipDesktop = true; break;
       case '--skip-android': args.skipAndroid = true; break;
       case '--keep-files': args.keepFiles = true; break;
+      case '--keep-published': args.keepPublished = true; break;
       default: throw new Error(`unknown argument: ${arg}`);
     }
   }
   if (!args.instanceId) throw new Error('--instance is required');
   return args;
 }
+function labelFor(remote) {
+  if (/^NuanbanDemo-.*-portable-.*\.zip$/.test(remote)) return 'Windows 桌面便携包（未签名）';
+  const known = Object.values(artifacts).find((artifact) => artifact.remote === remote);
+  return known ? known.label : remote;
+}
+
 function log(message) {
   const stamp = new Date().toISOString().slice(11, 19);
   console.log(`[${stamp}] ${message}`);
@@ -171,6 +178,7 @@ async function main() {
   const receiverSource = fs.readFileSync(path.join(root, 'infra', 'windows', 'tools', 'upload-receiver.mjs'));
   const publishableSelected = selected.map(([, a]) => a);
   const expected = publishableSelected.map((a) => ({ name: a.remote, sha256: a.sha256, size: a.size }));
+  let publishedFiles = null;
 
   // ---- 1. push small helper files
   await client.sendFile({
@@ -340,9 +348,28 @@ Remove-Item -LiteralPath (Join-Path $temp 'upload-token.txt') -Force -ErrorActio
 Write-Host 'temporary upload channel closed, files published'
 Get-ChildItem $downloads -File | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
 `;
+    const listPublished = `$ErrorActionPreference = 'Stop'
+$downloads = 'C:\\nuanban\\web\\downloads'
+$items = Get-ChildItem -LiteralPath $downloads -File | Where-Object { $_.Extension -ne '.html' } | Sort-Object Name | ForEach-Object {
+  [pscustomobject]@{ name = $_.Name; size = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower() }
+}
+ConvertTo-Json -InputObject @($items) -Compress
+`;
     const finalizeResult = await runCommand(client, args.instanceId, finalize, 'nuanban-upload-finalize', 300);
     console.log(finalizeResult.output);
     if (finalizeResult.status !== 'Success') throw new Error('finalize step failed');
+    if (args.keepPublished) {
+      // Windows-only releases must not drop the Android rows that are already published, and must not
+      // republish APKs built by someone else: list the directory and hash every file on the host.
+      const listingResult = await runCommand(client, args.instanceId, listPublished, 'nuanban-downloads-listing', 180);
+      if (listingResult.status !== 'Success') throw new Error('downloads listing failed');
+      const parsed = JSON.parse(decodeOutput(listingResult.output).trim());
+      publishedFiles = (Array.isArray(parsed) ? parsed : [parsed])
+        .filter((item) => item && item.name)
+        .map((item) => ({ remote: item.name, size: Number(item.size), sha256: String(item.sha256).toLowerCase() }));
+      if (!publishedFiles.length) throw new Error('downloads listing returned no files');
+      log(`keeping ${publishedFiles.length} published file(s) in the page listing`);
+    }
   } catch (error) {
     log(`upload failed, cleaning up the temporary channel: ${error.message}`);
     try {
@@ -355,9 +382,10 @@ Get-ChildItem $downloads -File | Select-Object Name, Length | Format-Table -Auto
   }
 
   // ---- 5. download page
-  const rows = publishableSelected
+  const pageEntries = publishedFiles ?? publishableSelected.map((a) => ({ remote: a.remote, size: a.size, sha256: a.sha256 }));
+  const rows = pageEntries
     .map(
-      (a) => `        <tr><td>${a.label}</td><td><a href="./${a.remote}">${a.remote}</a></td><td>${(a.size / 1024 / 1024).toFixed(1)} MiB</td><td><code>${a.sha256}</code></td></tr>`
+      (a) => `        <tr><td>${a.label ?? labelFor(a.remote)}</td><td><a href="./${a.remote}">${a.remote}</a></td><td>${(a.size / 1024 / 1024).toFixed(1)} MiB</td><td><code>${a.sha256}</code></td></tr>`
     )
     .join('\n');
   const page = `<!doctype html>
@@ -402,7 +430,7 @@ ${rows}
   log('download page dispatched');
 
   // ---- 6. public verification (first bytes only; full hash was verified on the host)
-  for (const a of publishableSelected) {
+  for (const a of (publishedFiles ?? publishableSelected)) {
     const url = `${base}/downloads/${encodeURIComponent(a.remote)}`;
     const head = await new Promise((resolve) => {
       const req = http.request(url, { method: 'HEAD', timeout: 20000 }, (res) => {
