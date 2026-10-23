@@ -3,69 +3,67 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AnimationClip, AnimationMixer, Group, NumberKeyframeTrack } from 'three';
-import type { Mesh } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createModelAnimationController } from '../../apps/web/src/three-d/animation-controller';
 import { inspectRenderedModel } from '../../apps/web/src/three-d/viewer';
-import { createLumiModel } from '../../apps/web/src/three-d/lumi-model';
 
 const { inspectModelContainer } = createRequire(import.meta.url)('../../apps/desktop/local-model.cjs');
 const assetPath = join(process.cwd(), 'apps/web/public/models/lumi/Lumi_Magical_Kitten.glb');
 
 describe('露米随包模型与动作', () => {
-  it('客户端程序化模型保留小猫本体、服装和配饰，并提供完整动作集', () => {
-    const model = createLumiModel();
-    const summary = inspectRenderedModel(model.root, model.animations);
-    expect(model.format).toBe('procedural-lumi');
-    expect(model.id).toBe('lumi');
-    expect(summary).toMatchObject({ animations: 16, textures: [] });
-    expect(summary.meshes).toBeGreaterThan(40);
-    expect(summary.triangles).toBeGreaterThan(1000);
-    expect(model.animations.map(animation => animation.name)).toEqual(expect.arrayContaining([
-      'idle', 'walk', 'wave', 'happy', 'think', 'cast', 'surprise', 'sleep', 'tap_react', 'blink',
-      'face_cast', 'face_happy', 'face_sleep', 'face_surprise', 'face_tap_react', 'face_think',
-    ]));
-    const names = new Set<string>();
-    model.root.traverse(object => names.add(object.name));
-    expect([...names]).toEqual(expect.arrayContaining(['LumiHead', 'Body', 'Cape_Back', 'Gem', 'Staff', 'ShoulderBag', 'Tail', 'Eye_L', 'Eye_R']));
-    const mixer = new AnimationMixer(model.root);
-    const controller = createModelAnimationController(mixer, model.animations);
-    for (const name of ['idle', 'walk', 'wave', 'happy', 'think', 'cast', 'surprise', 'sleep', 'tap_react']) {
-      expect(controller.play(name)).toBe(true);
-      mixer.update(0.25);
-      model.root.updateMatrixWorld(true);
-      model.root.traverse(object => expect(object.matrixWorld.elements.every(Number.isFinite)).toBe(true));
-    }
-    controller.dispose();
-    mixer.stopAllAction();
-    mixer.uncacheRoot(model.root);
+  it('预览与桌宠加载原版资产，不再用程序化替代猫覆盖上传模型', () => {
+    const card = readFileSync(join(process.cwd(), 'apps/web/src/three-d/lumi-card.tsx'), 'utf8');
+    const desktop = readFileSync(join(process.cwd(), 'apps/web/src/three-d/desktop.ts'), 'utf8');
+    expect(card).toContain('await loadLumiModel(controller.signal)');
+    expect(desktop).toContain('model.id === lumiModel.previousSha256 ? await loadLumiModel()');
+    expect(card).not.toContain('createLumiModel');
+    expect(desktop).not.toContain('createLumiModel');
+    expect(card).not.toContain('9 个动作');
   });
 
-  it('真实 GLB 通过原生检查与 Three 解析，带有全部身体、表情和骨骼', async () => {
+  it('原版 GLB 保留角色、配饰、原始来源与实时毛发，符合原生预算', async () => {
     const bytes = readFileSync(assetPath);
-    expect(createHash('sha256').update(bytes).digest('hex')).toBe('7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b');
+    const manifest = JSON.parse(readFileSync(join(process.cwd(), 'apps/web/public/models/lumi/character_manifest.json'), 'utf8'));
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe('3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90');
+    expect(bytes.length).toBe(manifest.runtime.fileBytes);
     expect(inspectModelContainer(bytes, 'glb')).toEqual({ format: 'glb' });
-    const model = await new GLTFLoader().parseAsync(new Uint8Array(bytes).buffer, '');
-    expect(inspectRenderedModel(model.scene, model.animations)).toMatchObject({ triangles: 29900, bones: 30, animations: 16, textures: [] });
-    const names = model.animations.map(clip => clip.name);
-    expect(names[0]).not.toBe('idle');
-    expect(names).toEqual(expect.arrayContaining(['idle', 'walk', 'wave', 'happy', 'think', 'cast', 'surprise', 'sleep', 'tap_react', 'blink', 'face_cast', 'face_happy', 'face_sleep', 'face_surprise', 'face_tap_react', 'face_think']));
-    const morphs = new Set<string>();
-    model.scene.traverse(object => { for (const name of Object.keys((object as Mesh).morphTargetDictionary ?? {})) morphs.add(name); });
-    expect([...morphs]).toEqual(expect.arrayContaining(['blink_L', 'blink_R', 'brow_up', 'mouth_open', 'smile']));
+    const jsonBytes = bytes.readUInt32LE(12);
+    const document = JSON.parse(bytes.subarray(20, 20 + jsonBytes).toString('utf8'));
+    expect(document.cameras).toBeUndefined();
+    expect(document.skins).toBeUndefined();
+    expect(document.images.map((image: { name: string }) => image.name)).toEqual(expect.arrayContaining([
+      'Microglow short-fur normal', 'Microglow woven cloak normal', 'Microglow original blue iris baked',
+    ]));
+    expect(document.nodes.find((node: { name: string }) => node.name === 'Microglow_Original_Cat').extras.source_blend_sha256).toBe(manifest.source.sha256);
+    expect(manifest.source).toMatchObject({ file: 'microglow_cat.blend', collection: 'MICROGLOW_CAT_ONLY', sourceGroomStrands: 173800 });
+    expect(manifest.runtime.groom).toMatchObject({ strands: 12364, lossless: false });
+    const binary = bytes.subarray(28 + jsonBytes);
+    const geometry = { ...document, materials: document.materials.map((material: { name: string }) => ({ name: material.name })), images: [], textures: [] };
+    const json = Buffer.from(JSON.stringify(geometry));
+    const padding = Buffer.alloc((4 - json.length % 4) % 4, 32);
+    const header = Buffer.from(bytes.subarray(0, 20));
+    header.writeUInt32LE(28 + json.length + padding.length + binary.length, 8);
+    header.writeUInt32LE(json.length + padding.length, 12);
+    const binaryHeader = bytes.subarray(20 + jsonBytes, 28 + jsonBytes);
+    const container = Buffer.concat([header, json, padding, binaryHeader, binary]);
+    const model = await new GLTFLoader().parseAsync(new Uint8Array(container).buffer, '');
+    expect(inspectRenderedModel(model.scene, model.animations)).toMatchObject({ triangles: 97978, meshes: 149, bones: 0, animations: 1, textures: [] });
+    expect(model.animations.map(clip => clip.name)).toEqual(['idle']);
+    const names = new Set<string>();
+    model.scene.traverse(object => names.add(object.name));
+    expect([...names]).toEqual(expect.arrayContaining([
+      'CAT_HEAD_sculpted_cheeks_RT', 'CAT_CLOAK_tailored_open_front_RT', 'CAT_BROOCH_turquoise_cabochon_RT',
+      'CAT_WAND_rounded_gold_star_RT', 'CAT_BAG_soft_leather_body_RT', 'CAT_TAIL_curved_RT', 'CAT_HEAD_sculpted_cheeks_FUR_RT',
+    ]));
     const mixer = new AnimationMixer(model.scene);
     const controller = createModelAnimationController(mixer, model.animations);
     expect(controller.defaultName).toBe('idle');
-    for (const name of ['idle', 'wave', 'happy', 'cast', 'sleep', 'tap_react']) {
-      expect(controller.play(name)).toBe(true);
-      mixer.update(0.25);
-      model.scene.updateMatrixWorld(true);
-      model.scene.traverse(object => {
-        expect(object.matrixWorld.elements.every(Number.isFinite)).toBe(true);
-        expect(((object as Mesh).morphTargetInfluences ?? []).every(Number.isFinite)).toBe(true);
-      });
-    }
+    expect(controller.play('idle')).toBe(true);
+    expect(controller.play('cast')).toBe(false);
+    mixer.update(0.25);
+    model.scene.updateMatrixWorld(true);
+    model.scene.traverse(object => expect(object.matrixWorld.elements.every(Number.isFinite)).toBe(true));
     controller.dispose();
     mixer.stopAllAction();
     mixer.uncacheRoot(model.scene);

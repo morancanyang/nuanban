@@ -116,7 +116,7 @@ describe('模型 IPC 权限与通知', () => {
     return { bridge, handlers, dialog, validate, activate, managementEvent, toolEvent, petEvent, management, tool, pet, store };
   }
   it.each([
-    { id: 'lumi', bytes: 1836140, fileName: 'Lumi_Magical_Kitten.glb', sha256: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b' },
+    { id: 'lumi', bytes: 5411364, fileName: 'Lumi_Magical_Kitten.glb', sha256: '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90' },
     { id: 'lili', bytes: 1601548, fileName: 'Lili_Independent_Deer.glb', sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327' },
   ])('内置 $id 只读预览不暂存、不改当前伙伴；确认后验证并持久化', async builtin => {
     const current = bridgeFixture();

@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import type { LocalModel } from '../../apps/web/src/local-model';
 
 const bytes = Array.from(readFileSync(join(process.cwd(), 'apps/web/public/models/lumi/Lumi_Magical_Kitten.glb')));
-const hash = '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b';
+const hash = '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90';
 
 test('内置小猫可真实旋转与播放动作，纯预览不调用或上传', async ({ page }) => {
   const errors: string[] = [];
@@ -18,11 +18,10 @@ test('内置小猫可真实旋转与播放动作，纯预览不调用或上传',
   await card.getByRole('button', { name: '预览 3D 与动作' }).click();
   const canvas = card.locator('canvas');
   await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-render-source', 'glb');
   await expect(canvas).toHaveAttribute('data-animation', 'idle');
-  for (const [label, name] of [['打招呼', 'wave'], ['施展魔法', 'cast'], ['打个盹', 'sleep'], ['陪伴', 'idle']]) {
-    await card.getByRole('button', { name: label, exact: true }).click();
-    await expect(canvas).toHaveAttribute('data-animation', name);
-  }
+  await card.getByRole('button', { name: '陪伴', exact: true }).click();
+  await expect(card.getByRole('button', { name: '施展魔法', exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => window.nuanbanModel)).toBeUndefined();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await card.screenshot({ path: test.info().outputPath('lumi-card.png') });
@@ -42,7 +41,7 @@ test('模拟原生桥：取消不替换，确认本机保存，刷新后再次�
   await page.addInitScript(({ modelBytes, id }) => {
     const listeners = new Set<(model: LocalModel) => void>();
     const model: LocalModel = { kind: 'model', id, fileName: 'Lumi_Magical_Kitten.glb', format: 'glb', bytes: new Uint8Array(modelBytes),
-      summary: { triangles: 29900, meshes: 35, bones: 30, animations: 16, decodedBytes: 2000000, textures: [] }, updatedAt: '2026-10-20T00:00:00.000Z' };
+      summary: { triangles: 97978, meshes: 149, bones: 0, animations: 1, decodedBytes: 20000000, textures: [{ width: 512, height: 512 }, { width: 512, height: 512 }, { width: 1024, height: 1024 }] }, updatedAt: '2026-10-23T00:00:00.000Z' };
     let active: LocalModel = localStorage.getItem('test-lumi-active') ? model : { kind: 'none' };
     window.nuanbanModel = {
       read: async () => active,

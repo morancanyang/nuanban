@@ -3,411 +3,45 @@
   "character": {
     "id": "lumi-magical-kitten",
     "name": "Lumi Magical Kitten",
-    "assetVersion": "1.0.0"
+    "assetVersion": "2.0.0"
+  },
+  "source": {
+    "file": "microglow_cat.blend",
+    "sha256": "ffe061fc3b5a4e72e18373823063d71bc239b8440b6a888f69af53a0743a9ada",
+    "collection": "MICROGLOW_CAT_ONLY",
+    "sourceGroomStrands": 173800
   },
   "runtime": {
     "format": "glTF 2.0 binary (.glb)",
     "file": "Lumi_Magical_Kitten.glb",
-    "fileBytes": 1836140,
-    "frameRate": 30,
-    "triangleCount": 29900,
-    "meshCount": 19,
-    "materialCount": 11,
-    "materials": [
-      "Lumi_Belly_Ivory",
-      "Lumi_Cream_Fur",
-      "Lumi_Cyan_Iris",
-      "Lumi_Deep_Indigo",
-      "Lumi_Eye_Glint",
-      "Lumi_Grape_Cloak",
-      "Lumi_Lavender_Lining",
-      "Lumi_Magic_Teal",
-      "Lumi_Peach",
-      "Lumi_Star_FurMark",
-      "Lumi_Warm_Gold"
-    ],
+    "fileBytes": 5411364,
+    "sha256": "3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90",
+    "triangleCount": 97978,
+    "meshCount": 148,
+    "materialCount": 19,
     "skeleton": {
-      "name": "Lumi_Rig",
-      "boneCount": 30,
-      "bones": [
-        "root",
-        "pelvis",
-        "spine",
-        "chest",
-        "cloak.back",
-        "cloak.L",
-        "cloak.R",
-        "neck",
-        "head",
-        "ear.L",
-        "ear.R",
-        "socket_head_prompt",
-        "socket_chest_prompt",
-        "upper_arm.L",
-        "forearm.L",
-        "paw.L",
-        "upper_arm.R",
-        "forearm.R",
-        "paw.R",
-        "socket_wand",
-        "tail.01",
-        "tail.02",
-        "tail.03",
-        "tail.04",
-        "thigh.L",
-        "shin.L",
-        "foot.L",
-        "thigh.R",
-        "shin.R",
-        "foot.R"
-      ]
+      "boneCount": 0
     },
-    "boundsMeters": {
-      "basis": "glTF scene coordinates: +Y up, +Z front",
-      "min": [
-        -0.2623473107814789,
-        -2.936394594144076e-8,
-        -0.1622280776500702
-      ],
-      "max": [
-        0.24012307822704315,
-        0.7346402406692505,
-        0.16559989750385284
-      ],
-      "size": [
-        0.502470389008522,
-        0.7346402700331964,
-        0.32782797515392303
-      ]
+    "frameRate": 30,
+    "groom": {
+      "method": "Tapered triangle ribbons from original curves and packed normal map",
+      "strands": 12364,
+      "lossless": false
     },
-    "morphTargets": [
-      "blink_L",
-      "blink_R",
-      "brow_up",
-      "mouth_open",
-      "smile"
+    "textures": [
+      "Microglow short-fur normal",
+      "Microglow woven cloak normal",
+      "Microglow original blue iris baked"
     ],
     "animations": [
       {
         "name": "idle",
-        "description": "Gentle breathing, tail sway, and ear movement.",
-        "startFrame": 0,
-        "endFrame": 72,
-        "durationSeconds": 2.4,
-        "suggestedLoop": true,
-        "runtimeAnimation": "idle",
-        "facialAnimation": null
-      },
-      {
-        "name": "walk",
-        "description": "In-place short-step walk cycle; the app controls travel.",
-        "startFrame": 0,
-        "endFrame": 48,
-        "durationSeconds": 1.6,
-        "suggestedLoop": true,
-        "runtimeAnimation": "walk",
-        "facialAnimation": null
-      },
-      {
-        "name": "wave",
-        "description": "One friendly left-paw wave.",
-        "startFrame": 0,
-        "endFrame": 45,
-        "durationSeconds": 1.5,
-        "suggestedLoop": false,
-        "runtimeAnimation": "wave",
-        "facialAnimation": null
-      },
-      {
-        "name": "happy",
-        "description": "A light, cheerful bounce.",
-        "startFrame": 0,
-        "endFrame": 48,
-        "durationSeconds": 1.6,
-        "suggestedLoop": false,
-        "runtimeAnimation": "happy",
-        "facialAnimation": "face_happy"
-      },
-      {
-        "name": "think",
-        "description": "A curious head tilt and thoughtful gesture.",
-        "startFrame": 0,
-        "endFrame": 72,
-        "durationSeconds": 2.4,
-        "suggestedLoop": true,
-        "runtimeAnimation": "think",
-        "facialAnimation": "face_think"
-      },
-      {
-        "name": "cast",
-        "description": "Raise the wand, charge, then release a spell.",
-        "startFrame": 0,
-        "endFrame": 66,
-        "durationSeconds": 2.2,
-        "suggestedLoop": false,
-        "runtimeAnimation": "cast",
-        "facialAnimation": "face_cast",
-        "events": {
-          "charge": 0.6,
-          "release": 1.2,
-          "end": 2.2
-        }
-      },
-      {
-        "name": "surprise",
-        "description": "A soft startle with lifted ears.",
-        "startFrame": 0,
-        "endFrame": 42,
-        "durationSeconds": 1.4,
-        "suggestedLoop": false,
-        "runtimeAnimation": "surprise",
-        "facialAnimation": "face_surprise"
-      },
-      {
-        "name": "sleep",
-        "description": "Relaxed breathing with sleepy eyelids.",
-        "startFrame": 0,
-        "endFrame": 72,
-        "durationSeconds": 2.4,
-        "suggestedLoop": true,
-        "runtimeAnimation": "sleep",
-        "facialAnimation": "face_sleep"
-      },
-      {
-        "name": "tap_react",
-        "description": "A small recoil followed by a friendly response.",
-        "startFrame": 0,
-        "endFrame": 36,
-        "durationSeconds": 1.2,
-        "suggestedLoop": false,
-        "runtimeAnimation": "tap_react",
-        "facialAnimation": "face_tap_react"
+        "kind": "object-transform"
       }
     ],
-    "facialClips": {
-      "blink": true,
-      "face_cast": true,
-      "face_happy": true,
-      "face_sleep": true,
-      "face_surprise": true,
-      "face_tap_react": true,
-      "face_think": true
-    },
-    "expressions": {
-      "neutral": {},
-      "happy": {
-        "smile": 0.9,
-        "mouth_open": 0.25,
-        "blink_L": 0.15,
-        "blink_R": 0.15
-      },
-      "curious": {
-        "brow_up": 0.65,
-        "mouth_open": 0.1
-      },
-      "thinking": {
-        "brow_up": 0.24,
-        "blink_L": 0.4,
-        "blink_R": 0.16
-      },
-      "surprised": {
-        "brow_up": 1,
-        "mouth_open": 0.9
-      },
-      "sleepy": {
-        "blink_L": 1,
-        "blink_R": 1,
-        "smile": 0.18
-      }
-    },
-    "morphWeightRange": [
-      0,
-      1
-    ],
-    "preparation": {
-      "sourceSha256": "4f731fa804dd92883c53b7fcaa7965720a2b822ea733be668db0dc04ec0f0319",
-      "runtimeSha256": "7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b",
-      "expandedSparseAccessors": 40,
-      "operation": "Lossless sparse-to-dense morph accessor expansion; geometry, animations and material values unchanged."
-    }
-  },
-  "coordinateSystem": {
-    "authoring": {
-      "up": "+Z",
-      "front": "-Y",
-      "metersPerBlenderUnit": 0.2
-    },
-    "glTF": {
-      "up": "+Y",
-      "front": "+Z"
-    },
-    "root": "LUMI_Root at the foot-ground center; use it for placement, heading, and uniform scale.",
-    "applicationNote": "Blender -Y front is exported as glTF +Z front. Keep the loader basis conversion; rotate only the character root to match the app's camera and forward convention."
-  },
-  "sockets": [
-    {
-      "name": "socket_head_prompt",
-      "parent_bone": "head",
-      "local_translation_blender_authoring": [
-        0,
-        1.6400001049041748,
-        -0.02500000037252903
-      ],
-      "local_rotation_xyzw": [
-        0,
-        0,
-        0,
-        1
-      ],
-      "local_scale": [
-        1,
-        1,
-        1
-      ],
-      "world_position_meters_blender": [
-        0,
-        0,
-        0.784000039100647
-      ],
-      "glTFNodeIndex": 5,
-      "glTFLocalTransform": {
-        "translation": [
-          0,
-          1.6400001049041748,
-          -0.02500000037252903
-        ],
-        "rotationXYZW": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "scale": [
-          1,
-          1,
-          1
-        ],
-        "note": "Relative to the exported parent bone. Includes the inherited authoring scale through the root; attach to the loaded node without scaling these offsets separately."
-      }
-    },
-    {
-      "name": "socket_wand",
-      "parent_bone": "paw.R",
-      "local_translation_blender_authoring": [
-        -0.09968093037605286,
-        0.2105010449886322,
-        -0.008829683065414429
-      ],
-      "local_rotation_xyzw": [
-        0.19752533733844757,
-        -0.5977359414100647,
-        -0.597736120223999,
-        0.49639400839805603
-      ],
-      "local_scale": [
-        0.9999998807907104,
-        0.9999998807907104,
-        0.9999998211860657
-      ],
-      "world_position_meters_blender": [
-        -0.2029999941587448,
-        -0.13200001418590546,
-        0.33000001311302185
-      ],
-      "glTFNodeIndex": 13,
-      "glTFLocalTransform": {
-        "translation": [
-          -0.09968093037605286,
-          0.21050110459327698,
-          -0.008829817175865173
-        ],
-        "rotationXYZW": [
-          0.19752533733844757,
-          -0.5977359414100647,
-          -0.597736120223999,
-          0.4963940978050232
-        ],
-        "scale": [
-          1,
-          0.9999998211860657,
-          0.9999998807907104
-        ],
-        "note": "Relative to the exported parent bone. Includes the inherited authoring scale through the root; attach to the loaded node without scaling these offsets separately."
-      }
-    },
-    {
-      "name": "socket_chest_prompt",
-      "parent_bone": "chest",
-      "local_translation_blender_authoring": [
-        0,
-        0.25,
-        0.6100000143051147
-      ],
-      "local_rotation_xyzw": [
-        0,
-        0,
-        0,
-        1
-      ],
-      "local_scale": [
-        1,
-        1,
-        1
-      ],
-      "world_position_meters_blender": [
-        0,
-        -0.12200000137090683,
-        0.3799999952316284
-      ],
-      "glTFNodeIndex": 8,
-      "glTFLocalTransform": {
-        "translation": [
-          0,
-          0.24999988079071045,
-          0.6100000143051147
-        ],
-        "rotationXYZW": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "scale": [
-          1,
-          1,
-          1
-        ],
-        "note": "Relative to the exported parent bone. Includes the inherited authoring scale through the root; attach to the loaded node without scaling these offsets separately."
-      }
-    }
-  ],
-  "optionalSpellEffects": {
-    "implementation": "Host-app particles, trails, and optional bloom; not baked into the GLB.",
-    "enabledByDefault": false,
-    "anchorNode": "Wand_Magic",
-    "anchorLocalTranslation": [
-      -1.0332620014677514,
-      3.111029391522174,
-      0.7507301006283793
-    ],
-    "anchorBasis": "Exact exported glTF mesh-local coordinates at the teal gem center; inherits the loaded node transform and root scale.",
-    "events": {
-      "charge": "Start a small teal sparkle cluster.",
-      "release": "Emit a short star burst and curved trails away from the face.",
-      "end": "Stop emitters and dispose transient effects."
-    },
-    "baseModelIndependent": true
-  },
-  "replaceableParts": {
-    "wand": "Wand_Magic object; attach runtime effects to socket_wand.",
-    "cloak": "Cloak_ClothAndTrim and Cloak_CollarAndClasp meshes; recolor Lumi_Grape_Cloak, Lumi_Lavender_Lining, and Lumi_Warm_Gold materials.",
-    "fur": "Torso_PearShape, Head_Round, and limb meshes; recolor Lumi_Cream_Fur and Lumi_Belly_Ivory materials."
-  },
-  "verification": {
-    "independentBlenderImport": true,
-    "morphAnimationExported": true,
-    "independentBodyPlayback": true,
-    "independentFacialPlayback": true,
-    "targetApplicationNotTested": true
+    "limitations": [
+      "The original source has no skeletal rig or facial blend shapes.",
+      "Movie groom and procedural shaders are adapted for real-time rendering, not exported losslessly."
+    ]
   }
 }

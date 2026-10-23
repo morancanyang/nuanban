@@ -6,22 +6,15 @@ const root = `${import.meta.env.BASE_URL}models/lumi/`;
 export const lumiModel = {
   id: 'lumi',
   name: '露米 Lumi',
-  version: '1.0.0',
+  version: '2.0.0',
   fileName: 'Lumi_Magical_Kitten.glb',
-  sha256: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b',
+  sha256: '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90',
+  previousSha256: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b',
   modelUrl: `${root}Lumi_Magical_Kitten.glb`,
   posterUrl: `${root}poster.png`,
   manifestUrl: `${root}character_manifest.json`,
   actions: [
     { name: 'idle', label: '陪伴' },
-    { name: 'walk', label: '走一走' },
-    { name: 'wave', label: '打招呼' },
-    { name: 'happy', label: '开心' },
-    { name: 'think', label: '想一想' },
-    { name: 'cast', label: '施展魔法' },
-    { name: 'surprise', label: '惊喜' },
-    { name: 'sleep', label: '打个盹' },
-    { name: 'tap_react', label: '摸摸头' },
   ],
 } as const;
 
