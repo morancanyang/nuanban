@@ -429,7 +429,7 @@ describe('分析返回与本地检测重叠时的安全续接', () => {
     ['OUTBOUND_CLOSED', '画面已过期'], ['INVALID_ANALYSIS_RESPONSE', '格式或目标'],
     ['ANALYSIS_AUTH_FAILED', '认证或权限'], ['ANALYSIS_RATE_LIMITED', '限流'],
     ['ANALYSIS_TIMEOUT', '超时'], ['ANALYSIS_RESPONSE_INCOMPLETE', '未完整返回'],
-    ['ANALYSIS_UNAVAILABLE', '服务暂不可用'], ['constructor', '未获得可核验的结果'],
+    ['ANALYSIS_UNAVAILABLE', '暂时不可用'], ['constructor', '未获得可核验的结果'],
   ])('分析失败说明恢复途径，但不暴露原始错误或自动重试：%s', async (code, expected) => {
     const setup = fixture();
     await setup.start();

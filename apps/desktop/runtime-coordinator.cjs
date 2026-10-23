@@ -33,9 +33,9 @@ function checkedLabels(value) {
 function analysisFailureMessage(error, timedOut) {
   const messages = {
     ANALYSIS_TIMEOUT: '本次屏幕分析超时，已取消请求；可以手动重新提问或结束教学，不会自动重试。',
-    ANALYSIS_UNAVAILABLE: '云分析服务暂不可用，请检查模型配置或服务连接；未显示箭头，不会用演示数据替代。',
+    ANALYSIS_UNAVAILABLE: '模型服务暂时不可用（网络中断或服务端错误，已做有界自动重试）；未显示箭头，不会用演示数据替代。可稍后手动重新提问。',
     ANALYSIS_AUTH_FAILED: '模型认证或权限检查失败，请检查模型凭证和模型权限；未显示箭头。',
-    ANALYSIS_RATE_LIMITED: '模型服务暂时限流，未显示箭头；请稍后手动重新提问，不会自动重试。',
+    ANALYSIS_RATE_LIMITED: '模型服务暂时限流（已做有界自动重试）；未显示箭头；请稍后手动重新提问。',
     ANALYSIS_IMAGE_TOO_LARGE: '脱敏画面超过分析服务大小上限，本次未发送，未显示箭头；当前本地共享仍保持。可停止共享后重新选择较小区域，再手动提问。',
     ANALYSIS_RESPONSE_INCOMPLETE: '模型结果未完整返回，未显示箭头；请手动重新提问，不会使用残缺结果。',
     ANALYSIS_FAILED: '模型请求失败（网络、图片大小或返回异常），未显示箭头；请稍后手动重新提问，不会使用旧位置。',
@@ -727,7 +727,8 @@ function createDesktopRuntime(options) {
             publish();
           }
         } catch (error) {
-          traceGuidance('analysis_error', { code: error?.code ?? error?.message ?? 'unknown', name: error?.name, providerCode: error?.providerCode, timedOut });
+          traceGuidance('analysis_error', { code: error?.code ?? error?.message ?? 'unknown', name: error?.name, providerCode: error?.providerCode,
+            attempts: Number.isSafeInteger(error?.attempts) ? error.attempts : undefined, timedOut });
           if (sequence === analysisSequence && sameGeneration(job.observation, job.task) && (!controller.signal.aborted || timedOut)) {
             clearTarget();
             state.task.state = 'needs_help';

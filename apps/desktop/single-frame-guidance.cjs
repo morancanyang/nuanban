@@ -27,8 +27,8 @@ function parseSingleFrameResult(text, width, height) {
 
 const providerFailureMessages = {
   TIMEOUT: '模型响应超时（网络或服务较慢），本次没有显示箭头；请稍后重新截帧分析，不会自动重试。',
-  PROVIDER_UNAVAILABLE: '模型服务暂不可用，本次没有显示箭头；请检查网络或模型配置后重试。',
-  RATE_LIMITED: '模型服务繁忙或限流，本次没有显示箭头；请稍后重试。',
+  PROVIDER_UNAVAILABLE: '模型服务暂不可用（网络中断或服务端错误，已做有界自动重试），本次没有显示箭头；请检查网络后重新截帧分析。',
+  RATE_LIMITED: '模型服务繁忙或限流（已做有界自动重试），本次没有显示箭头；请稍后重新截帧分析。',
   AUTH_FAILED: '模型认证失败，本次没有显示箭头；请检查本机模型凭证配置。',
   INVALID_REQUEST: '模型拒绝了本次请求（图片过大或内容不符合要求），本次没有显示箭头。',
   STREAM_INTERRUPTED: '模型返回不完整，本次没有显示箭头；请重试。',

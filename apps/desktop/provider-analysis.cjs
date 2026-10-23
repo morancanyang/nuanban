@@ -108,6 +108,7 @@ function createProviderAnalysisClient({ provider, now = Date.now } = {}) {
           RATE_LIMITED: 'ANALYSIS_RATE_LIMITED', TIMEOUT: 'ANALYSIS_TIMEOUT', STREAM_INTERRUPTED: 'ANALYSIS_RESPONSE_INCOMPLETE' };
         const wrapped = failure(Object.hasOwn(codes, error?.code) ? codes[error.code] : 'ANALYSIS_FAILED');
         wrapped.providerCode = error?.code ?? error?.name ?? 'unknown';
+        wrapped.attempts = Number.isSafeInteger(error?.attempts) ? error.attempts : undefined;
         throw wrapped;
       }
       const installOk = () => typeof input.canInstallCurrent === 'function' ? input.canInstallCurrent() : input.canSend();

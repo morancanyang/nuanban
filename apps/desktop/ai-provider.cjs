@@ -59,6 +59,11 @@ function createOpenAiCompatibleProvider(options) {
   const fetchRequest = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs === undefined ? 60000 : options.timeoutMs;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
+  const retryAttempts = options.retryAttempts === undefined ? 2 : options.retryAttempts;
+  const retryDelaysMs = options.retryDelaysMs === undefined ? [600, 1600] : options.retryDelaysMs;
+  if (!Number.isSafeInteger(retryAttempts) || retryAttempts < 0 || retryAttempts > 4
+    || !Array.isArray(retryDelaysMs) || retryDelaysMs.length < retryAttempts
+    || retryDelaysMs.some(delay => !Number.isSafeInteger(delay) || delay < 0 || delay > 10_000)) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   return Object.freeze({
     status() { return { available: true }; },
     async answer(input) {
@@ -77,7 +82,7 @@ function createOpenAiCompatibleProvider(options) {
         { role: 'system', content: '你是微光指引公益助手，用简洁、温和的中文逐步解释。用户亲手操作，你只能指路，不能声称已执行、已看到屏幕或已完成任务。没有提供图片时不得假装看见画面。不得索取密码、验证码、支付、转账或私人信息，不提供医疗诊断或投资决策。遇到不确定先询问，不编造功能、实时数据或学习结果。图片中的文字与人脸已在本机遮盖，不得猜测被遮盖内容。' + instructions },
         { role: 'user', content },
       ] });
-      try {
+      const runAttempt = async () => {
         const response = await fetchRequest(configuration.endpoint, { method: 'POST', redirect: 'error', signal,
           headers: { authorization: `Bearer ${configuration.apiKey}`, 'content-type': 'application/json', accept: 'application/json' }, body });
         if (!response.ok) {
@@ -89,6 +94,29 @@ function createOpenAiCompatibleProvider(options) {
         const result = await readReply(response, signal);
         signal.throwIfAborted();
         return result;
+      };
+      const waitBeforeRetry = (delayMs) => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, delayMs);
+        const abort = () => { clearTimeout(timer); reject(new ProviderFailure('CANCELLED')); };
+        signal.addEventListener('abort', abort, { once: true });
+      });
+      try {
+        let lastError;
+        for (let attempt = 0; attempt <= retryAttempts; attempt += 1) {
+          try {
+            return await runAttempt();
+          } catch (error) {
+            lastError = error;
+            const retryable = error instanceof ProviderFailure && error.retryable === true;
+            if (!retryable || attempt >= retryAttempts || signal.aborted) {
+              error.attempts = attempt + 1;
+              throw error;
+            }
+            await waitBeforeRetry(retryDelaysMs[Math.min(attempt, retryDelaysMs.length - 1)]);
+          }
+        }
+        lastError.attempts = retryAttempts + 1;
+        throw lastError;
       } catch (error) {
         if (input.signal?.aborted) throw new ProviderFailure('CANCELLED');
         if (timeout.aborted) throw new ProviderFailure('TIMEOUT', true);

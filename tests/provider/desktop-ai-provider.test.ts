@@ -59,10 +59,37 @@ describe('桌面真实模型端口（仅合成HTTP，不是供应验收）', () 
     expect(fetchRequest).not.toHaveBeenCalled();
   });
 
-  it.each([[401, 'AUTH_FAILED', false], [403, 'AUTH_FAILED', false], [429, 'RATE_LIMITED', true], [503, 'PROVIDER_UNAVAILABLE', true]] as const)('HTTP %s 仅返回安全错误码且不自动重试', async (status, code, retryable) => {
+  it.each([[401, 'AUTH_FAILED', false], [403, 'AUTH_FAILED', false]] as const)('HTTP %s 仅返回安全错误码且不重试', async (status, code, retryable) => {
     const fetchRequest = vi.fn<typeof fetch>(async () => new Response('sensitive-provider-error-body', { status }));
     const provider = createOpenAiCompatibleProvider({ ...configuration, fetch: fetchRequest });
     await expect(provider.answer({ question: '请解释' })).rejects.toMatchObject({ code, retryable, message: code });
+    expect(fetchRequest).toHaveBeenCalledOnce();
+  });
+
+  it.each([[429, 'RATE_LIMITED'], [503, 'PROVIDER_UNAVAILABLE']] as const)('HTTP %s 返回安全错误码，并对可恢复失败做有界重试（默认 2 次）', async (status, code) => {
+    const fetchRequest = vi.fn<typeof fetch>(async () => new Response('sensitive-provider-error-body', { status }));
+    const provider = createOpenAiCompatibleProvider({ ...configuration, fetch: fetchRequest, retryDelaysMs: [1, 1] });
+    const error = await provider.answer({ question: '请解释' }).then(() => null, failure => failure);
+    expect(error).toMatchObject({ code, message: code, attempts: 3 });
+    expect(fetchRequest).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(error)).not.toContain('sensitive-provider-error-body');
+  });
+
+  it('瞬时 5xx 后重试成功，最终返回模型结果', async () => {
+    let calls = 0;
+    const fetchRequest = vi.fn<typeof fetch>(async () => {
+      calls += 1;
+      return calls <= 2 ? new Response('busy', { status: 503 }) : completed('重试成功');
+    });
+    const provider = createOpenAiCompatibleProvider({ ...configuration, fetch: fetchRequest, retryDelaysMs: [1, 1] });
+    await expect(provider.answer({ question: '请解释' })).resolves.toEqual({ text: '重试成功' });
+    expect(fetchRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it('retryAttempts: 0 时保持单次尝试', async () => {
+    const fetchRequest = vi.fn<typeof fetch>(async () => new Response('busy', { status: 503 }));
+    const provider = createOpenAiCompatibleProvider({ ...configuration, fetch: fetchRequest, retryAttempts: 0 });
+    await expect(provider.answer({ question: '请解释' })).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
     expect(fetchRequest).toHaveBeenCalledOnce();
   });
 
@@ -73,7 +100,7 @@ describe('桌面真实模型端口（仅合成HTTP，不是供应验收）', () 
       () => new Response('x'.repeat(192 * 1024 + 1)),
     ];
     for (const response of responses) {
-      const provider = createOpenAiCompatibleProvider({ ...configuration, fetch: async () => response() });
+      const provider = createOpenAiCompatibleProvider({ ...configuration, fetch: async () => response(), retryDelaysMs: [1, 1] });
       await expect(provider.answer({ question: '请解释' })).rejects.toBeInstanceOf(Error);
     }
   });
@@ -87,7 +114,7 @@ describe('桌面真实模型端口（仅合成HTTP，不是供应验收）', () 
     }));
     await expect(createOpenAiCompatibleProvider({ ...configuration, fetch: fetchRequest, timeoutMs: 10 }).answer({ question: '请解释' })).rejects.toMatchObject({ code: 'TIMEOUT', message: 'TIMEOUT' });
     expect(fetchRequest).toHaveBeenCalledOnce();
-    await expect(createOpenAiCompatibleProvider({ ...configuration, fetch: async () => { throw new Error(configuration.apiKey); } }).answer({ question: '请解释' })).rejects.toMatchObject({ message: 'PROVIDER_UNAVAILABLE' });
+    await expect(createOpenAiCompatibleProvider({ ...configuration, fetch: async () => { throw new Error(configuration.apiKey); }, retryDelaysMs: [1, 1] }).answer({ question: '请解释' })).rejects.toMatchObject({ message: 'PROVIDER_UNAVAILABLE' });
   });
 });
 
