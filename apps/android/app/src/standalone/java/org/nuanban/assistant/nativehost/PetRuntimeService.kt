@@ -9,10 +9,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
@@ -38,6 +40,7 @@ import kotlin.math.abs
 class PetRuntimeService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var bubble: View? = null
+    private var bubbleLayout: WindowManager.LayoutParams? = null
     private var pet3d: Pet3dOverlay? = null
     private var bubbleAnimator: ObjectAnimator? = null
     private var panel: ScrollView? = null
@@ -49,6 +52,24 @@ class PetRuntimeService : Service() {
     private fun statusText(): String {
         val shape = pet3d?.statusLine() ?: Pet3dRenderPolicy.statusLine(Pet3dRenderMode.STATIC_PNG, "overlay_not_started")
         return PetRuntime.status(this) + "\n" + shape
+    }
+
+    /** 旋转/分辨率变化后把浮层夹回屏内，避免拖动过的位置落在屏幕外。 */
+    private val configurationWatcher = object : ComponentCallbacks {
+        override fun onConfigurationChanged(newConfig: Configuration) { clampBubbleIntoDisplay() }
+        override fun onLowMemory() { }
+    }
+
+    private fun clampBubbleIntoDisplay() {
+        val view = bubble ?: return
+        val layout = bubbleLayout ?: return
+        val metrics = resources.displayMetrics
+        val x = layout.x.coerceIn(0, (metrics.widthPixels - layout.width).coerceAtLeast(0))
+        val y = layout.y.coerceIn(0, (metrics.heightPixels - layout.height).coerceAtLeast(0))
+        if (x == layout.x && y == layout.y) return
+        layout.x = x
+        layout.y = y
+        runCatching { getSystemService(WindowManager::class.java).updateViewLayout(view, layout) }
     }
     private val guidanceMonitor = object : Runnable {
         override fun run() { refreshGuidance(); handler.postDelayed(this, 100) }
@@ -172,7 +193,9 @@ class PetRuntimeService : Service() {
             }
         }
         bubble = pet
+        bubbleLayout = layout
         manager.addView(pet, layout)
+        registerComponentCallbacks(configurationWatcher)
         shape.start()
         if (ValueAnimator.areAnimatorsEnabled()) {
             bubbleAnimator = ObjectAnimator.ofFloat(pet, View.TRANSLATION_Y, 0f, -3 * metrics.density, 0f).apply {
@@ -256,8 +279,10 @@ class PetRuntimeService : Service() {
         // 先销毁 3D 表面（释放 GL 上下文/渲染进程），再移除浮层视图，避免残留渲染。
         runCatching { pet3d?.destroy() }
         pet3d = null
+        runCatching { unregisterComponentCallbacks(configurationWatcher) }
         bubble?.let { runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(it) } }
         bubble = null
+        bubbleLayout = null
         AndroidGuidanceRuntime.setListener(null)
         runCatching { guidance?.clear() }
         guidance = null

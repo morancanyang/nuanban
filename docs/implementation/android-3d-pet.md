@@ -216,11 +216,105 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps/android/standalone/tool
 新增（资产与工具）：
 
 - `app/src/standalone/assets/pet3d/{index.html,README.md,viewer/*}`（页面 + 内嵌 three 运行时 + MIT 许可证）
-- `standalone/tools/pet3d/{check-pet3d.ps1,Pet3dChecks.kt,measure-pet3d.ps1}`
+- `standalone/tools/pet3d/{check-pet3d.ps1,Pet3dChecks.kt,measure-pet3d.ps1,accept-pet3d.ps1}`
 
 修改：
 
-- `app/src/standalone/java/org/nuanban/assistant/nativehost/PetRuntimeService.kt`（浮层挂载 `Pet3dOverlay`、状态文本加形象层级、面板加切换按钮、面板期间暂停渲染、销毁顺序）
-- `standalone/build.gradle.kts`（`assets.srcDir(app/src/standalone/assets)` + `syncPet3dModelAssets` 构建期复制模型）
+- `app/src/standalone/java/org/nuanban/assistant/nativehost/PetRuntimeService.kt`（浮层挂载 `Pet3dOverlay`、状态文本加形象层级、面板加切换按钮、面板期间暂停渲染、旋转后把浮层夹回屏内、销毁顺序）
+- `.../Pet3dGlView.kt`（系统关闭动画时只渲染一帧静态形象）
+- `standalone/build.gradle.kts`（`assets.srcDir(app/src/standalone/assets)` + `syncPet3dModelAssets` 构建期复制模型 + 验收用 `-Ppet3dModelVariant=missing|corrupt`，默认 `full`）
 - `tests/platform/android-3d-{render-policy,assets,overlay}.test.ts`（新增）
 - 本文件
+
+## 11. 真机验收清单（邀请所有者执行，由 lead 记录结果）
+
+> 脚本：`apps/android/standalone/tools/pet3d/accept-pet3d.ps1`（自动判定可自动化的项并落盘 JSON；人眼项只打印 `MANUAL:`，
+> 不会替人记"通过"）。**邀请所有者执行、由 lead 记录结果**；本仓库开发机没有设备，以下所有格子目前都是空的。
+> 未发布、未上传任何 APK；下面用的都是本仓库本地构建的 debug 包。
+
+### 11.1 准备（自动）
+
+```powershell
+# 1) 设备在线
+powershell -NoProfile -ExecutionPolicy Bypass -File apps/android/standalone/tools/pet3d/accept-pet3d.ps1 -Step devices
+# 2) 本地构建 + 覆盖安装（同一 debug 证书；若报签名不一致，先 adb uninstall 再装）
+powershell -NoProfile -ExecutionPolicy Bypass -File apps/android/standalone/tools/pet3d/accept-pet3d.ps1 -Step install -Build -Serial <serial> -ReportPath .\pet3d-acceptance.json
+#    只复用已有 APK：去掉 -Build
+```
+
+首次启动需要两项授权（脚本会打印 MANUAL 提示）：
+
+- **显示在其他应用上层（SYSTEM_ALERT_WINDOW）**：系统设置里允许；也可 `adb shell appops set org.nuanban.assistant.standalone SYSTEM_ALERT_WINDOW allow`（部分 ROM 有效，`-Step grants` 会记录 `appops get` 结果）；
+- **通知权限**：`adb shell pm grant org.nuanban.assistant.standalone android.permission.POST_NOTIFICATIONS`（或系统弹窗允许）；通知渠道"微光指引独立桌宠与停止入口"被关闭时，按既有隐私逻辑桌宠会自行停止，这是预期行为。
+
+启动桌宠（等价于在应用内点按启动）：
+
+```powershell
+adb -s <serial> shell am start-foreground-service -n org.nuanban.assistant.standalone/org.nuanban.assistant.nativehost.PetRuntimeService -a org.nuanban.assistant.START_PET_BY_USER
+```
+
+### 11.2 逐项检查表（`-Step verify` 跑自动项，人眼项由所有者确认、lead 记录）
+
+| # | 检查项 | 命令 / 触发方式 | 预期 | 结果（lead 填） |
+| --- | --- | --- | --- | --- |
+| 1 | 设备与安装 | `-Step devices` / `-Step install -Build` | `adb devices` 显示在线；`pm path` 有包；版本号与本地 APK 一致 | |
+| 2 | 浮层与通知授权 | `-Step grants` | `appops get … SYSTEM_ALERT_WINDOW` 为 allow；通知渠道 importance 不为 none | |
+| 3 | 浮层窗口存在 | `-Step verify` | `dumpsys window windows` 中出现该包的 `TYPE_APPLICATION_OVERLAY` 窗口 | |
+| 4 | 3D 加载与循环动画 | 人眼 | 形象出现且持续动画（不是静止帧、不是黑块/空白）；状态面板显示"形象：实时 3D · …" | |
+| 5 | 拖动 | 人眼 | 跟手移动，松手后位置保持；不触发面板 | |
+| 6 | 单击打开原生面板 | 人眼 | 面板出现、按钮可用，"收起面板/退出桌宠"正常 | |
+| 7 | **FLAG_SECURE** | `-Step verify`（脚本截屏采样） | 截图中浮层区域应为纯黑（`overlayRegionUniformBlack=true`）；若能看到形象即安全缺陷，停止验收 | |
+| 8 | 遮挡拒收 | 人眼（用其他应用的悬浮窗盖住桌宠后点击） | 点击被拒收，不打开面板（`filterTouchesWhenObscured`） | |
+| 9 | 回退：模型缺失 | `-Step fallback-missing` | logcat 出现 `reason=bundled_model_missing`，面板显示"随包静态形象（bundled_model_missing）"，静态图可见、拖动/单击正常 | |
+| 10 | 回退：摘要不符 | `-Step fallback-corrupt` | logcat 出现 `reason=bundled_model_digest_mismatch`；不渲染未校验字节 | |
+| 11 | 恢复完整包 | `-Step restore` | 重新选择 3D 层级（logcat 出现非 `STATIC_PNG` 的 `mode=`） | |
+| 12 | 层级选择：无 WebView | `-Step tiering-webview-off` | 停用系统 WebView 后选择 `mode=NATIVE_GL`；脚本会自动重新启用 WebView | |
+| 13 | 层级选择：WebView 可用 | `-Step tiering-webview-on` | 选择 `mode=CONTROLLED_WEBVIEW` | |
+
+> 说明：**渲染器运行时失败（首帧超时、着色器/页面报错）无法在没有调试专用代码的情况下确定性注入**——
+> 我们刻意没有为验收加"强制失败"开关（避免把测试后门带进产品包）。该路径的判据是：8 秒内无首帧即升层、
+> 连续 2 次失败封闭到静态图，日志会出现 `renderer_failed reason=…` 与 `ready_timeout_ms=8000`。
+> 资产失败路径由第 9/10 项用构建期变体 `-Ppet3dModelVariant=missing|corrupt` 覆盖（默认 `full`，正常包不受影响）。
+
+### 11.3 性能与长时挂起（每个形态各跑一次）
+
+```powershell
+# 形态由人在面板里切换确认，脚本只记录 -Phase
+powershell -NoProfile -ExecutionPolicy Bypass -File apps/android/standalone/tools/pet3d/accept-pet3d.ps1 -Step perf -Phase webview_three_js -PerfSeconds 600 -Serial <serial> -ReportPath .\pet3d-perf-webview.json
+# 再跑 native_gl / static_png 各一次，然后用同一判据表比较
+```
+
+取数命令（脚本内部执行，也可手工复核）：
+
+```powershell
+adb -s <serial> shell dumpsys gfxinfo org.nuanban.assistant.standalone reset
+adb -s <serial> shell dumpsys gfxinfo org.nuanban.assistant.standalone framestats   # Janky frames 百分比
+adb -s <serial> logcat -s NuanbanPet3d:I                                             # 每 5 秒 avgFps / p95FrameMs / worstFrameMs
+adb -s <serial> shell dumpsys meminfo org.nuanban.assistant.standalone               # TOTAL PSS / RSS
+adb -s <serial> shell dumpsys batterystats --charged org.nuanban.assistant.standalone
+```
+
+可接受阈值建议（与 §7.3 相同，待真机确认后固化）：持续 `avgFps ≥ 24`、`p95FrameMs ≤ 40ms`、`Janky frames ≤ 10%`、
+PSS 增量相对 `static_png` 形态 WebView `≤ 80MB` / 原生 GL `≤ 30MB`、`Estimated power use` 增量 `≤ 3%/10min`、首帧 `< 8s`。
+**长时挂起**：同一形态连续运行 30 分钟后重取 `meminfo` 与 `gfxinfo`，PSS 不应持续单调上涨（允许 ±10% 波动），
+`avgFps` 不应下降超过 20%；面板打开期间渲染是暂停的，长时挂起测量请在面板关闭状态进行。
+
+### 11.4 低端与异常路径的预期行为
+
+| 场景 | 触发方式 | 预期行为 |
+| --- | --- | --- |
+| 切后台（回桌面/切到其他应用） | 按 Home / 切换到别的应用 | 悬浮形象继续驻留（`TYPE_APPLICATION_OVERLAY`）；通知保留停止/退出入口；3D 继续渲染 |
+| 锁屏 | 按电源键 | 按既有隐私逻辑桌宠停止：`ACTION_SCREEN_OFF` 触发 `privacyPause` 并 `stopSelf()`，浮层与通知消失、3D 表面随之销毁；解锁后需本人再次启动（预期行为，不是回归） |
+| 旋转屏幕 | 旋转设备 | 浮层仍留在屏内：服务注册了 `ComponentCallbacks`，配置变化时把坐标夹回新屏幕范围；拖动与单击保持可用 |
+| 低电量模式（Battery Saver） | 系统设置开启 | 行为不变（3D 继续渲染，耗电相对更高）；如需省电由本人在面板切到静态形象。**未按电量自动降级**，这是刻意选择（避免无提示地改变形象） |
+| 关闭系统动画（开发者选项三个动画缩放设为"关闭"） | 人眼 | 静态回退形象不再上下浮动（已判断 `areAnimatorsEnabled()`）；原生 GL 层只渲染一帧静态形象（`RENDERMODE_WHEN_DIRTY`）；WebView 层若系统映射 `prefers-reduced-motion` 则同样只渲染静态帧并在就绪摘要里回报 `motion_reduced` |
+| 通知渠道被关闭 | 系统设置里关掉该渠道 | 既有监控逻辑判定不可用，桌宠停止（预期） |
+| 低内存/无 GLES2 设备 | `isLowRamDevice` 或内存 < 2048MB 的机型 | 直接使用随包静态 PNG（策略表见 §3），不启动任何 3D 渲染层 |
+| WebView 版本 < 90 或不可用 | 旧机型或停用 WebView | 选择原生 GL 层；若原生层也不可用则静态 PNG |
+| 渲染连续失败 2 次 | 见 §11.2 说明（不可确定性注入） | 封闭到静态 PNG，日志出现 `renderer_failed` 与 `consecutiveFailures=2`，不再重试 |
+
+### 11.5 结果记录
+
+`accept-pet3d.ps1` 落盘的 JSON 含 `results`（自动项与原始文件路径）、`failedChecks`、`manualSteps`、`deviceVerified`。
+约定：**自动项由脚本判定；人工项由 lead 把结论补进上表**；未执行的项保持空白，不得写成"通过"。
+本机（无设备）执行 `-Step devices` 的输出里 `deviceVerified` 为 false —— 这是当前唯一可得的"真机相关"输出，不构成验收。

@@ -100,7 +100,7 @@ describe('Android 独立桌宠实时 3D：悬浮层行为与回退路径', () =>
     expect(stats).toContain('deviceVerified=false');
   });
 
-  it('文档明确标注未做真机验收，并给出可执行的测量步骤与判据', () => {
+  it('文档明确标注未做真机验收，并给出可执行的测量与验收步骤、判据与异常路径预期', () => {
     expect(existsSync(docPath)).toBe(true);
     const doc = readFileSync(docPath, 'utf8');
     expect(doc).toContain('deviceVerified=false');
@@ -110,9 +110,34 @@ describe('Android 独立桌宠实时 3D：悬浮层行为与回退路径', () =>
     }
     for (const phase of ['webview_three_js', 'native_gl', 'static_png']) expect(doc).toContain(phase);
     expect(doc).toContain('measure-pet3d.ps1');
+    // 真机验收清单（邀请所有者执行、由 lead 记录结果）必须覆盖 lead 要求的四类内容。
+    expect(doc).toContain('accept-pet3d.ps1');
+    expect(doc).toContain('邀请所有者执行');
+    for (const covered of [
+      'adb install', 'SYSTEM_ALERT_WINDOW', 'POST_NOTIFICATIONS', 'FLAG_SECURE', 'overlayRegionUniformBlack',
+      'fallback-missing', 'fallback-corrupt', 'Ppet3dModelVariant', 'am start-foreground-service', 'Janky frames',
+      'ACTION_SCREEN_OFF', '旋转', '低电量', '关闭系统动画',
+    ]) expect(doc).toContain(covered);
+    expect(doc).toContain('结果（lead 填）');
     // 不允许出现编造的实测数字：不得声称已实测帧率/内存/耗电。
     expect(doc).not.toMatch(/实测[^。\n]{0,20}\d+\s*(fps|帧|MB|mAh)/i);
     expect(doc).not.toMatch(/deviceVerified\s*=\s*true/);
     expect(doc).not.toMatch(/已通过真机|真机已验证|线上已更新/);
+  });
+
+  it('旋转与“关闭系统动画”有明确实现：夹取坐标 + 只渲染静态一帧', () => {
+    const service = readAndroid(nativeRoot + 'PetRuntimeService.kt');
+    expect(service).toContain('registerComponentCallbacks(configurationWatcher)');
+    expect(service).toContain('unregisterComponentCallbacks(configurationWatcher)');
+    expect(service).toContain('override fun onConfigurationChanged(newConfig: Configuration) { clampBubbleIntoDisplay() }');
+    const clamp = service.slice(service.indexOf('private fun clampBubbleIntoDisplay()'));
+    expect(clamp).toContain('resources.displayMetrics');
+    expect(clamp).toContain('updateViewLayout(view, layout)');
+    const glView = readAndroid(nativeRoot + 'Pet3dGlView.kt');
+    expect(glView).toContain('ValueAnimator.areAnimatorsEnabled()');
+    expect(glView).toContain('RENDERMODE_WHEN_DIRTY');
+    const page = readFileSync(androidRoot + 'app/src/standalone/assets/pet3d/viewer/pet3d-viewer.js', 'utf8');
+    expect(page).toContain("matchMedia('(prefers-reduced-motion: reduce)')");
+    expect(page).toContain('motion_reduced');
   });
 });

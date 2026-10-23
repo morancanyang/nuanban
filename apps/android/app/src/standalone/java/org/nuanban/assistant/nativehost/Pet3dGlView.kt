@@ -1,5 +1,6 @@
 package org.nuanban.assistant.nativehost
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.PixelFormat
 import android.opengl.GLSurfaceView
@@ -36,7 +37,13 @@ class Pet3dGlView(
                 onFailure = { reason -> handler.post { if (!released) onFailure(reason) } },
             ),
         )
-        renderMode = RENDERMODE_CONTINUOUSLY
+        // 系统关闭动画（开发者选项动画缩放为 0）时只渲染一帧静态形象，与静态 PNG 回退图的行为一致，也更省电。
+        if (ValueAnimator.areAnimatorsEnabled()) {
+            renderMode = RENDERMODE_CONTINUOUSLY
+        } else {
+            renderMode = RENDERMODE_WHEN_DIRTY
+            requestRender()
+        }
     }
 
     override fun pauseRendering() {

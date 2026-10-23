@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -116,8 +117,12 @@ describe('Android 独立桌宠实时 3D：随包资产与权限边界', () => {
     expect(existsSync(assetRoot + 'viewer/THREE-LICENSE.txt')).toBe(true);
   });
 
-  it('离线校验脚本可从 Windows PowerShell 5.1 解析（UTF-8 BOM）且自带真机测量脚本', () => {
-    for (const script of ['standalone/tools/pet3d/check-pet3d.ps1', 'standalone/tools/pet3d/measure-pet3d.ps1']) {
+  it('离线校验脚本可从 Windows PowerShell 5.1 解析（UTF-8 BOM）且自带真机测量与验收脚本', () => {
+    for (const script of [
+      'standalone/tools/pet3d/check-pet3d.ps1',
+      'standalone/tools/pet3d/measure-pet3d.ps1',
+      'standalone/tools/pet3d/accept-pet3d.ps1',
+    ]) {
       const bytes = readFileSync(androidRoot + script);
       expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]);
       expect(bytes.byteLength).toBeGreaterThan(500);
@@ -132,5 +137,54 @@ describe('Android 独立桌宠实时 3D：随包资产与权限边界', () => {
     expect(measure).toContain('deviceVerified = $false');
     expect(measure).toContain('NuanbanPet3d');
     expect(measure).not.toMatch(/https?:\/\//);
+
+    const accept = readAndroid('standalone/tools/pet3d/accept-pet3d.ps1');
+    for (const step of ['devices', 'install', 'grants', 'verify', 'fallback-missing', 'fallback-corrupt', 'restore', 'tiering-webview-off', 'tiering-webview-on', 'perf']) {
+      expect(accept).toContain(`'${step}'`);
+    }
+    expect(accept).toContain("ValidateSet('devices', 'install', 'grants', 'verify'");
+    expect(accept).toContain('adb');
+    expect(accept).toContain('appops');
+    expect(accept).toContain('screencap');
+    expect(accept).toContain('overlayRegionUniformBlack');
+    expect(accept).toContain('measure-pet3d.ps1');
+    expect(accept).toContain('manualSteps');
+    // 不允许把人工项当通过，也不允许无条件声明已验收。
+    expect(accept).toContain('Note-Manual');
+    expect(accept).toContain('deviceVerified = $script:deviceVerifiedByThisRun');
+    expect(accept).not.toMatch(/deviceVerified = \$true/);
+    expect(accept).not.toMatch(/https?:\/\//);
+  });
+
+  it.skipIf(process.platform !== 'win32')('三个 PowerShell 脚本在 Windows PowerShell 5.1 下语法可解析（不接受 PS7 专有语法）', () => {
+    const script = `
+$files = @(
+  'apps/android/standalone/tools/pet3d/check-pet3d.ps1',
+  'apps/android/standalone/tools/pet3d/measure-pet3d.ps1',
+  'apps/android/standalone/tools/pet3d/accept-pet3d.ps1'
+)
+foreach ($f in $files) {
+  $tokens = $null; $errors = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path, [ref]$tokens, [ref]$errors)
+  if ($errors.Count -gt 0) { Write-Output ($f + ' FAIL ' + ($errors | ForEach-Object { $_.Message }) -join ' | ') } else { Write-Output ($f + ' OK') }
+}`;
+    const scriptPath = androidRoot + 'standalone/tools/pet3d/build/parse-check.ps1';
+    mkdirSync(androidRoot + 'standalone/tools/pet3d/build', { recursive: true });
+    writeFileSync(scriptPath, script, 'utf8');
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
+      cwd: workspaceRoot, encoding: 'utf8', timeout: 60_000, windowsHide: true,
+    });
+    expect(output).not.toContain('FAIL');
+    expect(output.match(/OK/g)?.length).toBe(3);
+  }, 120_000);
+
+  it('构建期模型变体只影响验收用构建，默认仍复制与桌面端一致的完整模型', () => {
+    const build = readAndroid('standalone/build.gradle.kts');
+    expect(build).toContain('pet3dModelVariant');
+    expect(build).toContain('full\", \"missing\", \"corrupt');
+    expect(build).toContain('"missing" -> fileSystem.delete');
+    expect(build).toContain('bytes.copyOf(bytes.size / 2)');
+    expect(build).toContain('require(pet3dModelVariant in setOf("full", "missing", "corrupt"))');
+    expect(build).toContain('(findProperty("pet3dModelVariant") as String?) ?: "full"');
   });
 });

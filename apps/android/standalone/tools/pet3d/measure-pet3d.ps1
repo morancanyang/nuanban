@@ -16,7 +16,8 @@ $ErrorActionPreference = 'Stop'
 # 用法（每个形态各跑一次，跑之前请在本机面板里切到对应形态）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File apps/android/standalone/tools/pet3d/measure-pet3d.ps1 `
 #     -Serial <device-serial> -Phase webview_three_js -DurationSeconds 600 -OutputPath <json>
-$adb = (Get-Command adb -ErrorAction SilentlyContinue)?.Source
+$adbCommand = Get-Command adb -ErrorAction SilentlyContinue
+$adb = if ($adbCommand) { $adbCommand.Source } else { $null }
 if (-not $adb) {
     $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $env:ANDROID_SDK_ROOT }
     if (-not $sdk) { $sdk = Join-Path $env:LOCALAPPDATA 'Android/Sdk' }
