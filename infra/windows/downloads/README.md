@@ -2,9 +2,9 @@
 
 > **2026-10-23 r15：** 修复"云分析服务暂不可用"。现场 trace 显示请求 11 秒后以 `providerCode=PROVIDER_UNAVAILABLE` 失败，而同一分钟本机实测网关 `GET /models` 与连续三次对话请求均 200（另有 GitHub TLS 握手失败），属于**偶发 5xx/网络抖动**。模型端口现在只对**可恢复失败**做有界重试：网络异常、HTTP 429/5xx、响应中断最多重试 2 次（退避 0.6s/1.6s，共享原有 60s 超时预算）；鉴权失败、非法请求、取消与超时仍只尝试一次。文案与 trace 会说明"已做有界自动重试"并记录 `attempts`；`retryAttempts`/`retryDelaysMs` 可配置。验证：17 个相关测试文件 **1178/1178** 通过、`tsc --noEmit` 0、打包校验 `matches: true`，r14→r15 的 zip 条目仅 `resources/app.asar`（+2,130 字节）变化。旧 r14 包已从下载目录移除。
 >
-> **同批 Android 包（2026-10-23 21:10 发布）：** 独立桌宠包修复了"打开桌宠只有'微光指引'四个字、没有形象"——悬浮层由 `TextView` 改为 `ImageView` 并随包携带产品默认"花环水獭"本地静态形象（`res/drawable-nodpi/nuanban_pet_preview.png`，资源只进独立源集，普通包不携带）；两包同时同步了最新共享 UI（14 个文件，含 Lili/Lumi 资源）。打包隔离校验 **89/89**（新增"普通包无形象资源/独立包有形象资源"两项）。
+> **同批 Android 包（2026-10-23 21:24 最终发布，从 HEAD `9dfa22e` 干净构建）：** 独立桌宠包修复"打开桌宠只有'微光指引'四个字、没有形象"——悬浮层由 `TextView` 改为 `ImageView` 并随包携带产品默认"花环水獭"本地静态形象（`res/drawable-nodpi/nuanban_pet_preview.png`，只进独立源集，普通包不携带）；两包同时恢复 WebView 宿主能力：`onShowFileChooser`（系统文件选择器，零权限）与系统 `TextToSpeech` 注入的 `speechSynthesis` 垫片（无网络、无麦克风，引擎不可用时保持降级）；并纳入已提交的 Lili/Lumi 模型与最新共享 UI。
 >
-> **来源与可复现性说明：** 这一对 APK 由并行同事在含**未提交改动**的工作区中构建（其 Android 形象修复当时未提交 git；共享 UI 里含 Codex 的 Lili/Lumi 未提交改动），因此**无法仅凭 HEAD 精确复现**；且 debug 签名包含构建时间戳，**每次重编哈希都会变化**（21:11 本地重编即为 `b14803ed…/3b196f0a…`，与线上这对不同）。上表记录的是**线上实际文件**的哈希与大小。两包仍为 debug、未做真机安装/悬浮窗/麦克风验收（`deviceVerified=false`）。
+> **来源与可复现性说明：** 这一对由**已提交的 HEAD `9dfa22e`** 在独立干净工作树中构建（`pnpm android:sync` + `check-standalone-packaging.ps1`），不含任何未提交改动，可从该 commit 重建；debug 签名含构建时间戳，**每次重编哈希都会变化**，但包内容一致。上表记录的是**线上实际文件**的哈希与大小。两包仍为 debug、未做真机安装/悬浮窗/麦克风验收（`deviceVerified=false`）。
 >
 > **Android 能力边界（未变）：** 管理页没有模型通道（无 `nuanbanTextQuestion`/`nuanbanImageQuestion` 桥），图片问答与文字 AI 不可用；听写/麦克风按权限边界保持关闭（无 `RECORD_AUDIO`）。要让 Android 接入真实模型需要"受控会话接入"（服务端会话/设备绑定 + Android 原生加密存储 + 桥接，令牌不进 JS），属独立立项。
 
@@ -184,21 +184,21 @@ node scripts/check-d03-candidate.mjs
 
 > 本文件记录的是 2026-10-22 这一次构建的产物；重新构建后路径/大小/哈希都会变化，需要重新生成 `SHA256SUMS.txt` 与本说明。若产物内容或版本变化，本文件的“未签名、未真机验收、不是正式发布”结论必须重新评估。
 
-## 10. Android 构建产物（冻结版：2026-10-23 21:10 线上发布，debug 包）
+## 10. Android 构建产物（冻结版：2026-10-23 21:24 线上发布，debug 包）
 
-> 冻结版为 **2026-10-23 21:10 通过一次性上传通道发布到试验服务器的那一对**；下表大小与哈希记录的是**线上实际文件**。**debug 签名、未做 release 签名、未做真机验收**，与第 1 节的“未签名/未验收”边界一致。
+> 冻结版为 **2026-10-23 21:24 通过一次性上传通道发布到试验服务器的那一对**（从 HEAD `9dfa22e` 干净构建）；下表大小与哈希记录的是**线上实际文件**。**debug 签名、未做 release 签名、未做真机验收**。此前 21:10 发布的一对（`5ae96273…` / `1428ceb8…`）不含已提交的 WebView 宿主修复（文件选择器/TTS），已被本版取代。
 
 | 产物 | 绝对路径 | 大小 | SHA256 | 变体 |
 | --- | --- | --- | --- | --- |
-| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 7,570,810 字节（7.22 MiB） | `5AE9627325135EFB74281DAE8DDA2883C97355DAE924BE109E66AEC9817545F9` | debug，包名 `org.nuanban.assistant` |
-| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 90,449,913 字节（86.26 MiB） | `1428CEB8C6A021D212B7789BFFB7E3E3897F465476AFBD1ED9249DB6B042E6DB` | debug，包名 `org.nuanban.assistant.standalone` |
+| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 7,299,930 字节（6.962 MiB） | `1EDBB6B70FA5FE70BD69E41D2565D57AF1845116994D773A5A75916424F9517B` | debug，包名 `org.nuanban.assistant` |
+| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 90,449,909 字节（86.260 MiB） | `0B5B0E3DAF440B27A9FB6B4E09A08C3006995555883718CE3E48AB9A0EA3449C` | debug，包名 `org.nuanban.assistant.standalone` |
 
 - 构建来源（2026-10-23）：`node scripts/sync-android.mjs` 把 `apps/web/dist`（2026-10-23 20:54 构建，14 个文件，含 Lili/Lumi 资源）同步到 `app/src/main/assets/ui`；随后离线执行 `apps/android/check-standalone-packaging.ps1` 重编 `:app` 与 `:standalone` 并做打包隔离校验（`BUILD SUCCESSFUL in 39s`）。构建完成后未再改动 APK。
 - 两者均通过 `apksigner verify`（v2 scheme）与 `zipalign -c 4`；签名证书为构建机 `~/.android/debug.keystore` 的 Android Debug 证书，不能用于正式分发。
-- 共享 UI：构建时使用的 `assets/ui` 快照共 **14 个文件**（含 Lili/Lumi 资源；`index.html` 引用 `assets/index-DZjAi1Wj.js`、`assets/index-CeTjnOdW.css`），该快照仍保存在 `apps/android/app/src/main/assets/ui`，可离线复核。注意：2026-10-23 21:11 本地另有一次重编，注入了更新的未提交共享 UI（`assets/index-BWNOxrR6.js` 等），**不属于本冻结版**。
+- 共享 UI：构建时使用的 `assets/ui` 快照共 **14 个文件**（含 Lili/Lumi 资源；`index.html` 引用 `assets/index-BWNOxrR6.js`、`assets/index-CeTjnOdW.css`），已逐文件与同批 `apps/web/dist` 比对一致（0 缺失 / 0 多余 / 0 不一致），`onTarget`/`assets/ui` 与两包内嵌资源同源。
 - **真机验收条件不具备**：无真机/模拟器连接，未安装、未抓屏、未录音、未调用云服务；通知、精确闹钟、悬浮窗、MediaProjection 前台服务、OCR/后台提醒均未验证。构建成功不等于真机可用。
 - 距可发布仍缺：release 签名与 release 构建（无 signingConfigs/minify/AAB）、版本号仍为 demo/validation、商店政策与隐私合规、standalone 86.26 MiB 体积优化。
 - 与桌面端相同：**不要把 APK 提交到 git**（`build/` 已被忽略）。2026-10-23 已通过一次性上传通道发布到 `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` 与 `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk`，服务器端逐个校验 SHA256 一致。
 - 打包隔离校验（`apps/android/check-standalone-packaging.ps1`）通过 **89/89**：普通包不含 `INTERNET`/悬浮窗/前台服务/采屏权限与 nativehost 类，独立包含全部相关权限与 6 个组件，独立包 39 个 OCR/人脸模型资产指纹与 `AndroidScreenPolicy.MODEL_FINGERPRINT` 一致，普通包不含桌宠形象资源、独立包含该资源，且不含自动 CCT 传输后端。
-- **冻结说明**：本表冻结版为线上已发布的一对（`5ae96273…` / `1428ceb8…`）。2026-10-23 21:11 本地重编得到 `b14803ed…` / `3b196f0a…`，与线上双包内容不同（含更新的未提交共享 UI），**不是发布版本，不得对外分发**；debug 包每次重编哈希都会变化，冻结后不再重编、不再重新上传。
+- **冻结说明**：本表冻结版为 2026-10-23 21:24 线上发布的一对（`1edbb6b7…` / `0b5b0e3d…`），由 HEAD `9dfa22e` 干净构建；21:10 旧对与 21:11 本地重编对均已作废，不得对外分发。
 - `zipalign -c 4` 与 `apksigner verify` 对两个包均返回 0（v2 scheme，单一 debug 签名者）。
