@@ -751,16 +751,19 @@ describe('C2 advisory microphone signal reporting', () => {
     await expect(result).resolves.toMatchObject({ status: 'complete', text: '把字体调大' });
   });
 
-  it('emits the advisory signal from the polling loop and never from an audio callback', () => {
+  it('queues audio events for the polling loop and emits the advisory signal from there', () => {
     const helper = readFileSync('apps/desktop/wake/windows-local-wake.ps1', 'utf8');
     const loop = helper.slice(helper.indexOf('while ($running)'), helper.indexOf('Start-Sleep -Milliseconds 20'));
-    expect(helper).toContain('add_AudioLevelUpdated');
-    expect(helper).toContain('add_AudioSignalProblemOccurred');
+    // Audio events must be queued for the runspace; a scriptblock delegate would run on the engine thread
+    // and abort the helper on PowerShell 5.1 (field regression: dictation died at 10s with no error event).
+    expect(helper).toContain('-EventName AudioLevelUpdated -SourceIdentifier $levelId');
+    expect(helper).toContain('-EventName AudioSignalProblemOccurred -SourceIdentifier $problemId');
+    expect(helper).not.toContain('add_AudioLevelUpdated(');
+    expect(helper).not.toContain('add_AudioSignalProblemOccurred(');
+    expect(loop).toContain('Get-Event');
     expect(loop).toContain("kind = 'signal'");
-    // audio callbacks may only record state; writing protocol lines from them would interleave stdout
-    for (const match of helper.matchAll(/add_Audio(?:LevelUpdated|SignalProblemOccurred)\(\{([^}]*)\}/g)) {
-      expect(match[1]).not.toContain('Write-ProtocolEvent');
-    }
     expect(loop).toContain('$script:SignalNextEmitAt');
+    expect(loop).toContain('Remove-Event -EventIdentifier $signalEvent.EventIdentifier');
+    expect(helper).toContain('foreach ($sourceIdentifier in @($recognitionId, $completionId, $levelId, $problemId))');
   });
 });

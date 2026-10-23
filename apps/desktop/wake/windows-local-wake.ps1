@@ -3,8 +3,10 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $script:ProtocolToken = $null
 $script:ProtocolGeneration = 0
-# C2: advisory microphone signal state. Audio callbacks only write these variables; the main polling
-# loop emits throttled `signal` events, so protocol lines stay single-threaded and never interleave.
+# C2: advisory microphone signal state. Audio events are queued with Register-ObjectEvent and drained by
+# the main polling loop; they are never executed as cross-thread scriptblock delegates, which aborts the
+# engine on PowerShell 5.1 (field regression reproduced with the packaged helper). The loop emits the
+# throttled `signal` event so protocol lines stay single-threaded.
 $script:SignalLevel = 0
 $script:SignalProblem = ''
 $script:SignalEmittedLevel = -1
@@ -124,18 +126,19 @@ try {
     } elseif ($null -ne $request.mode) { throw 'wake_request_invalid' }
     $recognitionId = 'nuanban-recognized-' + $script:ProtocolToken
     $completionId = 'nuanban-completed-' + $script:ProtocolToken
+    $levelId = 'nuanban-level-' + $script:ProtocolToken
+    $problemId = 'nuanban-problem-' + $script:ProtocolToken
     [void](Register-ObjectEvent -InputObject $engine -EventName SpeechRecognized -SourceIdentifier $recognitionId)
     [void](Register-ObjectEvent -InputObject $engine -EventName RecognizeCompleted -SourceIdentifier $completionId)
+    [void](Register-ObjectEvent -InputObject $engine -EventName AudioLevelUpdated -SourceIdentifier $levelId)
+    [void](Register-ObjectEvent -InputObject $engine -EventName AudioSignalProblemOccurred -SourceIdentifier $problemId)
+    $script:SignalEmittedLevel = -1
+    $script:SignalEmittedProblem = ''
+    $script:SignalNextEmitAt = [DateTime]::MinValue
     try { $engine.SetInputToDefaultAudioDevice() } catch {
       if ($_.Exception.ToString().Contains('0x80070005') -or $_.Exception -is [UnauthorizedAccessException] -or $_.Exception.InnerException -is [UnauthorizedAccessException]) { throw 'wake_microphone_access_denied' }
       throw 'wake_microphone_unavailable'
     }
-    # C2: observe input level and signal problems. Callbacks must not write to stdout.
-    $engine.add_AudioLevelUpdated({ param($sender, $eventArgs) $script:SignalLevel = [int]$eventArgs.AudioLevel })
-    $engine.add_AudioSignalProblemOccurred({ param($sender, $eventArgs) $script:SignalProblem = [string]$eventArgs.AudioSignalProblem })
-    $script:SignalEmittedLevel = -1
-    $script:SignalEmittedProblem = ''
-    $script:SignalNextEmitAt = [DateTime]::MinValue
     try {
       if ($request.mode -eq 'dictation') {
         $engine.InitialSilenceTimeout = [TimeSpan]::FromSeconds(10)
@@ -203,6 +206,17 @@ try {
       }
       $recognition = $null
       $queuedEvents = $null
+      $signalEvents = @(Get-Event -ErrorAction SilentlyContinue | Where-Object { $_.SourceIdentifier -eq $levelId -or $_.SourceIdentifier -eq $problemId })
+      if ($signalEvents.Count -gt 0) {
+        if ($signalEvents.Count -gt 256) { throw 'wake_event_limit' }
+        foreach ($signalEvent in $signalEvents) {
+          try {
+            if ($signalEvent.SourceIdentifier -eq $levelId) { $script:SignalLevel = [int]$signalEvent.SourceEventArgs.AudioLevel }
+            else { $script:SignalProblem = [string]$signalEvent.SourceEventArgs.AudioSignalProblem }
+          } finally { Remove-Event -EventIdentifier $signalEvent.EventIdentifier -ErrorAction SilentlyContinue }
+        }
+      }
+      $signalEvents = $null
       $now = [DateTime]::UtcNow
       if ($now -ge $script:SignalNextEmitAt) {
         $problem = $script:SignalProblem
@@ -226,7 +240,7 @@ try {
   try { Write-ProtocolEvent @{ kind = 'error'; reason = $reason } } catch {}
   $resultCode = 2
 } finally {
-  foreach ($sourceIdentifier in @($recognitionId, $completionId)) {
+  foreach ($sourceIdentifier in @($recognitionId, $completionId, $levelId, $problemId)) {
     if ($null -ne $sourceIdentifier) {
       Unregister-Event -SourceIdentifier $sourceIdentifier -ErrorAction SilentlyContinue
       Get-Event -SourceIdentifier $sourceIdentifier -ErrorAction SilentlyContinue | Remove-Event -ErrorAction SilentlyContinue
