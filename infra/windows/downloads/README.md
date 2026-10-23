@@ -1,5 +1,8 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-23 r13：** 在 r12 的单帧 `TIMEOUT` 修复（provider 60s / 单帧 90s / 上传降采样 + 坐标还原 / 错误码中文提示）之上，纳入当日晚些时候提交的 `a8ece51`（本地语音听写在不确定时不执行）。仍从**独立干净工作树**构建（HEAD `63fc4bb`），与 r12 的 zip 条目逐项比对只有 `resources/app.asar`（+2,616 字节）与解包脚本 `wake/windows-local-wake.ps1`（+1,291 字节）变化，无新增/删除文件；发布前跑完 15 个相关测试文件 **1112/1112 通过**。r12 已被 r13 取代并从下载目录移除。
+
+
 > **2026-10-23 r12：** 修复单帧图片指引报 `Error: TIMEOUT`：桌面提供方默认超时 45s→60s（`ai-provider.json` 可用 `timeoutMs` 下调，环境变量 `NUANBAN_AI_TIMEOUT_MS` 同样生效），单帧流程超时窗口 50s→90s，单帧上传复用连续模式的图片降采样（超过约 1.4 MB 时发送缩放副本，并把模型返回的缩放坐标按原图比例还原后再本机核验），`TIMEOUT`/`PROVIDER_UNAVAILABLE` 等错误码改为中文提示，不再透传原始错误。
 >
 > 本包在**独立干净工作树**（HEAD `322ac84` + 本次桌面修复）中构建：与 r11 的 zip 条目逐项比对只有 `resources/app.asar` 变化（-6,168 字节），确认没有把仓库里其他未提交的语音/唤醒 WIP 打进包。验证：桌面相关测试 984/984、`tsc --noEmit` 0、打包校验 `matches: true`、ASAR 内含 `analysis-image.cjs`、`mapProviderFailure`、`timeoutMs = 90_000`、provider 默认 60000。旧 r11 包已从下载目录移除。
@@ -50,7 +53,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r12.zip` | 182,095,025 字节（173.652 MiB） | `96301952ef770e5aee31870e670911f4c44fb4b07806e5af0679960b2a9caa4b` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip` | 182,094,500 字节（173.652 MiB） | `3b28b4f3f9c59670b371890b7b1babcbfb5b0bcb7db3d4a6c7dadfa8b540d736` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -95,7 +98,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r12.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -159,11 +162,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r12.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r12.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
