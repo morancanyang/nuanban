@@ -59,10 +59,22 @@ C01 的独立 `native-lab` 模块（`org.nuanban.nativelab`）保留为隔离实
   - 新增静态回归断言（`tests/platform/android-standalone-runtime.test.ts`）：要求文件选择器/TTS 垫片存在，且 `MainActivity` 不得出现 `RECORD_AUDIO`/`CAMERA`/`SpeechRecognizer`/`getUserMedia`/`MediaRecorder`。
 - 仍未解决（**产品边界缺口，不是 WebView 缺陷**，不能按“已修复”对外说明）：
   - 图片“上传给模型”仍不可用：图片问答端口只接受 Windows 桌面 IPC（`window.nuanbanImageQuestion`）。文件选择器修好后可选图、预览并明确提示“当前没有可用的桌面图片接口”，但**不会上传、也不会假装识别**。
-  - 语音听写仍不可用：Android 两包均不声明 `RECORD_AUDIO`/`CAMERA`（官方打包隔离校验与测试明令禁止），要开麦克风必须改产品权限边界、安全策略与验收范围。
+  - 语音听写当时仍不可用：普通包继续不声明 `RECORD_AUDIO`/`CAMERA`；独立桌宠包已按所有者决策在下一节（C）新增 `RECORD_AUDIO`，只使用系统离线识别，仍需真机验收。
   - 文字 AI 同样未接入 Android：共享 UI 为 local 模式且无 `nuanbanTextQuestion` 桥；要同 Windows 能力需接服务端受控设备会话（见上一节模型说明）。
 - 构建与验证：`apps/android/check-standalone-packaging.ps1`（离线）`BUILD SUCCESSFUL in 1m 5s`，打包隔离 **89/89** 通过；`zipalign -c 4`、`apksigner verify`（v2、debug 证书）通过；新增 vitest 断言通过；TTS 垫片在 Node 模拟 `window`/host 下验证可用性、speak/语速、cancel、onend、onerror、引擎未就绪时 `undefined` 六条语义。
 - 产物（debug、未签名发布版；与上一节尺寸/哈希不同是因为本次构建含本节宿主改动）：
   - `app/build/outputs/apk/debug/app-debug.apk`：7,570,810 字节（7.22 MiB），SHA256 `B14803EDDBECE1AD73735D2F6AD84882CA2FA8173CB36EA4D62E4753EDA8609F`。
   - `standalone/build/outputs/apk/debug/standalone-debug.apk`：90,481,515 字节（86.29 MiB），SHA256 `3B196F0AD7FEC45D03708E243D4A884822E276459D84C1BC2F55B6261F8FE53D`。
 - 未做：没有连接真机/模拟器，**未安装、未点击真实文件选择器、未播放真实 TTS**，`deviceVerified=false`；上述宿主修复只证明可编译、DEX/权限隔离与 JS 垫片语义，真实机型文件选择器行为、TTS 引擎可用性与朗读音质仍需真机验收。C17/验收门禁指纹因 `MainActivity.kt` 变更需按仓库流程重跑后再作为证据。
+
+## 2026-10-23 独立包本地听写（C，所有者决策后实施）
+
+- 决策：所有者选择 **C**（额外开放麦克风听写），同时明确**普通管理包保持无网络**、**Android 图片问答暂不做**；配对方式为“桌面显示一次性配对码”（另见 `docs/implementation/android-model-and-3d-plan.md`）。
+- 权限边界改动（仅独立桌宠包）：`standalone/src/main/AndroidManifest.xml` 新增 `RECORD_AUDIO`；**普通包继续不声明** `RECORD_AUDIO`/`CAMERA`。打包隔离校验相应改为 `normal_no_RECORD_AUDIO` + `standalone_has_RECORD_AUDIO`，并新增 4 条 DEX 断言：普通包不得含听写桥 `nuanbanVoiceHost`、不得含 `Landroid/speech/SpeechRecognizer;`，独立包必须同时包含两者；另有 `AndroidLocalDictation` 类级别的普通包排除/独立包包含断言。
+- 实现（`app/src/standalone/.../AndroidLocalDictation.kt`，仅独立源集编译）：
+  - 只用系统**离线**识别（`createOnDeviceSpeechRecognizer`，API 31+；API 33+ 先查 `isOnDeviceRecognitionAvailable`）；不可用时明确报不可用，**不回退云端识别、不假装成功**。
+  - 低置信度策略与 Windows 端一致：阈值 `0.6`，置信度缺失或低于阈值 → `uncertain`，**不携带文本**、不写入草稿、不进入模型、不执行动作，只提示重说；`tests/domain/speech.test.ts` 新增 4 项断言固化该契约（`uncertain` 的文本被丢弃、`microphoneActive` 必须为 false）。
+  - 麦克风只在本人点击“开始语音输入”后开启，一次一句话，结束立即关闭；20 秒超时；文本上限 500 字；不使用常驻唤醒监听。
+  - 桥接：`WebViewCompat.addWebMessageListener`（名字 `nuanbanVoiceHost`，origin 限定 `https://appassets.androidplatform.net`，仅主框架、payload ≤4096）暴露 `status`/`dictate`/`cancelDictation`/`enable`/`disable`/`openSettings`；`localOnly: true`、结束后 `microphoneActive: false`；音频仅本机处理，不上传不保存。
+- 验证：`tests/domain/speech.test.ts` + `tests/platform/android-standalone-runtime.test.ts` **19/19 通过**；`:standalone:compileDebugKotlin` **BUILD SUCCESSFUL**（需 `JAVA_HOME=<Android Studio jbr>` 与 `ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk`）。
+- 未做/待办：**未做真机验收**（无设备/AVD，未申请真实麦克风权限、未跑真实离线识别），`deviceVerified=false`；完整的 `check-standalone-packaging.ps1` 重编校验待 3D 工作流落地后统一复跑（用例数将由 89 上升）；权限边界变更使 C17/验收类门禁指纹需按仓库流程重跑。

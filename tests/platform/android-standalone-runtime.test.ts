@@ -43,7 +43,7 @@ describe('Android 独立桌宠原生安全闭环', () => {
     expect(result).toMatchObject({ deviceVerified: false, captureExecuted: false, cloudExecuted: false });
   }, 120_000);
 
-  it('分离 specialUse 驻留与 mediaProjection 捕获，不申请麦克风、无障碍或开机自启', () => {
+  it('分离 specialUse 驻留与 mediaProjection 捕获，麦克风仅独立包本地听写，无无障碍/开机自启', () => {
     const manifest = readAndroid('standalone/src/main/AndroidManifest.xml');
     const petService = manifest.match(/<service\b[^>]*android:name="\.nativehost\.PetRuntimeService"[^>]*>/)?.[0];
     const captureService = manifest.match(/<service\b[^>]*android:name="\.nativehost\.NativeCaptureService"[^>]*>/)?.[0];
@@ -54,7 +54,8 @@ describe('Android 独立桌宠原生安全闭环', () => {
     expect(captureService).toContain('android:stopWithTask="false"');
     expect(manifest).toContain('android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE');
     expect(manifest).toContain('android:name=".nativehost.PetControlActivity" android:exported="true"');
-    expect(manifest).not.toMatch(/RECORD_AUDIO|BIND_ACCESSIBILITY_SERVICE|AccessibilityService|RECEIVE_BOOT_COMPLETED/);
+    expect(manifest).toContain('android:name="android.permission.RECORD_AUDIO"');
+    expect(manifest).not.toMatch(/CAMERA|BIND_ACCESSIBILITY_SERVICE|AccessibilityService|RECEIVE_BOOT_COMPLETED/);
   });
 
   it('普通 app 恢复原权限与入口，并在源集层面不编译独立桌宠和捕获实现', () => {
@@ -65,6 +66,7 @@ describe('Android 独立桌宠原生安全闭环', () => {
     expect([...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(match => match[1]).sort()).toEqual([
       'android.permission.POST_NOTIFICATIONS', 'android.permission.SCHEDULE_EXACT_ALARM',
     ]);
+    expect(manifest).not.toContain('RECORD_AUDIO');
     expect(manifest).toContain('android:name=".MainActivity" android:exported="true"');
     expect(manifest).not.toMatch(/PetRuntimeService|NativeCaptureService|PetControlActivity|mediaProjection|specialUse/);
     expect(build).toContain('src/normal/java');

@@ -64,10 +64,17 @@ foreach ($permission in @('INTERNET', 'SYSTEM_ALERT_WINDOW', 'HIDE_OVERLAY_WINDO
     Assert-Case ('normal_no_' + $permission) (-not $normalPermissions.Contains("'android.permission." + $permission + "'"))
     Assert-Case ('standalone_has_' + $permission) ($standalonePermissions.Contains("'android.permission." + $permission + "'"))
 }
-foreach ($permission in @('RECORD_AUDIO', 'CAMERA', 'BIND_ACCESSIBILITY_SERVICE', 'RECEIVE_BOOT_COMPLETED')) {
+# C：本地听写麦克风权限仅独立包允许；相机/无障碍/开机自启两包均禁止。
+Assert-Case 'normal_no_RECORD_AUDIO' (-not $normalPermissions.Contains("'android.permission.RECORD_AUDIO'"))
+Assert-Case 'standalone_has_RECORD_AUDIO' ($standalonePermissions.Contains("'android.permission.RECORD_AUDIO'"))
+foreach ($permission in @('CAMERA', 'BIND_ACCESSIBILITY_SERVICE', 'RECEIVE_BOOT_COMPLETED')) {
     Assert-Case ('normal_no_' + $permission) (-not $normalPermissions.Contains("'android.permission." + $permission + "'"))
     Assert-Case ('standalone_no_' + $permission) (-not $standalonePermissions.Contains("'android.permission." + $permission + "'"))
 }
+Assert-Case 'normal_dex_excludes_local_dictation_bridge' (-not $normalDex.Contains('nuanbanVoiceHost'))
+Assert-Case 'standalone_dex_contains_local_dictation_bridge' ($standaloneDex.Contains('nuanbanVoiceHost'))
+Assert-Case 'standalone_dex_uses_speech_recognizer' ($standaloneDex.Contains('Landroid/speech/SpeechRecognizer;'))
+Assert-Case 'normal_dex_excludes_speech_recognizer' (-not $normalDex.Contains('Landroid/speech/SpeechRecognizer;'))
 Assert-Case 'normal_original_application_id' ($normalBadging.Contains("package: name='org.nuanban.assistant'"))
 Assert-Case 'standalone_separate_application_id' ($standaloneBadging.Contains("package: name='org.nuanban.assistant.standalone'"))
 Assert-Case 'normal_original_launcher' ($normalBadging.Contains("launchable-activity: name='org.nuanban.assistant.MainActivity'"))
@@ -76,7 +83,7 @@ foreach ($component in @('PetRuntimeService', 'NativeCaptureService', 'PetContro
     Assert-Case ('normal_manifest_excludes_' + $component) (-not $normalManifest.Contains('org.nuanban.assistant.nativehost.' + $component))
     Assert-Case ('standalone_manifest_registers_' + $component) ($standaloneManifest.Contains('org.nuanban.assistant.nativehost.' + $component))
 }
-foreach ($className in @('PetRuntimeService', 'NativeCaptureService', 'PetControlActivity', 'NativeCaptureControlActivity', 'PetRuntime', 'PetSessions', 'PetManagementBoundary', 'CaptureSession', 'LocalFrameGate', 'NativeCaptureRuntime', 'AndroidLocalScreenDetector', 'AndroidScreenPolicy', 'AndroidTeachingState', 'AndroidGuidanceRuntime', 'AndroidGuidanceAdapter', 'AndroidGuidanceOverlay', 'AndroidGuidanceConnection', 'StandaloneGuidanceProtocol', 'StandaloneGuidanceClient', 'AndroidCaptureGeometry')) {
+foreach ($className in @('PetRuntimeService', 'NativeCaptureService', 'PetControlActivity', 'NativeCaptureControlActivity', 'PetRuntime', 'PetSessions', 'PetManagementBoundary', 'CaptureSession', 'LocalFrameGate', 'NativeCaptureRuntime', 'AndroidLocalScreenDetector', 'AndroidScreenPolicy', 'AndroidTeachingState', 'AndroidGuidanceRuntime', 'AndroidGuidanceAdapter', 'AndroidGuidanceOverlay', 'AndroidGuidanceConnection', 'StandaloneGuidanceProtocol', 'StandaloneGuidanceClient', 'AndroidCaptureGeometry', 'AndroidLocalDictation')) {
     $descriptor = 'Lorg/nuanban/assistant/nativehost/' + $className + ';'
     Assert-Case ('normal_dex_excludes_' + $className) (-not $normalDex.Contains($descriptor))
     Assert-Case ('standalone_dex_contains_' + $className) ($standaloneDex.Contains($descriptor))

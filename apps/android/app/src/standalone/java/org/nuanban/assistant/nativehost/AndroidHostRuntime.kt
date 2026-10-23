@@ -21,6 +21,8 @@ object AndroidHostRuntime {
             setOnClickListener { activity.startActivity(Intent(activity, PetControlActivity::class.java)) }
         })
         management.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        // C：仅独立包为共享管理页接本地听写桥；普通包没有此文件/权限，保持无麦克风能力。
+        AndroidLocalDictation.attach(activity, content)
         return management
     }
 
