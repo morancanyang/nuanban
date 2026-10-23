@@ -1,5 +1,8 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-23 r17：** 修复"模型只认文字、认不出图标，浏览器入口报未识别"。两处断点：① 本机控件词表里没有任何应用名，OCR 读到的 `Google Chrome` / `Microsoft Edge` / `浏览器` 被当成未知正文整条丢弃；② 无文字图标的候选要求四周接近纯色（`flatSurround`），壁纸上的桌面快捷方式因此全部被否掉。现在词表加入浏览器、微信/QQ/钉钉、Office/WPS、记事本/计算器/任务管理器等常见应用与入口名，并参与桌面场景判定；视觉候选新增"图标网格"通道，只有与同列、同尺寸量级、间距像图标网格的邻居成对出现时才接受，照片纹理仍被拒绝。提示词同时要求模型优先使用 `surface=visual` / 应用名条目按位置指引，不再直接回答"识别范围有限"。构建来自独立干净工作树（HEAD `8e088e4`），`tsc --noEmit` 退出 0，相关测试 424/424（9 个文件）通过；包内已确认含新词表、网格候选与提示词。Android 两包与最新 Web 产物仍逐文件一致（14/14），未重出。旧 r16 包已从下载目录移除。
+
+
 > **2026-10-23 r16：** 在 r15 之后落地的提交一并打包，并修复"截图/录屏拍不到桌宠和界面"。内容：`5e15bc9`（Lili 小鹿模型，包内 `ui/models/lili/Lili_Independent_Deer.glb` 等 3 个资源）、`9dfa22e`/`77516be`（Android WebView 文件选择、本地 TTS 与内置形象）、`89fa899`（模型网关可恢复失败的有界重试）以及本次 `731b2fd`：Windows `setContentProtection` 会经 `SetWindowDisplayAffinity` 把窗口排除出截图/录屏，旧默认只有启动参数才可见，直接运行 `nuanban.exe` 时桌宠与管理界面会从 Snipping Tool / Game Bar / OBS 里消失。新的 `capture-visibility.cjs` 让桌宠、工具小屋、语音气泡与管理界面**默认可被截图和录屏捕获**，屏幕观察/单帧采集活动时自动恢复保护；`--protect-pet`/`--protect-client`/`--protect-display` 保留旧行为，字幕与指引箭头仍始终保护。构建来自独立干净工作树（HEAD `731b2fd`），r15→r16 的 zip 条目差异为 `resources/app.asar` 与新增的 Lili 资源；相关测试 619/619（17 个文件）通过。Android 两包与最新 Web 产物逐文件一致（14/14，含 Lili 与 Lumi），未重出，哈希保持不变。旧 r15 包已从下载目录移除。
 
 
@@ -68,7 +71,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip` | 184,256,921 字节（175.721 MiB） | `89c5b670d24812b7aff4e85b1444cb476e151f745cd8100f74f840eb04b1204e` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip` | 184,258,378 字节（175.722 MiB） | `1fc9ac0cde1a3baff3ea7c922ef70d240f44ff04b2e3eb1d45fd527d01420322` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -113,7 +116,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -177,11 +180,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r16.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r17.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
