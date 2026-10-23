@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>微光指引 · 独立桌宠实时形象</title>
+  <!--
+    页面只加载本 APK assets/pet3d 下的文件（由 Pet3dWebView 拦截合成 https 源提供），不含任何外部 URL。
+    three 与 GLTFLoader 与桌面端同版本（three 0.186.1），模型为与桌面端同摘要的随包 GLB。
+  -->
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; background: transparent; pointer-events: none; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "./viewer/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="pet3d-stage"></canvas>
+  <script type="module" src="./viewer/pet3d-viewer.js"></script>
+</body>
+</html>
