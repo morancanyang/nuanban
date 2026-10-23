@@ -41,6 +41,12 @@ describe('本次本地听写的可信 IPC 与发起窗口生命周期（不启�
     expect(() => current.invoke('dictate', current.event, { purpose: 'other', observationGeneration: 3 })).toThrow('本人');
   });
 
+  it('低置信听写只返回无文字状态，不能把猜测内容投递给网页', async () => {
+    const current = fixture();
+    current.host.requestVoiceDictation.mockResolvedValueOnce({ status: 'uncertain', localOnly: true, microphoneActive: false, text: '猜测的文字' });
+    await expect(current.invoke('dictate')).resolves.toEqual({ status: 'uncertain', localOnly: true, microphoneActive: false });
+  });
+
   it('拒绝不可信窗口、附加授权参数和缺失宿主', async () => {
     const current = fixture();
     expect(() => current.invoke('dictate', {})).toThrow('不可信');
@@ -107,8 +113,9 @@ describe('前端听写结果校验', () => {
   it('剔除额外字段，不把取消后的文本当作输入', () => {
     expect(checkedDictationResult({ ...complete, audio: 'discard' })).toEqual(complete);
     expect(checkedDictationResult({ ...complete, status: 'cancelled' })).toEqual({ status: 'cancelled', localOnly: true });
+    expect(checkedDictationResult({ status: 'uncertain', localOnly: true, microphoneActive: false, text: 'discard' })).toEqual({ status: 'uncertain', localOnly: true, microphoneActive: false });
   });
-  it.each([null, {}, { ...complete, microphoneActive: true }, { ...complete, localOnly: false }, { ...complete, text: ' ' }, { ...complete, text: '字'.repeat(501) }])('拒绝未确认结果 %j', result => {
+  it.each([null, {}, { ...complete, microphoneActive: true }, { status: 'uncertain', localOnly: true, microphoneActive: true }, { ...complete, localOnly: false }, { ...complete, text: ' ' }, { ...complete, text: '字'.repeat(501) }])('拒绝未确认结果 %j', result => {
     expect(() => checkedDictationResult(result)).toThrow('未确认');
   });
 });

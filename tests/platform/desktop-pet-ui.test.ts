@@ -892,6 +892,31 @@ describe('桌宠直接语音输入草稿（合成识别，不开启麦克风）'
     expect(harness.bridge.command).not.toHaveBeenCalled();
   });
 
+  it('低置信听写不填入草稿、不发送，并明确提示重说', async () => {
+    const harness = petHarness();
+    await settle();
+    harness.input('保留的手写草稿');
+    harness.bridge.dictate.mockResolvedValueOnce({ status: 'uncertain', localOnly: true, microphoneActive: false });
+    harness.click('start-dictation');
+    await settle();
+    expect(harness.element('question').value).toBe('保留的手写草稿');
+    expect(harness.element('dictation-result').hidden).toBe(true);
+    expect(harness.element('dictation-status').textContent).toContain('没有听清');
+    expect(harness.bridge.ask).not.toHaveBeenCalled();
+  });
+
+  it('未确认停麦的低置信结果不显示重说提示', async () => {
+    const harness = petHarness();
+    await settle();
+    harness.bridge.dictate.mockResolvedValueOnce({ status: 'uncertain', localOnly: true, microphoneActive: true });
+    harness.click('start-dictation');
+    await settle();
+    expect(harness.element('question').value).toBe('');
+    expect(harness.element('dictation-status').textContent).not.toContain('没有听清');
+    expect(harness.element('error-text').textContent).toContain('未确认');
+    expect(harness.bridge.ask).not.toHaveBeenCalled();
+  });
+
   it('发送听写草稿后不再提示待发送，并可定位到真实最近问答', async () => {
     const harness = petHarness();
     await settle();
@@ -1422,6 +1447,18 @@ describe('已授权屏幕上的语音查找（合成识别，不读取真实屏�
     await settle();
     expect(harness.bridge.ask).not.toHaveBeenCalled();
     expect(harness.element('dictation-status').textContent).toContain('没有发送文字或屏幕画面');
+  });
+
+  it('低置信语音查找不发送问题或屏幕画面', async () => {
+    const harness = petHarness(snapshot({ state: 'observing', captureActive: true, cloudConsent: true, generation: 2 }));
+    await settle();
+    harness.click('feature-guidance');
+    harness.bridge.dictate.mockResolvedValueOnce({ status: 'uncertain', localOnly: true, microphoneActive: false });
+    harness.click('screen-voice-find');
+    await settle();
+    expect(harness.bridge.ask).not.toHaveBeenCalled();
+    expect(harness.element('dictation-result').hidden).toBe(true);
+    expect(harness.element('dictation-status').textContent).toContain('没有听清');
   });
 });
 

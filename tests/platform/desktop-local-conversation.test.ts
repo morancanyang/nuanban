@@ -34,7 +34,8 @@ function fixture() {
   conversations.push(conversation);
   const start = async () => { await conversation.probe(); await conversation.start({ actor: 'owner', confirmed: true }); };
   const say = (text: string) => deliver!({ status: 'complete', text, localOnly: true, microphoneActive: false });
-  return { conversation, input, speech, provider, events, onError, start, say, failInput: (error: unknown) => rejectInput!(error) };
+  const sayUncertain = () => deliver!({ status: 'uncertain', localOnly: true, microphoneActive: false });
+  return { conversation, input, speech, provider, events, onError, start, say, sayUncertain, failInput: (error: unknown) => rejectInput!(error) };
 }
 
 afterEach(async () => { for (const conversation of conversations.splice(0)) await conversation.stop(); });
@@ -59,6 +60,18 @@ describe('无需新增实时语音账号的本地对话（合成识别与声音�
     expect(current.speech.speak).toHaveBeenCalledExactlyOnceWith('很高兴听你分享，今天有什么开心的事？', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(current.input.disable.mock.invocationCallOrder[0]).toBeLessThan(current.provider.answer.mock.invocationCallOrder[0]);
     expect(current.events.filter(event => event.type === 'transcript').map(event => event.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('低置信听写不显示猜测文字或请求模型，只在本机提示重说', async () => {
+    const current = fixture();
+    await current.start();
+    current.sayUncertain();
+    await vi.waitFor(() => expect(current.input.dictate).toHaveBeenCalledTimes(2));
+    expect(current.provider.answer).not.toHaveBeenCalled();
+    expect(current.events.filter(event => event.type === 'transcript')).toEqual([
+      expect.objectContaining({ role: 'assistant', text: expect.stringContaining('没有听清') }),
+    ]);
+    expect(current.speech.speak).toHaveBeenCalledWith(expect.stringContaining('没有听清'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('复用本次少量上下文，但不携带屏幕、学习记录或录音', async () => {

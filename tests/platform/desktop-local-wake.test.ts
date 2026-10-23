@@ -126,6 +126,16 @@ describe('explicit one-shot local dictation without a wake phrase', () => {
     await expect(result).resolves.toMatchObject({ status: 'complete', text: '本地听写' });
   });
 
+  it('returns an uncertain result without releasing a guessed transcript', async () => {
+    const current = setup({ closeOnStop: false, closeOnKill: false });
+    const result = current.wake.dictate({ actor: 'owner', confirmed: true });
+    current.child().packet({ kind: 'uncertain', questionId: current.child().commands[0].questionId });
+    expect(current.wake.snapshot()).toMatchObject({ state: 'stopping', microphoneActive: true });
+    current.child().close();
+    await expect(result).resolves.toEqual({ status: 'uncertain', localOnly: true, microphoneActive: false });
+    expect(current.onQuestion).not.toHaveBeenCalled();
+  });
+
   it('cancels the lifetime and discards late recognition while awaiting actual shutdown', async () => {
     const current = setup({ closeOnStop: false, closeOnKill: false });
     const controller = new AbortController();
@@ -555,6 +565,11 @@ describe('offline helper source boundaries', () => {
     expect(helper).toContain('$dictation.Enabled = $false');
     expect(helper).toContain('$script:WakePhrases -ccontains $phrase');
     expect(helper).toContain('$recognition.Confidence -lt 0.65');
+    expect(helper).toContain('$recognition.Confidence -lt 0.78');
+    expect(helper).toContain("kind = 'uncertain'");
+    expect(helper).toContain('function Complete-DirectDictation');
+    expect(helper).toContain('[System.Speech.Recognition.RecognizeMode]::Single');
+    expect(helper).toContain('$engine.EndSilenceTimeout');
     expect(helper).toContain('$queuedEvents.Count -gt 16');
     expect(helper).toContain('$text.Length -gt 500');
     expect(helper).toContain('[DateTime]::UtcNow -ge $script:QuestionDeadline');
@@ -570,7 +585,9 @@ describe('offline helper source boundaries', () => {
     const adapter = readFileSync('apps/desktop/wake/windows-local-wake.cjs', 'utf8');
     expect(helper).not.toMatch(/Result\.Audio|WriteToWave|SetInputToWave|FileStream|WriteAll|Out-File|Add-Content|Set-Content|Start-Transcript|Invoke-WebRequest|Invoke-RestMethod|HttpClient|WebClient|SpeechSDK|Start-Process|Write-Host|Write-Output/);
     expect(adapter).not.toMatch(/console\.|node:https|node:http|node:fs|fetch\(|WebSocket|setInterval/);
-    expect(helper.match(/RecognizeAsync\(/g)).toHaveLength(1);
+    expect(helper.match(/RecognizeAsync\(/g)).toHaveLength(2);
+    expect(helper.match(/SetInputToDefaultAudioDevice\(\)/g)).toHaveLength(1);
+    expect(helper).toContain("$request.mode -eq 'dictation'");
     expect(adapter.match(/const child = spawn\(/g)).toHaveLength(1);
   });
 });

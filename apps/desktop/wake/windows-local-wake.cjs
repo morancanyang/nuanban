@@ -107,6 +107,14 @@ function createWindowsLocalWake({ onWake = () => {}, onQuestion = () => {}, onSt
       if (available(operation)) notify(onWake, Object.freeze({ localOnly: true, generation: operation.generation, dictationAvailable: operation.dictationAvailable }));
       return;
     }
+    if (event.kind === 'uncertain') {
+      if (state.state !== 'question' || !operation.questionId || event.questionId !== operation.questionId) return;
+      if (operation.kind === 'dictate') {
+        operation.uncertain = true;
+        void stopOperation(operation);
+      } else resumeWake(operation);
+      return;
+    }
     if (event.kind === 'question') {
       if (state.state !== 'question' || !operation.questionId || event.questionId !== operation.questionId) return;
       if (typeof event.text !== 'string' || event.text.length > 500) { fail(operation, 'wake_question_limit'); return; }
@@ -123,7 +131,7 @@ function createWindowsLocalWake({ onWake = () => {}, onQuestion = () => {}, onSt
   }
 
   function begin(kind, signal) {
-    const operation = { kind, generation: ++generation, token: randomUUID(), child: null, ready: false, intentional: false, failure: null, isClosed: false, dictationAvailable: false, probeResult: null, questionId: null, questionTimer: null, timer: null, stopTimer: null, decoder: new TextDecoder('utf-8', { fatal: true }), pending: '', outputBytes: 0, stderrBytes: 0 };
+    const operation = { kind, generation: ++generation, token: randomUUID(), child: null, ready: false, intentional: false, failure: null, isClosed: false, dictationAvailable: false, uncertain: false, probeResult: null, questionId: null, questionTimer: null, timer: null, stopTimer: null, decoder: new TextDecoder('utf-8', { fatal: true }), pending: '', outputBytes: 0, stderrBytes: 0 };
     operation.transcript = null;
     if (kind === 'dictate') operation.questionId = randomUUID();
     operation.readyPromise = new Promise((resolve, reject) => { operation.resolveReady = resolve; operation.rejectReady = reject; });
@@ -229,7 +237,8 @@ function createWindowsLocalWake({ onWake = () => {}, onQuestion = () => {}, onSt
     const operation = begin('dictate', signal);
     try { await operation.readyPromise; } catch {}
     await operation.closed;
-    if (signal?.aborted || (operation.intentional && !operation.transcript)) return Object.freeze({ status: 'cancelled', localOnly: true, microphoneActive: false });
+    if (signal?.aborted || (operation.intentional && !operation.transcript && !operation.uncertain)) return Object.freeze({ status: 'cancelled', localOnly: true, microphoneActive: false });
+    if (operation.uncertain) return Object.freeze({ status: 'uncertain', localOnly: true, microphoneActive: false });
     if (operation.failure || !operation.transcript) throw wakeError(operation.failure ?? 'wake_engine_failed');
     return Object.freeze({ status: 'complete', text: operation.transcript, localOnly: true, microphoneActive: false });
   }

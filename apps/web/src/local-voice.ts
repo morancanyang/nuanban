@@ -16,12 +16,15 @@ export interface LocalVoiceBridge {
   openSettings(): Promise<boolean>;
 }
 
-export type LocalDictationResult = { status: 'complete'; text: string; localOnly: true; microphoneActive: false } | { status: 'cancelled'; localOnly: true };
+export type LocalDictationResult = { status: 'complete'; text: string; localOnly: true; microphoneActive: false }
+  | { status: 'uncertain'; localOnly: true; microphoneActive: false }
+  | { status: 'cancelled'; localOnly: true };
 
 export function checkedDictationResult(value: unknown): LocalDictationResult {
   if (!value || typeof value !== 'object') throw new Error('本地听写结果未确认');
   const result = value as Record<string, unknown>;
   if (result.localOnly === true && result.status === 'cancelled') return { status: 'cancelled', localOnly: true };
+  if (result.localOnly === true && result.status === 'uncertain' && result.microphoneActive === false) return { status: 'uncertain', localOnly: true, microphoneActive: false };
   if (result.localOnly !== true || result.status !== 'complete' || result.microphoneActive !== false
     || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500) throw new Error('本地听写结果未确认');
   return { status: 'complete', text: result.text.trim(), localOnly: true, microphoneActive: false };

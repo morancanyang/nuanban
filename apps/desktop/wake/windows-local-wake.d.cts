@@ -27,7 +27,11 @@ export interface WindowsLocalWakeOptions {
   dictationTimeoutMs?: number;
   maxOutputBytes?: number;
 }
-export type WindowsLocalDictationResult = Readonly<{ status: 'complete'; text: string; localOnly: true; microphoneActive: false } | { status: 'cancelled'; localOnly: true; microphoneActive: false }>;
+export type WindowsLocalDictationResult = Readonly<
+  | { status: 'complete'; text: string; localOnly: true; microphoneActive: false }
+  | { status: 'uncertain'; localOnly: true; microphoneActive: false }
+  | { status: 'cancelled'; localOnly: true; microphoneActive: false }
+>;
 export function createWindowsLocalWake(options?: WindowsLocalWakeOptions): Readonly<{
   probe(options?: { signal?: AbortSignal }): Promise<WindowsLocalWakeProbe>;
   enable(options: { actor: 'owner'; confirmed: true; signal?: AbortSignal }): Promise<WindowsLocalWakeState>;

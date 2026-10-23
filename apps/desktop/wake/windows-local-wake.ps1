@@ -34,6 +34,21 @@ function Reset-WakeGrammar {
   $script:WakeGrammar.Enabled = $true
 }
 
+function Complete-DirectDictation($Recognition) {
+  $questionId = $script:QuestionId
+  $script:Mode = 'finished'
+  $script:DictationGrammar.Enabled = $false
+  if ($null -eq $Recognition -or $Recognition.Confidence -lt 0.78) {
+    Write-ProtocolEvent @{ kind = 'uncertain'; questionId = $questionId }
+    return
+  }
+  $text = ([string]$Recognition.Text).Trim()
+  if ($text.Length -gt 500) { $text = $text.Substring(0, 500); if ([char]::IsHighSurrogate($text[$text.Length - 1])) { $text = $text.Substring(0, $text.Length - 1) } }
+  if ($text.Length -gt 0) { Write-ProtocolEvent @{ kind = 'question'; questionId = $questionId; text = $text } }
+  else { Write-ProtocolEvent @{ kind = 'uncertain'; questionId = $questionId } }
+  $text = $null
+}
+
 function Invoke-Command($Command) {
   if ($Command.token -cne $script:ProtocolToken -or $Command.generation -ne $script:ProtocolGeneration) { throw 'wake_command_identity_invalid' }
   if ($Command.op -eq 'stop') { return $false }
@@ -107,7 +122,14 @@ try {
       if ($_.Exception.ToString().Contains('0x80070005') -or $_.Exception -is [UnauthorizedAccessException] -or $_.Exception.InnerException -is [UnauthorizedAccessException]) { throw 'wake_microphone_access_denied' }
       throw 'wake_microphone_unavailable'
     }
-    try { $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple) } catch { throw 'wake_recognition_unavailable' }
+    try {
+      if ($request.mode -eq 'dictation') {
+        $engine.InitialSilenceTimeout = [TimeSpan]::FromSeconds(10)
+        $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(1200)
+        $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(1800)
+        $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Single)
+      } else { $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple) }
+    } catch { throw 'wake_recognition_unavailable' }
     Write-ProtocolEvent @{ kind = 'ready'; dictationAvailable = ($null -ne $script:DictationGrammar) }
     $commandBuffer = New-Object byte[] 512
     $commandText = ''
@@ -137,23 +159,31 @@ try {
       if ($queuedEvents.Count -gt 16) { throw 'wake_event_limit' }
       foreach ($queuedEvent in $queuedEvents) {
         try {
-          if ($queuedEvent.SourceIdentifier -eq $completionId) { throw 'wake_recognition_stopped' }
+          if ($queuedEvent.SourceIdentifier -eq $completionId) {
+            if ($request.mode -eq 'dictation' -and $script:Mode -eq 'question') {
+              Complete-DirectDictation $queuedEvent.SourceEventArgs.Result
+              $running = $false
+              continue
+            }
+            throw 'wake_recognition_stopped'
+          }
           $recognition = $queuedEvent.SourceEventArgs.Result
           if ($script:Mode -eq 'wake' -and $recognition.Grammar.Name -ceq 'NuanbanLocalWake') {
             if ($recognition.Confidence -lt 0.65) { continue }
             $phrase = $recognition.Text
             if ($script:WakePhrases -ccontains $phrase) { Write-ProtocolEvent @{ kind = 'wake'; phrase = $phrase } }
           } elseif ($script:Mode -eq 'question' -and $recognition.Grammar.Name -ceq 'NuanbanLocalDictation') {
-            if ($request.mode -ne 'dictation' -and $recognition.Confidence -lt 0.65) { continue }
-            $text = $recognition.Text.Trim()
-            if ($text.Length -gt 500) { $text = $text.Substring(0, 500); if ([char]::IsHighSurrogate($text[$text.Length - 1])) { $text = $text.Substring(0, $text.Length - 1) } }
-            $questionId = $script:QuestionId
-            if ($request.mode -eq 'dictation') {
-              $script:Mode = 'finished'
-              $script:DictationGrammar.Enabled = $false
-            } else { Reset-WakeGrammar }
-            if ($text.Length -gt 0) { Write-ProtocolEvent @{ kind = 'question'; questionId = $questionId; text = $text } }
-            $text = $null
+            if ($request.mode -eq 'dictation') { continue }
+            if ($recognition.Confidence -lt 0.78) {
+              Reset-WakeGrammar
+            } else {
+              $text = $recognition.Text.Trim()
+              if ($text.Length -gt 500) { $text = $text.Substring(0, 500); if ([char]::IsHighSurrogate($text[$text.Length - 1])) { $text = $text.Substring(0, $text.Length - 1) } }
+              $questionId = $script:QuestionId
+              Reset-WakeGrammar
+              if ($text.Length -gt 0) { Write-ProtocolEvent @{ kind = 'question'; questionId = $questionId; text = $text } }
+              $text = $null
+            }
           }
         } finally { Remove-Event -EventIdentifier $queuedEvent.EventIdentifier -ErrorAction SilentlyContinue }
       }

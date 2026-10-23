@@ -19,7 +19,7 @@ await wake.disable();
 - `disable()`：立即使旧 generation 失效，不再发送任何唤醒/提问；先发 stop，500 毫秒内未退出则 kill。Promise 只在真实子进程 `close` 后完成；重复调用共享等待并再次尝试 kill。系统拒绝终止时保持 pending，不能超时伪装停麦，不能新建第二个进程。已关闭时幂等。
 - `snapshot()` 与 `onState(state)`：`{ state, enabled, microphoneActive, generation, reason?, localOnly: true, dictationAvailable }`，其中 state 为 `disabled | starting | listening | question | stopping | unavailable | error`。`enabled`/`microphoneActive` 是保守的“可能仍持麦”，不是精确硬件测量：从 enable 启动阶段（包括 ready 前）起，到 stopping/故障但尚未真实退出时都为 true，仅实际 close 后为 false。probe-only 始终为 false。host 必须等待 disable 且两字段都为 false 才展示已停麦。
 - `onWake({ localOnly: true, generation, dictationAvailable })`：仅严格本地语法 `暖伴`、`暖伴暖伴`、`小暖` 命中才回调，未唤醒语音不输出正文。host 可打开桌宠输入区，不得据此恢复屏幕采集或代替用户执行第三方操作。
-- `onQuestion(text)`：可选本地听写的一轮字符串，最多 500 个 UTF-16 单元；每轮独立 questionId。未唤醒、旧进程/旧轮次、超时/撤权后结果不传出。无听写支持时只 onWake，不伪造问题。此模块不联网，host 对提问文字的后续 runtime.ask/云端用途须另守自身授权边界；不提供音频出口。
+- `onQuestion(text)`：可选本地听写的一轮字符串，最多 500 个 UTF-16 单元；每轮独立 questionId。听写置信度不足时不会输出候选文字：直接听写返回 `uncertain` 并停麦，唤醒后的听写回到严格唤醒状态。未唤醒、旧进程/旧轮次、超时/撤权后结果不传出。无听写支持时只 onWake，不伪造问题。此模块不联网，host 对提问文字的后续 runtime.ask/云端用途须另守自身授权边界；不提供音频出口。
 
 host 负责锁屏、挂起、本人撤权、渲染失效和退出时调用并等待 disable；屏幕停止与语音开关相互独立。失败/权限拒绝/进程退出绝不自动重连，恢复必须本人新的明确动作。
 

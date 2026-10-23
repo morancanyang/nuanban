@@ -59,10 +59,19 @@ function createLocalConversation({ provider, onEvent = () => {}, onError = () =>
           publish('connecting');
           const result = await input.dictate({ actor: 'owner', confirmed: true, signal: current.signal });
           if (!valid()) continue;
-          if (result.status !== 'complete' || result.localOnly !== true || result.microphoneActive !== false || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500) throw new Error('本机语音识别结果未确认');
+          if (!result || !['complete', 'uncertain', 'cancelled'].includes(result.status) || result.localOnly !== true || result.microphoneActive !== false
+            || (result.status === 'complete' && (typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500))) throw new Error('本机语音识别结果未确认');
           await input.disable();
           if (!valid()) continue;
           if (input.snapshot().microphoneActive || input.snapshot().enabled) throw new Error('本次麦克风停止尚未确认');
+          if (result.status === 'cancelled') continue;
+          if (result.status === 'uncertain') {
+            const retry = '我没有听清，请靠近麦克风，慢一点再说一遍。';
+            transcript('assistant', retry);
+            publish('speaking');
+            await speech.speak(retry, { signal: current.signal });
+            continue;
+          }
           let answer;
           if (isRestrictedText(result.text)) {
             answer = '这句话可能包含隐私，未发送给模型。请换一种不含个人信息的说法。';

@@ -62,7 +62,8 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
             try { transcriptHandler.current?.(result.text); } catch {
               setError('语音已识别，但聊天草稿已接近字数上限。请先整理草稿，再使用下方识别文字；没有覆盖原文字。');
             }
-          } else setNotice('本次语音输入已取消，没有填入或发送文字。');
+          } else if (result.status === 'uncertain') setNotice('这次没有听清，未写入聊天草稿。请靠近麦克风、说慢一点后重试。');
+          else setNotice('本次语音输入已取消，没有填入或发送文字。');
         }
       } else if (action === 'cancelDictation') {
         await bridge.cancelDictation?.();
@@ -110,7 +111,7 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
         ? '请查看桌宠弹出的确认窗口，选择“本人同意开启”。如果不想开启，选择“暂不开启”，或点击下方“停止本地语音”。'
         : '点击“开始语音输入”，再在原生窗口选择“本人同意本次输入”。麦克风不会自动开启。'}</p>
     </section>}
-    <p className="small-note">本次听写最多 20 秒，识别后关闭麦克风。已有唤醒监听会先关闭，不会自动恢复；音频仅本机处理，不上传、不保存。屏幕和云分析仍需另外同意。</p>
+    <p className="small-note">本次听写最多 20 秒，识别后关闭麦克风。置信度不足时不会把猜测文字写入草稿，会提示你重新说。已有唤醒监听会先关闭，不会自动恢复；音频仅本机处理，不上传、不保存。屏幕和云分析仍需另外同意。</p>
     {!canDictate && <p role="alert">当前宿主尚无直接听写入口，请保存工作后重新打开客户端。开启唤醒不等于语音输入。</p>}
     {notice && <p role="status">{notice}</p>}
     {transcript && <section className="confirmation-box" aria-label="本次识别文字"><strong>本次识别文字</strong><p>{transcript}</p></section>}

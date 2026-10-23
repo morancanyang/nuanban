@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-async function installVoiceFixture(page: Page, mode: 'normal' | 'cancel' | 'unavailable' | 'pending' | 'dictation-cancel' | 'dictation-pending' | 'dictation-error' = 'normal') {
+async function installVoiceFixture(page: Page, mode: 'normal' | 'cancel' | 'unavailable' | 'pending' | 'dictation-cancel' | 'dictation-pending' | 'dictation-error' | 'dictation-uncertain' = 'normal') {
   await page.addInitScript(mode => {
     let state = { phase: 'disabled' as string, enabled: false, microphoneActive: false, dictationAvailable: true, localOnly: true as const, message: '本地语音未开启' };
     let lateEnable: (() => void) | undefined;
@@ -21,6 +21,10 @@ async function installVoiceFixture(page: Page, mode: 'normal' | 'cancel' | 'unav
           throw new Error('synthetic dictation timeout');
         }
         state = { ...state, phase: 'question', enabled: true, microphoneActive: true, message: '正在本机听写，请直接说话。' };
+        if (mode === 'dictation-uncertain') {
+          stopDictation();
+          return { status: 'uncertain' as const, localOnly: true as const, microphoneActive: false as const };
+        }
         const result = { status: 'complete' as const, text: '教我在浏览器里收藏网页', localOnly: true as const, microphoneActive: false as const };
         if (mode === 'dictation-pending') return new Promise(resolve => { lateDictation = () => resolve(result); });
         stopDictation();
@@ -147,6 +151,20 @@ test('原生取消本次输入后保留草稿，不误报识别成功', async ({
   await expect(dialog).toContainText('本次语音输入已取消');
   await dialog.getByRole('button', { name: '关闭窗口' }).click();
   await expect(page.getByLabel('想问微光指引的问题')).toHaveValue('');
+  await expect(page.locator('.message.user')).toHaveCount(0);
+});
+
+test('低置信本地听写不回填候选文字，提示本人重说', async ({ page }) => {
+  await installVoiceFixture(page, 'dictation-uncertain');
+  await page.goto('/#/chat/new');
+  await page.getByLabel('想问微光指引的问题').fill('保留的草稿');
+  await page.getByRole('button', { name: '语音', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: '开始语音输入', exact: true }).click();
+  await expect(dialog).toContainText('这次没有听清');
+  await expect(dialog.getByRole('region', { name: '本次识别文字' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: '关闭窗口' }).click();
+  await expect(page.getByLabel('想问微光指引的问题')).toHaveValue('保留的草稿');
   await expect(page.locator('.message.user')).toHaveCount(0);
 });
 

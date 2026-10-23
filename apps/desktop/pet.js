@@ -512,7 +512,7 @@
     element('start-dictation').textContent = dictationPending ? '本次听写中…' : '语音输入';
     element('cancel-dictation').hidden = !dictationPending;
     element('cancel-dictation').disabled = pending.has('dictation.cancel');
-    element('dictation-status').textContent = cloudAuthorizing ? '请在系统窗口确认是否允许本次按需脱敏分析；当前没有发送查找或开启麦克风。' : pending.has('dictation.cancel') ? '正在取消并等待本次麦克风关闭…' : dictationPending ? voiceFindMode ? wake.phase === 'question' ? '正在本机听写查找目标；麦克风关闭前不会发送。' : wake.phase === 'stopping' ? '听写结束，正在确认麦克风关闭…' : '请在系统窗口确认本次语音查找。' : wake.phase === 'question' ? '正在本机听写，请直接说一句话；最多等待 20 秒。' : wake.phase === 'stopping' ? '已结束识别，正在等待麦克风关闭…' : '请在原生窗口确认本次输入，等候正在本机听写提示。' : dictationNotice || '点击语音输入，本人确认后直接说话；识别文字仅填入，不自动发送。';
+    element('dictation-status').textContent = cloudAuthorizing ? '请在系统窗口确认是否允许本次按需脱敏分析；当前没有发送查找或开启麦克风。' : pending.has('dictation.cancel') ? '正在取消并等待本次麦克风关闭…' : dictationPending ? voiceFindMode ? wake.phase === 'question' ? '正在本机听写查找目标；麦克风关闭前不会发送。' : wake.phase === 'stopping' ? '听写结束，正在确认麦克风关闭…' : '请在系统窗口确认本次语音查找。' : wake.phase === 'question' ? '正在本机听写，请直接说一句话；最多等待 20 秒。' : wake.phase === 'stopping' ? '已结束识别，正在等待麦克风关闭…' : '请在原生窗口确认本次输入，等候正在本机听写提示。' : dictationNotice || '点击语音输入，本人确认后直接说话；仅置信度足够的文字会填入草稿，且不会自动发送。';
     element('dictation-result').hidden = !dictationTranscript;
     element('dictation-result').textContent = dictationTranscript ? `本次识别文字：${dictationTranscript}` : '';
 
@@ -732,8 +732,10 @@
     try {
       const result = await bridge.dictate();
       if (disposed || request !== dictationGeneration) return;
-      if (!result || result.localOnly !== true || !['complete', 'cancelled'].includes(result.status)) throw new Error('本地听写结果未确认');
+      if (!result || result.localOnly !== true || !['complete', 'uncertain', 'cancelled'].includes(result.status)) throw new Error('本地听写结果未确认');
       if (result.status === 'cancelled') { dictationNotice = '本次听写已取消，没有填入或发送文字。'; return; }
+      if (result.status === 'uncertain' && result.microphoneActive !== false) throw new Error('本地听写结果未确认');
+      if (result.status === 'uncertain') { dictationNotice = '这次没有听清，未填入或发送文字。请靠近麦克风、说慢一点后重试。'; return; }
       if (result.microphoneActive !== false || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500) throw new Error('本地听写结果未确认');
       const recognized = result.text.trim();
       const previous = element('question').value;
@@ -821,8 +823,10 @@
       render();
       const result = await bridge.dictate(observationGeneration);
       if (disposed || request !== dictationGeneration) return;
-      if (!result || result.localOnly !== true || !['complete', 'cancelled'].includes(result.status)) throw new Error('本地听写结果未确认');
+      if (!result || result.localOnly !== true || !['complete', 'uncertain', 'cancelled'].includes(result.status)) throw new Error('本地听写结果未确认');
       if (result.status === 'cancelled') { dictationNotice = '本次语音查找已取消，没有发送文字或屏幕画面。'; return; }
+      if (result.status === 'uncertain' && result.microphoneActive !== false) throw new Error('本地听写结果未确认');
+      if (result.status === 'uncertain') { dictationNotice = '这次没有听清，未发送问题或屏幕画面。请靠近麦克风、说慢一点后重试。'; return; }
       if (result.microphoneActive !== false || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500) throw new Error('本地听写结果未确认');
       const recognized = result.text.trim();
       dictationTranscript = recognized;
