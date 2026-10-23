@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { LocalSnapshot, AppServices } from '@nuanban/application';
 import type { Note, Todo, Preferences, Family } from '@nuanban/domain';
 import { recurrenceNext, redactSecrets } from '@nuanban/domain';
-import { markReviewed as reviewNote, setMastery as changeMastery } from '@nuanban/application';
+import { createLocalId, markReviewed as reviewNote, setMastery as changeMastery } from '@nuanban/application';
 import { applyPet, undoPet } from '@nuanban/pet-engine';
 import type { PetConfiguration } from '@nuanban/domain';
 import type { ConflictChoice } from '@nuanban/domain';
@@ -29,7 +29,7 @@ function mutate(change:(snapshot:LocalSnapshot)=>LocalSnapshot, message:string):
   queue=operation.catch(()=>undefined);
   return operation;
 }
-function track(snapshot:LocalSnapshot, entity:Note|Todo, kind:'note'|'todo'):void { snapshot.outbox.push({id:crypto.randomUUID(),ownerId:entity.ownerId,entityId:entity.id,entityType:kind,version:entity.version,status:'pending',createdAt:new Date().toISOString()}); }
+function track(snapshot:LocalSnapshot, entity:Note|Todo, kind:'note'|'todo'):void { snapshot.outbox.push({id:createLocalId(),ownerId:entity.ownerId,entityId:entity.id,entityType:kind,version:entity.version,status:'pending',createdAt:new Date().toISOString()}); }
 export const useApp = create<State>((set)=>({
   snapshot:null,ready:false,error:null,toast:null,busy:false,
   async initialize(injected,initial) { services=injected;factory=initial; try {
@@ -42,12 +42,12 @@ export const useApp = create<State>((set)=>({
     }
     set({snapshot,ready:true});
   } catch(error) { set({ready:true,error:error instanceof Error?error.message:'本地数据初始化失败'}); } },
-  addNote(question,summary,source) { return mutate(snapshot=> { const sanitized=redactSecrets(question); if(snapshot.notes.some(note=>note.question===sanitized&&!note.deletedAt)) return snapshot; const now=new Date().toISOString(); const note:Note={id:crypto.randomUUID(),ownerId:services.ownerId,question:sanitized,topic:sanitized.length>20?sanitized.slice(0,20)+'…':sanitized,summary:redactSecrets(summary),mastery:'unmastered',masterySource:null,reviewedAt:null,source,createdAt:now,updatedAt:now,version:1,deletedAt:null};snapshot.notes.unshift(note);track(snapshot,note,'note'); return snapshot; },'已记下学习要点，仅保存在本机。'); },
+  addNote(question,summary,source) { return mutate(snapshot=> { const sanitized=redactSecrets(question); if(snapshot.notes.some(note=>note.question===sanitized&&!note.deletedAt)) return snapshot; const now=new Date().toISOString(); const note:Note={id:createLocalId(),ownerId:services.ownerId,question:sanitized,topic:sanitized.length>20?sanitized.slice(0,20)+'…':sanitized,summary:redactSecrets(summary),mastery:'unmastered',masterySource:null,reviewedAt:null,source,createdAt:now,updatedAt:now,version:1,deletedAt:null};snapshot.notes.unshift(note);track(snapshot,note,'note'); return snapshot; },'已记下学习要点，仅保存在本机。'); },
   mastery(id,value) { return mutate(snapshot=> { snapshot.notes=snapshot.notes.map(note=>note.id===id?changeMastery(note,value):note); const note=snapshot.notes.find(item=>item.id===id);if(note)track(snapshot,note,'note');return snapshot; },value==='mastered'?'已记录：你确认掌握了。':'已调整为待练习。'); },
   review(id) { return mutate(snapshot=>{snapshot.notes=snapshot.notes.map(note=>note.id===id?reviewNote(note):note);const note=snapshot.notes.find(item=>item.id===id);if(note)track(snapshot,note,'note');return snapshot;},'已记录本次复习，掌握状态保持不变。'); },
   deleteNote(id) { return mutate(snapshot=>{const note=snapshot.notes.find(item=>item.id===id);if(note){note.deletedAt=new Date().toISOString();note.updatedAt=note.deletedAt;note.version++;track(snapshot,note,'note');}return snapshot;},'笔记已删除，关联提醒会显示内容已移除。'); },
   saveTodo(todo) { return mutate(snapshot=>{const index=snapshot.todos.findIndex(item=>item.id===todo.id);if(index>=0)snapshot.todos[index]=todo;else snapshot.todos.unshift(todo);track(snapshot,todo,'todo');return snapshot;},'提醒已保存在本机。需要保持页面打开才可触达。'); },
-  completeTodo(id) { return mutate(snapshot=>{const todo=snapshot.todos.find(item=>item.id===id);if(todo&&!todo.completedAt){todo.completedAt=new Date().toISOString();todo.updatedAt=todo.completedAt;todo.version++;track(snapshot,todo,'todo');const next=recurrenceNext(todo);if(next){const following={...todo,id:crypto.randomUUID(),dueAt:next,completedAt:null,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),version:1};snapshot.todos.push(following);track(snapshot,following,'todo');}}return snapshot;},'待办已完成，笔记掌握状态不会自动改变。'); },
+  completeTodo(id) { return mutate(snapshot=>{const todo=snapshot.todos.find(item=>item.id===id);if(todo&&!todo.completedAt){todo.completedAt=new Date().toISOString();todo.updatedAt=todo.completedAt;todo.version++;track(snapshot,todo,'todo');const next=recurrenceNext(todo);if(next){const following={...todo,id:createLocalId(),dueAt:next,completedAt:null,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),version:1};snapshot.todos.push(following);track(snapshot,following,'todo');}}return snapshot;},'待办已完成，笔记掌握状态不会自动改变。'); },
   deleteTodo(id) { return mutate(snapshot=>{const todo=snapshot.todos.find(item=>item.id===id);if(todo){todo.deletedAt=new Date().toISOString();todo.version++;track(snapshot,todo,'todo');}return snapshot;},'提醒已取消。'); },
   preferences(patch) { return mutate(snapshot=>({...snapshot,preferences:{...snapshot.preferences,...patch}}),'偏好已保存在本机。'); },
   applyPet(candidate, revision) { return mutate(snapshot => ({ ...snapshot, preferences: applyPet(snapshot.preferences, candidate, revision) }), '内置桌宠微调已确认并保存在本机。'); },

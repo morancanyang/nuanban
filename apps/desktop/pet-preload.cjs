@@ -198,6 +198,7 @@ function requireIdentifier(value) {
 
 contextBridge.exposeInMainWorld('nuanbanPet', Object.freeze({
   snapshot: () => ipcRenderer.invoke('nuanban:pet:snapshot').then(projectSnapshot),
+  focusInput: () => ipcRenderer.invoke('nuanban:pet:focus-input'),
   drag: (action, point) => {
     if (!['start', 'move', 'end'].includes(action)) throw new TypeError('桌宠移动请求无效');
     if (point !== undefined) {

@@ -1,4 +1,4 @@
-import { ServiceFailure, markReviewed, setMastery, type LocalSnapshot, type Repository } from '@nuanban/application';
+import { createLocalId, ServiceFailure, markReviewed, setMastery, type LocalSnapshot, type Repository } from '@nuanban/application';
 import { validInstant, validTimezone } from '@nuanban/contracts';
 import { recurrenceNext, redactSecrets, type Note, type Todo } from '@nuanban/domain';
 import { emptyLocalSnapshot } from './local-snapshot';
@@ -33,7 +33,7 @@ export class PetLibraryStore {
         Object.assign(note, { question, topic: this.topic(question), summary, updatedAt: now, version: note.version + 1 });
         this.track(snapshot, note, 'note', now);
       } else {
-        const note: Note = { id: crypto.randomUUID(), ownerId: this.ownerId, question, topic: this.topic(question), summary, mastery: 'unmastered', masterySource: null, reviewedAt: null, source: 'conversation', createdAt: now, updatedAt: now, version: 1, deletedAt: null };
+        const note: Note = { id: createLocalId(), ownerId: this.ownerId, question, topic: this.topic(question), summary, mastery: 'unmastered', masterySource: null, reviewedAt: null, source: 'conversation', createdAt: now, updatedAt: now, version: 1, deletedAt: null };
         snapshot.notes.unshift(note);
         this.track(snapshot, note, 'note', now);
       }
@@ -82,7 +82,7 @@ export class PetLibraryStore {
         Object.assign(todo, fields, { version: todo.version + 1 });
         this.track(snapshot, todo, 'todo', timestamp);
       } else {
-        const todo: Todo = { ...fields, id: crypto.randomUUID(), ownerId: this.ownerId, completedAt: null, createdAt: timestamp, version: 1, deletedAt: null };
+        const todo: Todo = { ...fields, id: createLocalId(), ownerId: this.ownerId, completedAt: null, createdAt: timestamp, version: 1, deletedAt: null };
         snapshot.todos.unshift(todo);
         this.track(snapshot, todo, 'todo', timestamp);
       }
@@ -105,7 +105,7 @@ export class PetLibraryStore {
       this.track(snapshot, todo, 'todo', timestamp);
       const nextTime = recurrenceNext(todo, now);
       if (nextTime) {
-        const next: Todo = { ...todo, id: crypto.randomUUID(), dueAt: nextTime, completedAt: null, createdAt: timestamp, updatedAt: timestamp, version: 1 };
+        const next: Todo = { ...todo, id: createLocalId(), dueAt: nextTime, completedAt: null, createdAt: timestamp, updatedAt: timestamp, version: 1 };
         snapshot.todos.unshift(next);
         this.track(snapshot, next, 'todo', timestamp);
       }
@@ -150,6 +150,6 @@ export class PetLibraryStore {
   private topic(question: string): string { return question.length > 20 ? question.slice(0, 20) + '…' : question; }
 
   private track(snapshot: LocalSnapshot, entity: Note | Todo, kind: 'note' | 'todo', now: string): void {
-    snapshot.outbox.push({ id: crypto.randomUUID(), ownerId: this.ownerId, entityId: entity.id, entityType: kind, version: entity.version, status: 'pending', createdAt: now });
+    snapshot.outbox.push({ id: createLocalId(), ownerId: this.ownerId, entityId: entity.id, entityType: kind, version: entity.version, status: 'pending', createdAt: now });
   }
 }

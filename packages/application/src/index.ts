@@ -47,9 +47,26 @@ export async function readConversation(port: ConversationPort, text: string, sig
   return answer;
 }
 export interface AppServices { repository: Repository; conversation: ConversationPort; ownerId: string; }
+export function createLocalId(): string {
+  const cryptoApi = globalThis.crypto;
+  try {
+    if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
+  } catch {}
+  const bytes = new Uint8Array(16);
+  try {
+    if (typeof cryptoApi?.getRandomValues === 'function') cryptoApi.getRandomValues(bytes);
+    else throw new Error('Web Crypto unavailable');
+  } catch {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hexadecimal = Array.from(bytes, byte => byte.toString(16).padStart(2, '0'));
+  return `${hexadecimal.slice(0, 4).join('')}-${hexadecimal.slice(4, 6).join('')}-${hexadecimal.slice(6, 8).join('')}-${hexadecimal.slice(8, 10).join('')}-${hexadecimal.slice(10).join('')}`;
+}
 export function buildReviewTodo(note: Note, dueAt: string, timezone: string): Todo {
   if (!Number.isFinite(Date.parse(dueAt))) throw new Error('提醒时间无效');
-  return { id: crypto.randomUUID(), ownerId: note.ownerId, title: '复习：' + note.topic, dueAt, timezone, noteId: note.id, completedAt: null, repeat:'none', source:'review', createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),version:1,deletedAt:null };
+  return { id: createLocalId(), ownerId: note.ownerId, title: '复习：' + note.topic, dueAt, timezone, noteId: note.id, completedAt: null, repeat:'none', source:'review', createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),version:1,deletedAt:null };
 }
 export function markReviewed(note: Note, now = new Date().toISOString()): Note { return { ...note, reviewedAt: now, updatedAt:now, version:note.version+1 }; }
 export function setMastery(note: Note, mastery: Note['mastery']): Note { return { ...note, mastery, masterySource:'user', updatedAt:new Date().toISOString(), version:note.version+1 }; }

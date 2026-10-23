@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -92,6 +92,12 @@ describe('桌面真实模型端口（仅合成HTTP，不是供应验收）', () 
 });
 
 describe('桌面密钥配置', () => {
+  it('正式主进程使用系统网络通道且不附带会话凭证', async () => {
+    const main = await readFile(new URL('../../apps/desktop/main.cjs', import.meta.url), 'utf8');
+    expect(main).toContain("loadConfiguredProvider({ fetch: (input, init) => electron.net.fetch(input, { ...init, credentials: 'omit' }) })");
+    expect(main).not.toContain('loadConfiguredProvider()');
+  });
+
   it('没有配置时关闭，不回退或生成默认密钥', async () => {
     expect(await loadConfiguredProvider({ env: {}, configurationPath: join(tmpdir(), crypto.randomUUID(), 'missing.json') })).toBeUndefined();
     await expect(loadConfiguredProvider({ env: { NUANBAN_AI_MODEL: 'gpt-6.1-sol' } })).rejects.toThrow('PROVIDER_UNAVAILABLE');

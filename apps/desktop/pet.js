@@ -14,7 +14,7 @@
     guidance: { title: '光标指引', target: 'lesson-card', panels: ['lesson-card', 'conversation-view'] },
     voice: { title: '语音陪伴', target: 'voice-section', panels: ['voice-section'] },
     observation: { title: '本地观察与脱敏', target: 'observation-section', panels: ['observation-section'] },
-    search: { title: '智能查询', target: 'search-panel', panels: ['search-view'] },
+    search: { title: '智能查询', target: 'search-query', panels: ['search-view'] },
     learning: { title: '学习笔记与复习', target: 'learning-summary', panels: ['learning-view'] },
     archive: { title: '学习档案', target: 'archive-view', panels: ['archive-view'] },
     todos: { title: '待办与复习', target: 'todos-view', panels: ['todos-view'] },
@@ -44,6 +44,7 @@
   let clarificationDraftKey = '';
   let newQuestionKey = '';
   let draftVersion = 0;
+  let focusRequest = 0;
   let dictationGeneration = 0;
   let voiceFindMode = false;
   let dictationNotice = '';
@@ -433,9 +434,9 @@
     element('observation-status').dataset.tone = state.blocked || state.privacyPaused ? 'danger' : state.safeObserving ? 'active' : 'neutral';
     const source = text(observation.sourceName);
     const reasonDetail = ['capture_retry', 'capture_error'].includes(analysis.state) ? text(analysis.message, '正在重新采集最新本地画面；不会使用过期画面，也不会重新请求屏幕共享。')
-      : state.safeObserving && observation.reason === 'controls_only'
       : state.safeObserving && observation.reason === 'authorized_sharing'
       ? '已授权持续实时共享，不再按敏感文字、未知页面或无文字自动暂停。可随时点击“停止共享”关闭；本地仍遮盖文字与人脸，云分析仅在另行授权后按需发送。'
+      : state.safeObserving && observation.reason === 'controls_only'
       ? '正在本地观察（安全控件布局模式）：只保留已识别的通用控件标签和位置，不包含原画面、正文、文件名或图片。仅在本人另行授权后，才按需发送控件布局用于教学；不会自动操作。'
       : text(observation.reason) && analysis.state === 'error' ? text(analysis.message, observation.reason) : text(observation.reason);
     element('observation-detail').textContent = state.cleanupFailed ? `停止清理尚未确认，请退出桌宠并重新启动。${text(observation.reason)}` : unsafe ? '隐私或停止状态与采集 / 分析信号不一致。请立即停止观察，再检查运行核心。' : state.safetyUnclassified ? 'unclassified_screen / unknown：当前本地分类器尚未识别此画面，不等于已发现敏感内容。已支持设置、桌面、文件管理器及常见浏览器/编辑器控件；可在继续共享时选择“框选观察区域”，只保留目标软件。仍未分类时继续保持暂停，不会发送画面。' : text(reasonDetail, source ? `共享来源：${source}` : ready && observation.state === 'off' && observation.captureActive === false ? '尚未共享屏幕。提问不会由面板自动开启观察。' : ready && observation.state === 'stopped' && observation.captureActive === false ? '采集已由运行核心报告停止，重新开启仍需本人确认。' : '等待运行核心确认共享来源与采集状态。');
@@ -502,7 +503,6 @@
     element('finish-lesson').disabled = !state.canFinish;
     element('verify-step').textContent = pending.has('guidance.verify') || task.state === 'verifying' ? '等待新画面核验…' : '我点好了，请核验';
     element('finish-lesson').textContent = pending.has('guidance.finish') ? '正在请求结束…' : '结束教学';
-    element('question').disabled = typeof bridge?.ask !== 'function';
     element('send-question').disabled = !state.canAsk || !element('question').value.trim();
     element('send-question').textContent = cloudAuthorizing ? '正在等待分析授权…' : pending.has('ask') ? '正在发送…' : state.analysis.state === 'capture_retry' ? '正在刷新画面…' : task.state === 'analyzing' ? task.kind === 'text' ? '正在等待回答…' : '正在分析画面…' : activeSection === 'guidance' ? '查找并指引 ↗' : '问暖暖 ↗';
     element('question-hint').textContent = state.privacyPaused || state.blocked ? '安全状态待处理，可保留草稿，不能发送' : !ready ? '等待连接，可先写下问题' : activeSection === 'guidance'
@@ -983,8 +983,23 @@
     }
   }
 
+  function focusTextInput(input) {
+    if (disposed || !expanded || input.disabled) return;
+    const current = ++focusRequest;
+    const section = activeSection;
+    input.focus({ preventScroll: true });
+    if (typeof bridge?.focusInput !== 'function') return;
+    try {
+      Promise.resolve(bridge.focusInput()).then(focused => {
+        if (focused === true && !disposed && expanded && current === focusRequest && section === activeSection
+          && !input.disabled && document.activeElement === input) input.focus({ preventScroll: true });
+      }).catch(() => {});
+    } catch {}
+  }
+
   function setExpanded(value, options = {}) {
     if (disposed) return;
+    focusRequest += 1;
     endPetDrag();
     if (value && faceVoiceActive()) value = false;
     const previousExpanded = expanded;
@@ -1017,11 +1032,12 @@
       const target = element(sectionViews[activeSection].target);
       if (options.section === 'accessibility') target.open = true;
       target.scrollIntoView({ block: 'start' });
-      target.focus({ preventScroll: true });
+      if (['question', 'search'].includes(activeSection)) focusTextInput(target);
+      else target.focus({ preventScroll: true });
     }
     else if (retryAction && options.notifyHost !== false) element('retry-action').focus({ preventScroll: true });
     else if (value && !options.section) element('feature-home').scrollIntoView({ block: 'start' });
-    if (value && !element('question-form').hidden && (options.focusInput === true || (options.focusInput !== false && !options.section && !retryAction))) element('question').focus({ preventScroll: true });
+    if (value && !element('question-form').hidden && (options.focusInput === true || (options.focusInput !== false && !options.section && !retryAction))) focusTextInput(element('question'));
   }
 
   function sendPetDrag(action, event) {
@@ -1178,6 +1194,9 @@
   bind(document, 'keydown', event => {
     if (event.key === 'Escape' && expanded && !event.isComposing) { event.preventDefault(); setExpanded(false); }
   });
+  for (const identifier of ['question', 'search-query']) {
+    bind(element(identifier), 'pointerdown', event => { if (event.button === 0) focusTextInput(element(identifier)); });
+  }
   bind(element('question'), 'input', () => {
     if (!pending.has('dictate') && !dictationTranscript) dictationNotice = '';
     draftVersion += 1;

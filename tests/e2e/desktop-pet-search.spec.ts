@@ -41,6 +41,7 @@ async function petSearchFixture(page: Page, configured = false, delayed = false,
   await page.locator('#pet-toggle').click();
   await page.getByRole('button', { name: '搜索', exact: true }).click();
   await expect(page.getByRole('heading', { name: '帮你查一查' })).toBeVisible();
+  await expect(page.locator('#search-query')).toBeFocused();
 }
 
 test('没有已有模型时仍可打开查询入口，但不发送请求或填充假结果', async ({ page }) => {
@@ -120,7 +121,31 @@ test('密钥已加载不代表鉴权通过，401 错误不展示模拟结果或�
   await page.getByRole('button', { name: '请模型回答', exact: true }).click();
   await expect(page.getByText('智能服务鉴权失败，请检查本机模型密钥或账号权限。')).toBeVisible();
   await expect(page.getByRole('list', { name: '搜索结果' })).toBeHidden();
+  await expect(page.locator('#search-query')).toHaveValue('如何养茉莉');
+  await expect(page.locator('#search-query')).toBeFocused();
+  await expect(page.locator('#search-query')).toBeEditable();
   expect(await page.evaluate(() => (window as unknown as { syntheticSearchAudit: { searches: string[] } }).syntheticSearchAudit.searches)).toEqual(['如何养茉莉']);
+});
+
+test('查询中保留可见插入点，取消后可继续输入且迟到结果不能抢焦点', async ({ page }) => {
+  await petSearchFixture(page, true, true);
+  await page.locator('#search-query').fill('如何养茉莉');
+  await page.locator('#search-consent').check();
+  await page.locator('#search-query').focus();
+  await page.locator('#search-query').press('Enter');
+  await expect(page.locator('#search-query')).toBeEnabled();
+  await expect(page.locator('#search-query')).not.toBeEditable();
+  await expect(page.locator('#search-query')).toBeFocused();
+  await expect(page.locator('#search-query')).toHaveCSS('caret-color', 'rgb(69, 49, 38)');
+  await page.locator('#cancel-search').click();
+  await expect(page.locator('#search-query')).toBeEditable();
+  await expect(page.locator('#search-query')).toBeFocused();
+  await page.locator('#search-query').fill('继续整理的问题');
+  await page.locator('#search-consent').focus();
+  await page.waitForTimeout(600);
+  await expect(page.locator('#search-query')).toHaveValue('继续整理的问题');
+  await expect(page.locator('#search-consent')).toBeFocused();
+  await expect(page.locator('#search-results')).toBeHidden();
 });
 
 test('取消后迟到搜索结果不能重新出现', async ({ page }) => {

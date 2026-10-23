@@ -10,6 +10,21 @@ test('首页为空白本机工作区，不预置学习资料或发生水平溢�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('手机网页发送栏保持在可视宽度内并与工具按钮同排', async ({ page }) => {
+  await page.goto('/#/chat/new');
+  const send = page.getByRole('button', { name: '发送', exact: true });
+  const tool = page.locator('.composer-bottom .tool-button').first();
+  await expect(send).toBeVisible();
+  const sendBox = await send.boundingBox();
+  const toolBox = await tool.boundingBox();
+  const viewport = page.viewportSize();
+  expect(sendBox).not.toBeNull();
+  expect(toolBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(sendBox!.x + sendBox!.width).toBeLessThanOrEqual(viewport!.width);
+  expect(Math.abs(sendBox!.y - toolBox!.y)).toBeLessThanOrEqual(8);
+});
+
 test('只有真实端口完整回复后创建笔记，刷新保留实际学习资料', async ({ page }) => {
   await installTextBridge(page);
   await page.goto('/#/chat/new');

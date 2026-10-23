@@ -11,6 +11,7 @@ import { dispatchServiceRoute, type ServerServiceModules } from './service-modul
 import { readIfMatch as ifMatch } from './versioning.ts';
 import { createStandaloneGuidanceService, StandaloneGuidanceError, type StandaloneGuidanceService } from './standalone-guidance.ts';
 import { createDesktopVoiceService, type DesktopVoiceService } from './desktop-voice.ts';
+import { createTextConversationService, type TextConversationService } from './text-conversation.ts';
 
 export type ServerStorageOptions =
   | { kind: 'memory' }
@@ -66,6 +67,8 @@ export interface ServerOptions {
   modules?: ServerServiceModules;
   standaloneGuidance?: StandaloneGuidanceService;
   desktopVoice?: DesktopVoiceService;
+  textConversation?: TextConversationService;
+  webOrigins?: readonly string[];
 }
 
 export interface ServerApplication {
@@ -74,10 +77,59 @@ export interface ServerApplication {
   family: FamilyService;
   repositories: ServerRepositories;
   modules?: ServerServiceModules;
+  textConversation: TextConversationService;
 }
 
 const maxBodyBytes = 1024 * 1024;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const corsAllowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
+const corsAllowedHeaders = ['Authorization', 'Content-Type', 'Accept', 'X-Request-ID', 'Idempotency-Key', 'If-Match'] as const;
+const corsAllowedHeaderNames = new Set(corsAllowedHeaders.map(header => header.toLowerCase()));
+
+function normalizeWebOrigins(origins: readonly string[] | undefined): ReadonlySet<string> {
+  const normalized = new Set<string>();
+  for (const rawOrigin of origins ?? []) {
+    const value = rawOrigin.trim();
+    if (!value) continue;
+    if (value === '*') throw new Error('NUANBAN_WEB_ORIGINS does not allow the wildcard origin');
+    let parsed: URL;
+    try { parsed = new URL(value); } catch { throw new Error(`Invalid web origin: ${value}`); }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+      throw new Error(`Invalid web origin: ${value}`);
+    }
+    normalized.add(parsed.origin);
+  }
+  return normalized;
+}
+
+function allowedOrigin(request: IncomingMessage, origins: ReadonlySet<string>): string | null {
+  const value = request.headers.origin;
+  if (typeof value !== 'string' || value === 'null') return null;
+  try {
+    const origin = new URL(value).origin;
+    return origins.has(origin) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyCors(response: ServerResponse, origin: string | null): void {
+  if (!origin) return;
+  response.setHeader('Access-Control-Allow-Origin', origin);
+  response.setHeader('Access-Control-Allow-Methods', corsAllowedMethods.join(', '));
+  response.setHeader('Access-Control-Allow-Headers', corsAllowedHeaders.join(', '));
+  response.setHeader('Access-Control-Expose-Headers', 'X-Request-ID, ETag');
+  response.setHeader('Access-Control-Max-Age', '600');
+  response.setHeader('Vary', 'Origin');
+}
+
+function validPreflight(request: IncomingMessage): boolean {
+  const method = request.headers['access-control-request-method'];
+  if (typeof method === 'string' && !corsAllowedMethods.includes(method.toUpperCase() as typeof corsAllowedMethods[number])) return false;
+  const headers = request.headers['access-control-request-headers'];
+  if (typeof headers !== 'string') return true;
+  return headers.split(',').map(header => header.trim().toLowerCase()).filter(Boolean).every(header => corsAllowedHeaderNames.has(header));
+}
 
 function requestId(request: IncomingMessage): string {
   const candidate = request.headers['x-request-id'];
@@ -170,11 +222,31 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
   const family = new FamilyService(repositories, { ...options.family, now });
   const standaloneGuidance = options.standaloneGuidance ?? createStandaloneGuidanceService();
   const desktopVoice = options.desktopVoice ?? createDesktopVoiceService();
+  const textConversation = options.textConversation ?? createTextConversationService();
+  const webOrigins = normalizeWebOrigins(options.webOrigins);
 
   const server = createNodeServer(async (request, response) => {
     const correlationId = requestId(request);
     const method = request.method ?? 'GET';
     const url = request.url ?? '/';
+    const origin = allowedOrigin(request, webOrigins);
+    applyCors(response, origin);
+    response.setHeader('x-request-id', correlationId);
+    if (method === 'OPTIONS') {
+      if (request.headers.origin && !origin) {
+        response.statusCode = 403;
+        response.end();
+        return;
+      }
+      if (!validPreflight(request)) {
+        response.statusCode = 400;
+        response.end();
+        return;
+      }
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
     const parts = pathParts(url);
     const isStandaloneGuidance = method === 'POST' && parts.join('/') === 'v1/standalone/guidance/analyze';
     const isVoiceStatus = method === 'GET' && parts.join('/') === 'internal/desktop/voice/status';
@@ -249,6 +321,51 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
         return;
       }
 
+      if (method === 'GET' && parts[0] === 'v1' && parts[1] === 'requests' && parts[2] && parts[3] === 'events') {
+        const session = await actor();
+        textConversation.assertRequest(session, parts[2]);
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        request.once('aborted', abort);
+        response.once('close', abort);
+        if (request.aborted || response.destroyed) controller.abort();
+        response.statusCode = 200;
+        response.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        response.setHeader('cache-control', 'no-cache, no-store');
+        response.setHeader('connection', 'keep-alive');
+        response.setHeader('x-request-id', context.requestId);
+        try {
+          for await (const event of textConversation.readEvents(session, parts[2], controller.signal)) {
+            if (controller.signal.aborted || response.destroyed) break;
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+          if (!controller.signal.aborted && !response.destroyed) response.end();
+        } catch (error) {
+          if (!controller.signal.aborted) throw error;
+        } finally {
+          request.removeListener('aborted', abort);
+          response.removeListener('close', abort);
+        }
+        return;
+      }
+
+      if (method === 'POST' && parts.join('/') === 'v1/conversations') {
+        await emit(201, textConversation.create(await actor(), context.body.mode));
+        return;
+      }
+      if (method === 'GET' && parts[0] === 'v1' && parts[1] === 'conversations' && parts[2] && parts[3] === 'messages') {
+        await emit(200, textConversation.messages(await actor(), parts[2]));
+        return;
+      }
+      if (method === 'POST' && parts[0] === 'v1' && parts[1] === 'conversations' && parts[2] && parts[3] === 'responses') {
+        await emit(201, textConversation.respond(await actor(), parts[2], context.body));
+        return;
+      }
+      if (method === 'POST' && parts[0] === 'v1' && parts[1] === 'requests' && parts[2] && parts[3] === 'cancel') {
+        await emit(200, textConversation.cancel(await actor(), parts[2]));
+        return;
+      }
+
       if (await dispatchServiceRoute({ method, url, parts, body: context.body, request, modules: options.modules, getActor: actor, emit })) return;
 
       if (method === 'GET' && url.split('?')[0] === '/healthz') {
@@ -316,7 +433,7 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
     }
   });
 
-  return { server, auth, family, repositories, modules: options.modules };
+  return { server, auth, family, repositories, modules: options.modules, textConversation };
 }
 
 export function createServer(options: ServerOptions = {}): Server {

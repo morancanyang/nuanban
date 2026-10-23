@@ -23,7 +23,7 @@
     element('submit-search').disabled = busy || checking || !configured || !consent.checked || !query.value.trim();
     element('submit-search').textContent = busy ? '正在查询…' : '请模型回答';
     element('cancel-search').disabled = !busy;
-    query.disabled = busy;
+    query.readOnly = busy;
     consent.disabled = busy;
   }
 
@@ -33,7 +33,11 @@
   }
 
   async function show() {
-    if (disposed || !element('search-panel').hidden) return;
+    if (disposed) return;
+    if (!element('search-panel').hidden) {
+      query.focus({ preventScroll: true });
+      return;
+    }
     element('search-panel').hidden = false;
     window.dispatchEvent(new CustomEvent('nuanban:pet:navigate', { detail: { section: 'search' } }));
     element('search-panel').scrollIntoView({ block: 'start', behavior: 'instant' });
@@ -119,6 +123,11 @@
     element('search-answer').hidden = true;
   }
 
+  function restoreQueryFocus() {
+    if (disposed || element('search-panel').hidden || !document.hasFocus()) return;
+    if ([query, element('submit-search'), element('cancel-search'), document.body].includes(document.activeElement)) query.focus({ preventScroll: true });
+  }
+
   async function search() {
     if (disposed || busy || checking || !configured || !consent.checked || !query.value.trim()) return;
     const current = ++generation;
@@ -139,7 +148,7 @@
       element('search-progress').textContent = '';
       error('搜索未完成或返回内容无法使用，请稍后手动重试。');
     } finally {
-      if (!disposed && current === generation) { busy = false; render(); }
+      if (!disposed && current === generation) { busy = false; render(); restoreQueryFocus(); }
     }
   }
 
@@ -149,6 +158,7 @@
     render();
     clearResults();
     element('search-progress').textContent = '查询已停止，不会自动重新发送。';
+    restoreQueryFocus();
     try { await api.cancel(); }
     catch { if (!disposed) error('停止请求尚未确认，请退出桌宠；迟到的结果不会显示。'); }
   }

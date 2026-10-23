@@ -184,7 +184,7 @@ if (ownsInstance) app.whenReady().then(async () => {
       },
     });
   } catch { reminderStore = undefined; reminderNotifications = undefined; }
-  try { aiProvider = await loadConfiguredProvider(); } catch { aiProvider = undefined; }
+  try { aiProvider = await loadConfiguredProvider({ fetch: (input, init) => electron.net.fetch(input, { ...init, credentials: 'omit' }) }); } catch { aiProvider = undefined; }
   registerBridge();
   standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow,
     liliEnabled: process.argv.includes('--pet-lili') || (!process.argv.includes('--pet-default') && process.env.NUANBAN_DESKTOP_PET === 'lili'),

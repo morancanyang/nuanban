@@ -4,7 +4,7 @@ import { RemoteApiClient, RemoteRepository, RemoteViews } from '@nuanban/api-cli
 import { createPlatform } from '@nuanban/platform-ports';
 import type { AppServices } from '@nuanban/application';
 import { DesktopImageQuestion } from './image-question';
-import { DesktopConversation } from './text-question';
+import { createConversation } from './conversation';
 import { emptyLocalSnapshot } from './local-snapshot';
 
 const environment = { ...import.meta.env };
@@ -16,7 +16,7 @@ export const remoteViews = remoteClient ? new RemoteViews(remoteClient) : null;
 export const services: AppServices = {
   ownerId: config.apiMode === 'local' ? 'local-owner' : (environment.VITE_API_OWNER_ID ?? 'remote-owner'),
   repository: remoteClient ? new RemoteRepository(remoteClient) : new IndexedDbRepository(),
-  conversation: new DesktopConversation(),
+  conversation: createConversation(config.platformMode, remoteClient),
 };
 export const platform = createPlatform();
 export const imageQuestionService = new DesktopImageQuestion();

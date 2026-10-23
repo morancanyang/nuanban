@@ -239,8 +239,8 @@ function createStandaloneHost(options) {
     return true;
   }
 
-  function secureWindow(window) {
-    window.setContentProtection(true);
+  function secureWindow(window, protectContent = true) {
+    window.setContentProtection(protectContent);
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
     window.webContents.on('will-attach-webview', event => event.preventDefault());
@@ -327,6 +327,14 @@ function createStandaloneHost(options) {
     return movePetToCursor(point);
   }
 
+  function focusPetInput() {
+    if (closing || !expanded || !live(petWindow) || !petWindow.isVisible()) return false;
+    if (petWindow.isMinimized()) petWindow.restore();
+    petWindow.focus();
+    petWindow.webContents.focus();
+    return true;
+  }
+
   function showPetPanel(panel = {}) {
     if (petClosePromise) return petClosePromise.then(() => showPetPanel(panel));
     if (!live(petWindow)) throw new Error('独立桌宠尚未就绪，请重新打开客户端。');
@@ -343,7 +351,7 @@ function createStandaloneHost(options) {
     petWindow.webContents.send('nuanban:pet:panel', { expanded: true, focusInput: panel.focusInput === false ? false : !section,
       ...(section ? { section, ...(section === 'learning' && typeof panel.noteId === 'string' ? { noteId: panel.noteId } : {}) } : {}) });
     petWindow.show();
-    petWindow.focus();
+    focusPetInput();
   }
 
   async function openFaceVoice() {
@@ -822,7 +830,9 @@ function createStandaloneHost(options) {
         publish(); break;
       case 'panel.set-expanded':
         if (typeof payload.expanded !== 'boolean') throw new Error('面板状态无效');
-        setExpanded(payload.expanded); break;
+        setExpanded(payload.expanded);
+        if (expanded) focusPetInput();
+        break;
       default: throw new Error('不支持的桌宠指令');
     }
     return { ok: true, snapshot: snapshot() };
@@ -847,12 +857,14 @@ function createStandaloneHost(options) {
     const area = screen.getPrimaryDisplay().workArea;
     petWindow = new BrowserWindow({ width: 300, height: Math.min(390, area.height - 24), x: area.x + area.width - 324, y: area.y + area.height - Math.min(414, area.height - 12),
       title: '微光指引桌宠', icon: PRODUCT_ICON_PATH, show: false, transparent: true, frame: false, hasShadow: false, alwaysOnTop: true, skipTaskbar: true,
-      resizable: false, movable: true, backgroundColor: '#00000000', webPreferences: windowPreferences('pet-preload.cjs') });
+      focusable: true, resizable: false, movable: true, backgroundColor: '#00000000', webPreferences: windowPreferences('pet-preload.cjs') });
     guideWindow = new BrowserWindow({ width: 400, height: 300, title: '微光指引教学指引', icon: PRODUCT_ICON_PATH, show: false, transparent: true, frame: false,
       hasShadow: false, alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, backgroundColor: '#00000000', webPreferences: windowPreferences('guide-preload.cjs') });
     captionWindow = new BrowserWindow({ width: 700, height: 116, title: '微光指引大字字幕', icon: PRODUCT_ICON_PATH, show: false, transparent: true, frame: false,
       hasShadow: false, alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, backgroundColor: '#00000000', webPreferences: windowPreferences('caption-preload.cjs') });
-    for (const window of [petWindow, guideWindow, captionWindow]) { secureWindow(window); window.setAlwaysOnTop(true, 'floating'); }
+    for (const window of [petWindow, captionWindow]) secureWindow(window);
+    secureWindow(guideWindow, false);
+    for (const window of [petWindow, guideWindow, captionWindow]) window.setAlwaysOnTop(true, 'floating');
     syncPetProtection(runtime.snapshot().observation);
     guideWindow.setIgnoreMouseEvents(true, { forward: true });
     captionWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -864,6 +876,10 @@ function createStandaloneHost(options) {
     guideWindow.webContents.on('did-finish-load', () => { if (pendingGuide) guideWindow.webContents.send('nuanban:guide:state', pendingGuide); });
     captionWindow.webContents.on('did-finish-load', updateCaptions);
     handle('nuanban:pet:snapshot', snapshot);
+    handle('nuanban:pet:focus-input', input => {
+      if (input !== undefined) throw new Error('桌宠聚焦参数无效');
+      return focusPetInput();
+    });
     handle('nuanban:pet:command', command);
     handle('nuanban:pet:single-frame:snapshot', () => singleFrame.snapshot());
     handle('nuanban:pet:single-frame:capture', input => {

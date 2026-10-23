@@ -42,7 +42,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     protection = false;
     ignoresMouse = false;
     webContents = Object.assign(new EventEmitter(), { isDestroyed: () => this.destroyed, mainFrame: { url: '' },
-      send: vi.fn(), setWindowOpenHandler: vi.fn() });
+      send: vi.fn(), focus: vi.fn(), setWindowOpenHandler: vi.fn() });
     constructor(public settings: Record<string, unknown>) {
       super();
       this.bounds = { x: Number(settings.x ?? 0), y: Number(settings.y ?? 0), width: Number(settings.width), height: Number(settings.height) };
@@ -62,7 +62,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     hide() { this.visible = false; }
     show() { this.visible = true; }
     showInactive() { this.visible = true; }
-    focus() {}
+    focus = vi.fn();
     async loadFile(file: string) { this.webContents.mainFrame.url = pathToFileURL(file).href; this.webContents.emit('did-finish-load'); }
   }
   const note = { noteId: 'note-local', question: '如何调整显示', summary: '学习显示设置', result: 'unfinished', mastery: 'unmastered' };
@@ -826,6 +826,37 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     expect(current.analyzer.analyze).not.toHaveBeenCalled();
   });
 
+  it('仅显式打开面板或受信输入请求聚焦桌宠及网页，不聚焦指引窗或开启采集', async () => {
+    const current = fixture();
+    await current.host.initialize();
+    const [pet, guide, caption] = current.windows;
+    expect(pet.settings.focusable).toBe(true);
+    expect(guide.settings.focusable).toBe(false);
+    expect(caption.settings.focusable).toBe(false);
+    expect(current.invoke('nuanban:pet:focus-input')).toBe(false);
+    expect(pet.webContents.focus).not.toHaveBeenCalled();
+    await current.invoke('nuanban:pet:command', { type: 'panel.set-expanded', expanded: true });
+    expect(pet.focus).toHaveBeenCalledOnce();
+    expect(pet.webContents.focus).toHaveBeenCalledOnce();
+    expect(current.invoke('nuanban:pet:focus-input')).toBe(true);
+    expect(pet.webContents.focus).toHaveBeenCalledTimes(2);
+    expect(() => current.invoke('nuanban:pet:focus-input', { windowId: 1 })).toThrow('聚焦参数');
+    expect(() => current.invoke('nuanban:pet:focus-input', undefined, { sender: guide.webContents, senderFrame: guide.webContents.mainFrame })).toThrow('不可信');
+    expect(() => current.invoke('nuanban:pet:focus-input', undefined, { sender: pet.webContents, senderFrame: { ...pet.webContents.mainFrame } })).toThrow('不可信');
+    pet.minimized = true;
+    current.host.showPetPanel({ section: 'question' });
+    expect(pet.restore).toHaveBeenCalledOnce();
+    expect(pet.webContents.focus).toHaveBeenCalledTimes(3);
+    pet.hide();
+    expect(current.invoke('nuanban:pet:focus-input')).toBe(false);
+    expect(guide.webContents.focus).not.toHaveBeenCalled();
+    expect(caption.webContents.focus).not.toHaveBeenCalled();
+    expect(current.source.capture).not.toHaveBeenCalled();
+    expect(current.questioner.answer).not.toHaveBeenCalled();
+    expect(current.analyzer.analyze).not.toHaveBeenCalled();
+    expect(current.wake.dictate).not.toHaveBeenCalled();
+  });
+
   it('本人框选后仍需单独授权，范围明确且默认不允许云端发送', async () => {
     const region = { x: 20, y: 30, width: 320, height: 200 };
     const picker = { select: vi.fn(async () => region), cancel: vi.fn(), dispose: vi.fn() };
@@ -916,8 +947,8 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     const current = fixture();
     await current.host.initialize();
     expect(current.windows).toHaveLength(3);
+    expect(current.windows.map(window => window.protection)).toEqual([true, false, true]);
     for (const window of current.windows) {
-      expect(window.protection).toBe(true);
       expect(window.settings.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true });
     }
     expect(current.windows.slice(1).every(window => window.ignoresMouse)).toBe(true);
@@ -949,13 +980,13 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     expect(onObservationState).toHaveBeenLastCalledWith(expect.objectContaining({ captureActive: false }));
   });
 
-  it('桌宠兼容显示不影响字幕和指引保护，开启观察前恢复、停止后解除桌宠保护', async () => {
+  it('指引浮层允许录屏捕获但不改变桌宠与字幕保护，观察停止后恢复桌宠兼容显示', async () => {
     const current = fixture({ petDisplayCompatible: true });
     await current.host.initialize();
-    expect(current.windows.map(window => window.protection)).toEqual([false, true, true]);
+    expect(current.windows.map(window => window.protection)).toEqual([false, false, true]);
     const originalCapture = current.source.capture.getMockImplementation()!;
     current.source.capture.mockImplementation(async (...argumentsList: Parameters<typeof originalCapture>) => {
-      expect(current.windows.map(window => window.protection)).toEqual([true, true, true]);
+      expect(current.windows.map(window => window.protection)).toEqual([true, false, true]);
       return originalCapture(...argumentsList);
     });
     current.choose();
@@ -968,7 +999,7 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     expect(await current.host.stop('user')).toMatchObject({ stopped: false });
     expect(current.windows[0].protection).toBe(true);
     expect(await current.host.stop('user')).toMatchObject({ stopped: true });
-    expect(current.windows.map(window => window.protection)).toEqual([false, true, true]);
+    expect(current.windows.map(window => window.protection)).toEqual([false, false, true]);
   });
 
   it('右键独立切换远程录屏兼容，第二次启动可启用，不开启观察或麦克风', async () => {
@@ -978,14 +1009,14 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     const entry = current.menus.at(-1)!.find(item => item.label === '远程与录屏可见（观察期间暂停）')!;
     expect(entry).toMatchObject({ type: 'checkbox', checked: false });
     entry.click!();
-    expect(current.windows.map(window => window.protection)).toEqual([false, true, true]);
+    expect(current.windows.map(window => window.protection)).toEqual([false, false, true]);
     await current.invoke('nuanban:pet:context-menu');
     const enabled = current.menus.at(-1)!.find(item => item.label === entry.label)!;
     expect(enabled.checked).toBe(true);
     enabled.click!();
     expect(current.windows[0].protection).toBe(true);
     current.host.setPetDisplayCompatibility(true);
-    expect(current.windows.map(window => window.protection)).toEqual([false, true, true]);
+    expect(current.windows.map(window => window.protection)).toEqual([false, false, true]);
     expect(current.source.capture).not.toHaveBeenCalled();
     expect(current.wake.enable).not.toHaveBeenCalled();
   });

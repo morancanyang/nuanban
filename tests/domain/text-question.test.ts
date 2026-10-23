@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readConversation, type TextQuestionBridge, type TextQuestionReply } from '@nuanban/application';
+import { RemoteConversation } from '@nuanban/api-client';
+import { createConversation } from '../../apps/web/src/conversation';
 import { DesktopConversation } from '../../apps/web/src/text-question';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -65,5 +67,15 @@ describe('前端真实文字适配', () => {
     expect(bridge.cancel).toHaveBeenCalledOnce();
     bridgeFixture(async () => { throw new Error('private-gateway-body'); });
     await expect(ask()).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+  });
+});
+
+describe('前端会话选择', () => {
+  it('浏览器和 Android 使用远程会话，Windows 保留桌面端口', () => {
+    const remoteClient = {} as ConstructorParameters<typeof RemoteConversation>[0];
+    expect(createConversation('browser', remoteClient)).toBeInstanceOf(RemoteConversation);
+    expect(createConversation('android', remoteClient)).toBeInstanceOf(RemoteConversation);
+    expect(createConversation('windows', remoteClient)).toBeInstanceOf(DesktopConversation);
+    expect(createConversation('browser', null)).toBeInstanceOf(DesktopConversation);
   });
 });

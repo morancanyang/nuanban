@@ -36,6 +36,7 @@ class UiElement extends EventTarget {
 
 class UiDocument extends EventTarget {
   elements = new Map<string, UiElement>();
+  activeElement: UiElement | undefined;
   routes: UiElement[] = [];
   tools: UiElement[] = [];
   constructor(html: string) {
@@ -47,6 +48,7 @@ class UiDocument extends EventTarget {
       const tool = attributes.match(/\bdata-tool="([^"]+)"/)?.[1];
       if (!identifier && !route && !tool) continue;
       const element = new UiElement();
+      element.focus.mockImplementation(() => { this.activeElement = element; });
       element.hidden = /\bhidden\b/.test(attributes);
       element.disabled = /\bdisabled\b/.test(attributes);
       if (identifier) this.elements.set(identifier, element);
@@ -92,6 +94,7 @@ function petHarness(initial: unknown = snapshot()) {
   const unsubscribePanel = vi.fn(() => { panelListener = undefined; });
   const bridge = {
     snapshot: vi.fn(async (): Promise<unknown> => current),
+    focusInput: vi.fn(async () => true),
     drag: vi.fn(async (_action: string, _point?: { x: number; y: number }) => true),
     onState: vi.fn((callback: StateListener) => { listener = callback; return unsubscribe; }),
     onPanel: vi.fn((callback: StateListener) => { panelListener = callback; return unsubscribePanel; }),
@@ -407,6 +410,77 @@ describe('直接按住桌宠拖动', () => {
   });
 });
 
+describe('桌宠输入焦点与问答失败恢复', () => {
+  it('初始连接和状态更新不抢焦点，打开输入页及点击输入框才请求原生焦点', async () => {
+    const harness = petHarness();
+    await settle();
+    harness.emit(snapshot());
+    expect(harness.bridge.focusInput).not.toHaveBeenCalled();
+    harness.emitPanel({ expanded: true, section: 'question' });
+    await settle();
+    expect(harness.bridge.focusInput).toHaveBeenCalledOnce();
+    expect(harness.document.activeElement).toBe(harness.element('question'));
+    harness.bridge.focusInput.mockClear();
+    dispatch(harness.element('question'), 'pointerdown', { button: 0 });
+    await settle();
+    expect(harness.bridge.focusInput).toHaveBeenCalledOnce();
+    expect(harness.element('question').disabled).toBe(false);
+  });
+
+  it.each(['navigate', 'collapse', 'other-control', 'dispose'])('迟到的原生焦点确认在 %s 后不重新聚焦输入框', async action => {
+    const harness = petHarness();
+    await settle();
+    harness.emitPanel({ expanded: true, section: 'question' });
+    await settle();
+    let resolveFocus!: (focused: boolean) => void;
+    harness.bridge.focusInput.mockImplementationOnce(() => new Promise(resolve => { resolveFocus = resolve; }));
+    dispatch(harness.element('question'), 'pointerdown', { button: 0 });
+    harness.element('question').focus.mockClear();
+    if (action === 'navigate') {
+      harness.click('view-features');
+      harness.emitPanel({ expanded: true, section: 'question' });
+      await settle();
+      harness.element('question').focus.mockClear();
+    } else if (action === 'collapse') harness.emitPanel({ expanded: false });
+    else if (action === 'other-control') harness.element('collapse-panel').focus();
+    else dispatch(harness.window, 'pagehide');
+    resolveFocus(true);
+    await settle();
+    expect(harness.element('question').focus).not.toHaveBeenCalled();
+  });
+
+  it('模型接口不可用时仍能编辑草稿，但不能发送问题', async () => {
+    const harness = petHarness();
+    delete (harness.bridge as Partial<typeof harness.bridge>).ask;
+    await settle();
+    harness.emitPanel({ expanded: true, section: 'question' });
+    harness.input('接口恢复后再发送的问题');
+    expect(harness.element('question').disabled).toBe(false);
+    expect(harness.element('send-question').disabled).toBe(true);
+    harness.emit(snapshot());
+    expect(harness.element('question').value).toBe('接口恢复后再发送的问题');
+  });
+
+  it('真实 preload 投影后的失败回答保留问题，不显示提交成功提示', async () => {
+    const preload = preloadHarness('pet-preload.cjs');
+    const failure = snapshot({}, {
+      kind: 'text', state: 'ended', result: 'failed', explanation: '模型凭证或模型权限无效，未使用模拟答案。',
+    });
+    preload.ipcRenderer.invoke.mockResolvedValue({ ok: true, snapshot: failure });
+    const harness = petHarness();
+    await settle();
+    harness.bridge.ask.mockImplementationOnce(question => preload.exposed.nuanbanPet.ask(question) as Promise<unknown>);
+    harness.bridge.snapshot.mockResolvedValueOnce(failure);
+    harness.input('怎样保存文件');
+    harness.submit();
+    await settle();
+    expect(harness.element('question').value).toBe('怎样保存文件');
+    expect(harness.element('task-status').textContent).toBe('文字回答未完成');
+    expect(harness.element('dictation-status').textContent).not.toContain('问题已提交');
+    expect(harness.element('send-question').disabled).toBe(false);
+  });
+});
+
 describe('桌宠安静未读提示', () => {
   it('启动不把历史消息当未读，普通状态和用户消息不点亮圆点', async () => {
     const history = { id: 'history', role: 'assistant', text: '之前的回答' };
@@ -653,7 +727,7 @@ describe('桌宠面对面语音入口', () => {
 });
 
 describe('桌宠 preload 的最小 IPC 合约', () => {
-  it('保留文字问答类型与结果，不暴露私有状态', async () => {
+  it('保留文字问答类型，聚焦接口不转发调用方载荷或暴露私有状态', async () => {
     const harness = preloadHarness('pet-preload.cjs');
     const api = harness.exposed.nuanbanPet;
     const state = snapshot({}, { kind: 'text', state: 'ended', result: 'failed', secret: 'discard' });
@@ -664,6 +738,8 @@ describe('桌宠 preload 的最小 IPC 合约', () => {
     harness.handlers.get('nuanban:pet:state')?.({}, state);
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ task: expect.objectContaining({ kind: 'text', result: 'failed' }) }));
     expect(JSON.stringify(listener.mock.calls)).not.toContain('discard');
+    await api.focusInput({ rawFrame: 'discard', windowId: 99 });
+    expect(harness.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet:focus-input');
   });
 
   it('仅活动桌宠语音向气泡投影有限文字，停止或非桌宠模式不泄露旧字幕', async () => {
@@ -693,7 +769,7 @@ describe('桌宠 preload 的最小 IPC 合约', () => {
     const harness = preloadHarness('pet-preload.cjs');
     const api = harness.exposed.nuanbanPet;
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api).sort()).toEqual(['ask', 'cancelDictation', 'close', 'command', 'dictate', 'drag', 'onPanel', 'onState', 'openMain', 'openTool', 'showMenu', 'snapshot']);
+    expect(Object.keys(api).sort()).toEqual(['ask', 'cancelDictation', 'close', 'command', 'dictate', 'drag', 'focusInput', 'onPanel', 'onState', 'openMain', 'openTool', 'showMenu', 'snapshot']);
     await api.openMain();
     await api.openMain('/notes');
     await api.ask('如何收藏网页');
@@ -1500,6 +1576,22 @@ describe('合成 snapshot 的桌宠 DOM 隔离测试，不代表真实跨应用�
     expect(harness.element('question').value).toBe('问题草稿');
   });
 
+  it('已授权持续共享显示新策略说明，并保留用户主动停止入口', async () => {
+    const harness = petHarness(snapshot({ state: 'observing', captureActive: true, reason: 'authorized_sharing' }));
+    await settle();
+    expect(harness.element('observation-status').textContent).toBe('正在本地观察');
+    expect(harness.element('observation-detail').textContent).toContain('已授权持续实时共享');
+    expect(harness.element('observation-detail').textContent).toContain('不再按敏感文字、未知页面或无文字自动暂停');
+    expect(harness.element('observation-detail').textContent).toContain('本地仍遮盖文字与人脸');
+    expect(harness.element('observation-detail').textContent).not.toContain('控件布局模式');
+    expect(harness.element('privacy-notice').hidden).toBe(true);
+    expect(harness.element('stop-observation').disabled).toBe(false);
+    expect(harness.element('stop-observation').textContent).toBe('停止共享');
+    harness.click('stop-observation');
+    await settle();
+    expect(harness.bridge.command).toHaveBeenCalledExactlyOnceWith({ type: 'observation.stop' });
+  });
+
   it('安全控件布局仍显示持续本地观察，并说明没有原始画面和自动出云', async () => {
     const harness = petHarness(snapshot({ state: 'observing', captureActive: true, reason: 'controls_only' }));
     await settle();
@@ -1574,22 +1666,6 @@ describe('合成 snapshot 的桌宠 DOM 隔离测试，不代表真实跨应用�
       expect(harness.element('analysis-status').textContent).toBe('按需分析中');
       expect(harness.element('privacy-detail').textContent).toContain('冲突');
     }
-  });
-
-  it('已授权持续共享显示新策略说明，并保留用户主动停止入口', async () => {
-    const harness = petHarness(snapshot({ state: 'observing', captureActive: true, reason: 'authorized_sharing' }));
-    await settle();
-    expect(harness.element('observation-status').textContent).toBe('正在本地观察');
-    expect(harness.element('observation-detail').textContent).toContain('已授权持续实时共享');
-    expect(harness.element('observation-detail').textContent).toContain('不再按敏感文字、未知页面或无文字自动暂停');
-    expect(harness.element('observation-detail').textContent).toContain('本地仍遮盖文字与人脸');
-    expect(harness.element('observation-detail').textContent).not.toContain('控件布局模式');
-    expect(harness.element('privacy-notice').hidden).toBe(true);
-    expect(harness.element('stop-observation').disabled).toBe(false);
-    expect(harness.element('stop-observation').textContent).toBe('停止共享');
-    harness.click('stop-observation');
-    await settle();
-    expect(harness.bridge.command).toHaveBeenCalledExactlyOnceWith({ type: 'observation.stop' });
   });
 
   it.each(['stopped', 'privacy_paused'])('捕获失败处于 %s 时在本地观察区显示具体恢复提示', async state => {
