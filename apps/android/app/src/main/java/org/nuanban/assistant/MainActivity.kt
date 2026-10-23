@@ -31,6 +31,12 @@ import org.nuanban.assistant.data.ReminderReceipts
 import org.nuanban.assistant.data.ReminderStatuses
 import org.nuanban.assistant.data.ReminderScheduleInput
 import org.nuanban.assistant.data.RoomReminderStore
+import org.nuanban.assistant.nativehost.AndroidModelAccessBridge
+import org.nuanban.assistant.nativehost.AndroidModelAccessHttp
+import org.nuanban.assistant.nativehost.ModelAccessBinder
+import org.nuanban.assistant.nativehost.ModelAccessBroker
+import org.nuanban.assistant.nativehost.ModelAccessRedactionGate
+import org.nuanban.assistant.nativehost.ModelAccessSessionStore
 import org.nuanban.assistant.nativehost.AndroidSecretStore
 import org.nuanban.assistant.nativehost.AndroidHostRuntime
 import org.nuanban.assistant.nativehost.NativeDeviceAuth
@@ -56,6 +62,9 @@ class MainActivity : Activity() {
     @Volatile private var textToSpeech: TextToSpeech? = null
     @Volatile private var ttsReady = false
     private var ttsBridgeFallbackScript: String? = null
+    private lateinit var modelExecutor: ExecutorService
+    private lateinit var modelBridge: AndroidModelAccessBridge
+    private var modelBridgeFallbackScript: String? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         webView = WebView(this)
@@ -99,6 +108,7 @@ class MainActivity : Activity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 ttsBridgeFallbackScript?.let { script -> view.evaluateJavascript(script, null) }
+                modelBridgeFallbackScript?.let { script -> view.evaluateJavascript(script, null) }
             }
             override fun onPageFinished(view: WebView, url: String) {
                 webViewReady = true
@@ -144,6 +154,23 @@ class MainActivity : Activity() {
                 }
             }
         }
+        modelExecutor = Executors.newSingleThreadExecutor()
+        val modelStore = ModelAccessSessionStore(AndroidSecretStore.create(this))
+        val modelTransport = AndroidModelAccessHttp()
+        val networkGranted = checkSelfPermission(android.Manifest.permission.INTERNET) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val modelBroker = ModelAccessBroker(
+            store = modelStore,
+            binder = ModelAccessBinder(modelStore, modelTransport),
+            transport = modelTransport,
+            // 本机图片脱敏/门控尚未接入 Android 管理页（需要 ML Kit 本地检测）；默认拒绝图片上传，fail-closed。
+            redaction = ModelAccessRedactionGate { false },
+            hostUnavailableMessage = {
+                if (networkGranted) null
+                else "当前安装包未声明网络权限（INTERNET），Android 模型通道不可用；不会回退演示回答。"
+            },
+        )
+        modelBridge = AndroidModelAccessBridge(webView, modelBroker, modelExecutor)
+        modelBridgeFallbackScript = modelBridge.register()
         webView.loadUrl("https://appassets.androidplatform.net/assets/ui/index.html")
         dispatchReminderIntent(intent)
     }
@@ -427,6 +454,8 @@ class MainActivity : Activity() {
         runCatching { textToSpeech?.shutdown() }
         textToSpeech = null
         ttsReady = false
+        if (::modelBridge.isInitialized) runCatching { modelBridge.destroy() }
+        if (::modelExecutor.isInitialized) runCatching { modelExecutor.shutdownNow() }
         webView.stopLoading()
         webView.destroy()
         synchronized(bridgeLifecycleLock) {

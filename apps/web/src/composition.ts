@@ -3,6 +3,7 @@ import { IndexedDbRepository, IndexedDbDrawing, IndexedDbDrawingJobs } from '@nu
 import { RemoteApiClient, RemoteRepository, RemoteViews } from '@nuanban/api-client';
 import { createPlatform } from '@nuanban/platform-ports';
 import type { AppServices } from '@nuanban/application';
+import { AndroidImageQuestion, androidModelBridge } from './android-model';
 import { DesktopImageQuestion } from './image-question';
 import { createConversation } from './conversation';
 import { emptyLocalSnapshot } from './local-snapshot';
@@ -19,7 +20,8 @@ export const services: AppServices = {
   conversation: createConversation(config.platformMode, remoteClient),
 };
 export const platform = createPlatform();
-export const imageQuestionService = new DesktopImageQuestion();
+const androidModelAccessBridge = androidModelBridge();
+export const imageQuestionService = androidModelAccessBridge ? new AndroidImageQuestion(androidModelAccessBridge) : new DesktopImageQuestion();
 export const drawingService = new IndexedDbDrawing(services.ownerId);
 export const drawingJobService = new IndexedDbDrawingJobs(services.ownerId);
 export const initialSnapshot = emptyLocalSnapshot;
