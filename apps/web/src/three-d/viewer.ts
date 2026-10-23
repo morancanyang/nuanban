@@ -9,7 +9,6 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import type { VRM } from '@pixiv/three-vrm';
 import type { ModelSource, ModelSummary } from '../local-model';
 import { createModelAnimationController } from './animation-controller';
-import { createLumiStudio } from './lumi-studio';
 import type { ProceduralModelSource } from './lumi-model';
 
 export type DisplayModelSource = ModelSource | ProceduralModelSource;
@@ -145,7 +144,6 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
   const group = new Group();
   const originalLili = loaded.root.getObjectByName('Lili_Original_Blender_Deer')?.userData.character_id === 'lili-original-v2';
   let studioEnvironment: ReturnType<PMREMGenerator['fromScene']> | undefined;
-  let lumiStudio: ReturnType<typeof createLumiStudio>;
   const mixer = new AnimationMixer(loaded.root);
   const animations = createModelAnimationController(mixer, loaded.animations, name => {
     renderer.domElement.dataset.animation = name;
@@ -178,7 +176,6 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
     for (const url of loaded.urls) URL.revokeObjectURL(url);
     renderer.dispose();
     studioEnvironment?.dispose();
-    lumiStudio?.dispose();
     renderer.forceContextLoss();
     renderer.domElement.remove();
   };
@@ -206,8 +203,7 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
       rim.position.set(3, 2, -3);
       scene.add(rim);
     }
-    lumiStudio = createLumiStudio(scene, renderer, loaded.root);
-    camera.position.set(options.interactive ? originalLili ? 0.65 : lumiStudio ? 1.1 : 1.6 : 0, originalLili || lumiStudio ? 0.12 : 0.3, 4.4);
+    camera.position.set(options.interactive ? originalLili ? 0.65 : 1.6 : 0, originalLili ? 0.12 : 0.3, 4.4);
     camera.lookAt(0, 0, 0);
     if (options.interactive) {
       controls = new OrbitControls(camera, renderer.domElement);
@@ -223,7 +219,7 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
       const height = container.clientHeight || 320;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
-      camera.position.z = originalLili || lumiStudio
+      camera.position.z = originalLili
         ? Math.max(size.y, size.x / camera.aspect) / longest / Math.tan(camera.fov * Math.PI / 360) * 1.12
         : Math.max(4.4, 4.4 / camera.aspect);
       camera.lookAt(0, 0, 0);
