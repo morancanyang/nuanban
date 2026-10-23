@@ -1,188 +1,273 @@
 {
   "id": "lili",
   "name": "栗栗 · Lili",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "format": "glb",
   "fileName": "Lili_Independent_Deer.glb",
-  "sha256": "35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327",
-  "bytes": 1601548,
-  "triangles": 76752,
-  "meshes": 39,
-  "decodedMeshes": 43,
+  "sha256": "8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c",
+  "bytes": 7171212,
+  "triangles": 97992,
+  "meshes": 59,
+  "decodedMeshes": 63,
   "bones": 0,
   "animations": 0,
-  "textures": 0,
-  "format": "glb",
+  "textures": 11,
   "background": false,
   "externalResources": false,
-  "optimizedFor": "本地客户端实时预览与透明桌宠",
-  "optimization": "采用 Blender MCP 将影视级雕刻网格降面；移除影视短绒与密集针织曲线，保留雕刻轮廓、鹿角、耳廓、分层眼睛、奶油色口鼻腹部、围巾主体与流苏。",
-  "sourceScene": "MICROGLOW_DEER_STANDALONE",
-  "createdVia": "Blender MCP execute_code",
+  "source": {
+    "file": "microglow_deer_independent.blend",
+    "sha256": "8ec7e5fe48b3c759d0e408d035573d51b131a004aa016be1a4c46d5db829a24e",
+    "scene": "MICROGLOW_DEER_STANDALONE"
+  },
+  "createdVia": "Local Blender source-scene export (scripts/export-lili-runtime.py)",
   "runtime": {
-    "renderer": "procedural-lili",
-    "factory": "createLiliModel",
-    "geometrySource": "客户端 Three.js 程序化生成",
-    "glbPurpose": "受信资源身份、持久化与完整性检查，不作为默认显示几何",
-    "animationCount": 0,
-    "background": false,
-    "posterPurpose": "Blender 参考立绘，用于不启用三维预览时的占位与浏览器页面陪伴"
+    "renderer": "glb",
+    "geometrySource": "Original Blender character and scarf, not a procedural replacement",
+    "knitStitches": 2112,
+    "sourceGroomStrands": 184587,
+    "groomStrands": 21855,
+    "posterPurpose": "Original offline reference render; not the 3D display source",
+    "limitations": [
+      "Static model: no skeletal rig or facial animation.",
+      "Original hair is sampled into mesh fibers; procedural shading is adapted to embedded textures, not exported losslessly."
+    ]
   },
   "parts": [
     {
       "name": "DEER_BODY_CONTINUOUS_SCULPT",
-      "triangles": 23870
+      "triangles": 5500
     },
     {
       "name": "DEER_HEAD_SCULPT",
-      "triangles": 3024
+      "triangles": 4800
     },
     {
       "name": "DEER_CREAM_MUZZLE",
-      "triangles": 798
+      "triangles": 1398
     },
     {
       "name": "DEER_CREAM_BELLY_FLUSH_SURFACE",
-      "triangles": 797
+      "triangles": 1499
     },
     {
       "name": "DEER_NOSE",
-      "triangles": 798
+      "triangles": 750
     },
     {
       "name": "DEER_GENTLE_SMILE",
-      "triangles": 102
+      "triangles": 160
     },
     {
       "name": "DEER_HOOF_-1",
-      "triangles": 798
+      "triangles": 600
     },
     {
       "name": "DEER_HOOF_SPLIT_-1",
-      "triangles": 40
+      "triangles": 80
     },
     {
       "name": "DEER_HAND_CREASE",
-      "triangles": 20
+      "triangles": 128
     },
     {
       "name": "DEER_HAND_CREASE.001",
-      "triangles": 20
+      "triangles": 128
     },
     {
       "name": "DEER_HOOF_1",
-      "triangles": 798
+      "triangles": 600
     },
     {
       "name": "DEER_HOOF_SPLIT_1",
-      "triangles": 40
+      "triangles": 80
     },
     {
       "name": "DEER_HAND_CREASE.002",
-      "triangles": 20
+      "triangles": 128
     },
     {
       "name": "DEER_HAND_CREASE.003",
-      "triangles": 20
+      "triangles": 128
     },
     {
       "name": "DEER_TAIL",
-      "triangles": 798
+      "triangles": 650
     },
     {
       "name": "DEER_TAIL_IVORY_TIP",
-      "triangles": 798
+      "triangles": 650
     },
     {
       "name": "DEER_EAR_SHELL_-1",
-      "triangles": 3800
+      "triangles": 1500
     },
     {
       "name": "DEER_EAR_INNER_-1",
-      "triangles": 1739
+      "triangles": 700
     },
     {
       "name": "DEER_EAR_SHELL_1",
-      "triangles": 3800
+      "triangles": 1500
     },
     {
       "name": "DEER_EAR_INNER_1",
-      "triangles": 1740
+      "triangles": 700
     },
     {
       "name": "DEER_ANTLER_ORGANIC_-1",
-      "triangles": 2460
+      "triangles": 2000
     },
     {
       "name": "DEER_ANTLER_ORGANIC_1",
-      "triangles": 2344
+      "triangles": 2000
     },
     {
       "name": "DEER_EYE_GLOBE_-1",
-      "triangles": 2496
+      "triangles": 900
     },
     {
       "name": "DEER_AMBER_IRIS_-1",
-      "triangles": 1919
+      "triangles": 1599
     },
     {
       "name": "DEER_PUPIL_-1",
-      "triangles": 2496
+      "triangles": 650
     },
     {
       "name": "DEER_CORNEA_-1",
-      "triangles": 1919
+      "triangles": 1100
     },
     {
       "name": "DEER_SOFT_EYELID_-1",
-      "triangles": 1432
+      "triangles": 650
     },
     {
       "name": "DEER_EXPRESSIVE_BROW_-1",
-      "triangles": 39
+      "triangles": 160
     },
     {
       "name": "DEER_EYE_GLOBE_1",
-      "triangles": 2496
+      "triangles": 900
     },
     {
       "name": "DEER_AMBER_IRIS_1",
-      "triangles": 1919
+      "triangles": 1599
     },
     {
       "name": "DEER_PUPIL_1",
-      "triangles": 2496
+      "triangles": 650
     },
     {
       "name": "DEER_CORNEA_1",
-      "triangles": 1919
+      "triangles": 1100
     },
     {
       "name": "DEER_SOFT_EYELID_1",
-      "triangles": 1432
+      "triangles": 650
     },
     {
       "name": "DEER_EXPRESSIVE_BROW_1",
-      "triangles": 39
+      "triangles": 160
     },
     {
       "name": "DEER_SOFT_CHEEK_TINT_-1",
-      "triangles": 402
+      "triangles": 599
     },
     {
       "name": "DEER_SOFT_CHEEK_TINT_1",
-      "triangles": 402
+      "triangles": 599
     },
     {
       "name": "DEER_SCARF_SOFT_CONTINUOUS_COLLAR",
-      "triangles": 1728
+      "triangles": 2400
     },
     {
       "name": "DEER_SCARF_DRAPED_TAIL",
-      "triangles": 3920
+      "triangles": 2500
     },
     {
       "name": "DEER_SCARF_SOFT_FRINGE",
-      "triangles": 1074
+      "triangles": 450
+    },
+    {
+      "name": "DEER_SCARF_COLLAR_KNIT_0",
+      "triangles": 9152
+    },
+    {
+      "name": "DEER_SCARF_COLLAR_KNIT_1",
+      "triangles": 7072
+    },
+    {
+      "name": "DEER_SCARF_COLLAR_KNIT_2",
+      "triangles": 4576
+    },
+    {
+      "name": "DEER_SCARF_TAIL_KNIT_0",
+      "triangles": 5376
+    },
+    {
+      "name": "DEER_SCARF_TAIL_KNIT_1",
+      "triangles": 3808
+    },
+    {
+      "name": "DEER_SCARF_TAIL_KNIT_2",
+      "triangles": 3808
+    },
+    {
+      "name": "DEER_HEAD_SCULPT_FILM_FUR",
+      "triangles": 8320
+    },
+    {
+      "name": "DEER_BODY_CONTINUOUS_SCULPT_FILM_FUR",
+      "triangles": 5689
+    },
+    {
+      "name": "DEER_CREAM_MUZZLE_FILM_FUR",
+      "triangles": 1717
+    },
+    {
+      "name": "DEER_CREAM_BELLY_FLUSH_SURFACE_FILM_FUR",
+      "triangles": 1658
+    },
+    {
+      "name": "DEER_EAR_SHELL_-1_FILM_FUR",
+      "triangles": 769
+    },
+    {
+      "name": "DEER_EAR_SHELL_1_FILM_FUR",
+      "triangles": 769
+    },
+    {
+      "name": "DEER_EAR_INNER_-1_FILM_FUR",
+      "triangles": 414
+    },
+    {
+      "name": "DEER_EAR_INNER_1_FILM_FUR",
+      "triangles": 414
+    },
+    {
+      "name": "DEER_TAIL_FILM_FUR",
+      "triangles": 473
+    },
+    {
+      "name": "DEER_TAIL_IVORY_TIP_FILM_FUR",
+      "triangles": 284
+    },
+    {
+      "name": "DEER_ANTLER_ORGANIC_-1_FILM_FUR",
+      "triangles": 260
+    },
+    {
+      "name": "DEER_ANTLER_ORGANIC_1_FILM_FUR",
+      "triangles": 260
+    },
+    {
+      "name": "DEER_SCARF_SOFT_CONTINUOUS_COLLAR_FILM_FUR",
+      "triangles": 532
+    },
+    {
+      "name": "DEER_SCARF_DRAPED_TAIL_FILM_FUR",
+      "triangles": 296
     }
   ]
 }

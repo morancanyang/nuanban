@@ -117,7 +117,7 @@ describe('模型 IPC 权限与通知', () => {
   }
   it.each([
     { id: 'lumi', bytes: 5411364, fileName: 'Lumi_Magical_Kitten.glb', sha256: '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90' },
-    { id: 'lili', bytes: 1601548, fileName: 'Lili_Independent_Deer.glb', sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327' },
+    { id: 'lili', bytes: 7171212, fileName: 'Lili_Independent_Deer.glb', sha256: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c' },
   ])('内置 $id 只读预览不暂存、不改当前伙伴；确认后验证并持久化', async builtin => {
     const current = bridgeFixture();
     const first = current.store.stage(candidate());

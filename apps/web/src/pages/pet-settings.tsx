@@ -45,7 +45,7 @@ export function PetsPage() {
       }
       const model = await modelBridge.applyBuiltin('lili');
       if (model.kind !== 'model' || model.id !== liliModel.sha256) throw new Error('小鹿资源状态未确认，请重试。');
-      setCallStatus('客户端建模小鹿已保存并调用到桌面。');
+      setCallStatus('原版小鹿 3D 模型已保存并调用到桌面。');
     } catch (error) { setCallError(error instanceof Error ? error.message : '栗栗桌宠调用未完成，请重试。'); }
     finally { setCalling(false); }
   }
@@ -78,7 +78,7 @@ export function PetsPage() {
         {isLili && <section className="lili-resource-card" aria-label="栗栗角色资源">
           <Badge tone="sage">本机 3D 模型 · 固定角色</Badge>
           <h3>栗栗小鹿 · 围一条暖围巾，陪在身旁。</h3>
-          <p>客户端本地生成栗栗三维模型，运行时无需打开 Blender。这里使用透明参考立绘，独立详情页支持真实三维旋转。</p>
+          <p>客户端加载参考图对应的原版栗栗模型，运行时无需打开 Blender。这里使用透明参考立绘，独立详情页支持真实三维旋转。</p>
           <div className="lili-resource-tags"><span>资源 ID：<code>lili</code></span><span>静态 3D 模型 · 无内置动画</span></div>
           <p className="small-note">确认应用会在本机记住伙伴；调用会校验并保存本机模型、切换桌面角色，不会替你保存本页候选设置。栗栗的五官、围巾和配色保持统一，不使用下方通用微调。</p>
           <button className="button secondary" disabled={calling || busy} onClick={() => void callLili()}><Monitor size={18} />{calling ? '正在请栗栗陪伴…' : canCall ? '调用栗栗 3D 桌宠' : '在本页显示栗栗'}</button>
@@ -92,7 +92,7 @@ export function PetsPage() {
           <label>动作姿态<select aria-label="动作姿态" disabled={isLili} value={draft.appearance.action} onChange={event => tune('action', event.target.value as PetAppearance['action'])}><option value="idle">安静陪伴</option><option value="greeting">招招手</option><option value="celebrating">一起庆祝</option></select></label>
           <label>伙伴颜色<input type="color" aria-label="伙伴颜色" disabled={isLili} value={draft.appearance.color} onChange={event => tune('color', event.target.value)} /></label>
         </div>
-        <p className="small-note">{isLili ? '小鹿由客户端实时建模，此版为静态模型，不包含动作动画。' : '通用微调只适用于猫、兔、狗的内置 SVG 形象，不代表生成动画。'}</p>
+        <p className="small-note">{isLili ? '小鹿使用 Blender 原版模型并在本机渲染，此版为静态模型，不包含动作动画。' : '通用微调只适用于猫、兔、狗的内置 SVG 形象，不代表生成动画。'}</p>
         <div className="stack"><button className="button primary" disabled={!changed || busy} onClick={() => setConfirmation('apply')}><Check size={19} />预览满意，确认应用</button><button className="button secondary" disabled={busy} onClick={reload}>放弃预览，读取当前设置</button><button className="button secondary" disabled={!preferences.previousPet || busy} onClick={() => setConfirmation('undo')}><RotateCcw size={18} />撤回上次应用</button></div>
       </section>
     </div>

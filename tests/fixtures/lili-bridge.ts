@@ -4,12 +4,13 @@ import type { Page } from '@playwright/test';
 import type { LocalModel } from '../../apps/web/src/local-model';
 
 export async function installLiliModelBridge(page: Page, options: { failOnce?: string; pending?: boolean } = {}) {
-  await page.addInitScript(({ bytes, failOnce, pending }) => {
+  await page.addInitScript(({ encoded, failOnce, pending }) => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
     const listeners = new Set<(model: LocalModel) => void>();
     const model: LocalModel = {
-      kind: 'model', id: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327',
+      kind: 'model', id: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c',
       fileName: 'Lili_Independent_Deer.glb', format: 'glb', bytes: new Uint8Array(bytes),
-      summary: { triangles: 76752, meshes: 43, bones: 0, animations: 0, decodedBytes: 4000000, textures: [] },
+      summary: { triangles: 97992, meshes: 63, bones: 0, animations: 0, decodedBytes: 40000000, textures: [{ width: 512, height: 512 }, { width: 1024, height: 512 }] },
       updatedAt: '2026-10-23T00:00:00.000Z',
     };
     let active: LocalModel = localStorage.getItem('test-lili-active') ? model : { kind: 'none' };
@@ -41,5 +42,5 @@ export async function installLiliModelBridge(page: Page, options: { failOnce?: s
       discard: async () => true,
       onChanged: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     };
-  }, { ...options, bytes: Array.from(readFileSync(join(process.cwd(), 'apps/web/public/models/lili/Lili_Independent_Deer.glb'))) });
+  }, { ...options, encoded: readFileSync(join(process.cwd(), 'apps/web/public/models/lili/Lili_Independent_Deer.glb')).toString('base64') });
 }

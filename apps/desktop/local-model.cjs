@@ -257,7 +257,7 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
     if (id !== 'lumi' && id !== 'lili') throw new Error('未知的内置三维伙伴');
     const builtin = {
       lumi: { fileName: 'Lumi_Magical_Kitten.glb', bytes: 5411364, sha256: '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90' },
-      lili: { fileName: 'Lili_Independent_Deer.glb', bytes: 1601548, sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327' },
+      lili: { fileName: 'Lili_Independent_Deer.glb', bytes: 7171212, sha256: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c' },
     }[id];
     const { fileName } = builtin;
     const filePath = path.join(builtinModelsPath, id, fileName);

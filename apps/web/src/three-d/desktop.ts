@@ -1,7 +1,6 @@
 import { createModelView } from './viewer';
 import type { LocalModel } from '../local-model';
-import { liliModel, loadLumiModel, lumiModel } from './builtin-models';
-import { createLiliModel } from './lili-model';
+import { liliModel, loadLiliModel, loadLumiModel, lumiModel } from './builtin-models';
 
 const validationStage = document.getElementById('model-validation-stage');
 if (validationStage && window.nuanbanModelValidator) {
@@ -46,7 +45,7 @@ if (modelStage && window.nuanbanModel) {
     modelStage!.hidden = false;
     try {
       const source = model.id === lumiModel.previousSha256 ? await loadLumiModel()
-        : model.id === liliModel.sha256 ? createLiliModel() : model;
+        : model.id === liliModel.previousSha256 ? await loadLiliModel() : model;
       const view = await createModelView(stage, source, { onError: text => {
         if (disposed || currentRevision !== revision) return;
         reset(); message(text);

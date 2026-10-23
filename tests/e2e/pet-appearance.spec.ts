@@ -35,10 +35,10 @@ test('桌面调用单独触发，失败可重试且不自动保存候选角色',
   await expect(call).toBeEnabled();
   await call.click();
   await expect(page.getByRole('alert')).toContainText('模拟栗栗资源未能加载');
-  await expect(page.getByText('客户端建模小鹿已保存并调用到桌面。', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('原版小鹿 3D 模型已保存并调用到桌面。', { exact: true })).toHaveCount(0);
   await call.click();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  await expect(page.getByText('客户端建模小鹿已保存并调用到桌面。', { exact: true })).toBeVisible();
+  await expect(page.getByText('原版小鹿 3D 模型已保存并调用到桌面。', { exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: '桌宠微调预览' }).getByRole('img').first()).toHaveAttribute('aria-label', '小橘猫暖暖');
   await page.reload();
   await expect(page.getByRole('button', { name: '小橘猫', exact: true })).toHaveAttribute('aria-pressed', 'true');

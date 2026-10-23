@@ -10,7 +10,7 @@ test('伙伴收藏分别打开小鹿和小猫的独立页面，手机浏览器�
   await collection.getByRole('link', { name: /认识小鹿栗栗/ }).click();
   await expect(page).toHaveURL(/#\/pets\/lili$/);
   await expect(page.getByRole('heading', { name: '小鹿栗栗', exact: true })).toBeVisible();
-  await expect(page.getByRole('region', { name: '栗栗 Lili' })).toContainText('客户端实时建模');
+  await expect(page.getByRole('region', { name: '栗栗 Lili' })).toContainText('Blender 原版 · 本机 3D 渲染');
   await expect(page.getByRole('region', { name: '栗栗 Lili' })).toContainText('静态 3D 模型 · 无内置动画');
   const liliButton = page.getByRole('button', { name: '在本页显示栗栗', exact: true });
   await expect(liliButton).toBeEnabled();
@@ -48,10 +48,10 @@ test('小鹿独立页确认后才调用原生桥，失败可重试且不伪报�
   await page.getByRole('button', { name: '请栗栗到桌面', exact: true }).click();
   await page.getByRole('button', { name: '确认切换并显示栗栗', exact: true }).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('测试角色资源读取失败');
-  await expect(page.getByText('客户端建模小鹿已保存并调用到桌面。', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('原版小鹿 3D 模型已保存并调用到桌面。', { exact: false })).toHaveCount(0);
   await page.getByRole('button', { name: '确认切换并显示栗栗', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('客户端建模小鹿已保存并调用到桌面。');
+  await expect(page.getByRole('status')).toContainText('原版小鹿 3D 模型已保存并调用到桌面。');
   expect(await page.evaluate(() => sessionStorage.getItem('lili-detail-calls'))).toBe('2');
   await page.reload();
   await expect(page.getByText('当前 3D 桌宠', { exact: true })).toBeVisible();
@@ -72,7 +72,8 @@ test('客户端小鹿支持真实旋转，预览无内置动画、不调用或�
   await card.getByRole('button', { name: '预览小鹿 3D 模型' }).click();
   const canvas = card.locator('canvas');
   await expect(canvas).toBeVisible();
-  await expect(canvas).toHaveAttribute('data-render-source', 'procedural-lili');
+  await expect(canvas).toHaveAttribute('data-render-source', 'glb');
+  await expect(card.locator('.lili-model-poster')).toHaveCount(0);
   expect(await canvas.getAttribute('data-animation')).toBeNull();
   const before = await canvas.screenshot();
   const bounds = (await canvas.boundingBox())!;
@@ -88,5 +89,11 @@ test('客户端小鹿支持真实旋转，预览无内置动画、不调用或�
   await expect(card.getByRole('img', { name: /栗栗小鹿三维参考立绘/ })).toBeVisible();
   expect(errors).toEqual([]);
   expect(uploads).toEqual([]);
-  expect(glbRequests).toEqual([]);
+  expect(glbRequests).toHaveLength(1);
+  await card.getByRole('button', { name: '预览小鹿 3D 模型' }).click();
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toHaveAttribute('data-render-source', 'glb');
+  await card.getByRole('button', { name: '收起 3D 预览' }).click();
+  await expect(canvas).toHaveCount(0);
 });

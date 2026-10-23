@@ -3,24 +3,25 @@ import { Box, Check, FolderOpen, RotateCcw } from 'lucide-react';
 import { Badge, Modal } from '../components';
 import { localModelBridge } from '../local-model';
 import type { LocalModel, ModelCandidate, ModelSource } from '../local-model';
-import { liliModel } from './builtin-models';
-import { createLiliModel } from './lili-model';
+import { liliModel, loadLiliModel } from './builtin-models';
 import './model-panel.css';
 
 function ModelPreview({ source, onReady, onError }: { source: ModelSource; onReady: () => void; onError: (message: string) => void }) {
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const controller = new AbortController();
     let disposed = false;
     let view: { dispose(): void } | undefined;
     void import('./viewer').then(async ({ createModelView }) => {
       if (disposed || !container.current) return;
-      const displaySource = 'id' in source && source.id === liliModel.sha256 ? createLiliModel() : source;
+      const displaySource = 'id' in source && source.id === liliModel.previousSha256 ? await loadLiliModel(controller.signal) : source;
+      if (disposed || !container.current) return;
       const created = await createModelView(container.current, displaySource, { interactive: true, onError });
       if (disposed) { created.dispose(); return; }
       view = created;
       onReady();
     }).catch(error => { if (!disposed) onError(error instanceof Error ? error.message : '模型预览失败，请重新选择文件'); });
-    return () => { disposed = true; view?.dispose(); };
+    return () => { disposed = true; controller.abort(); view?.dispose(); };
   }, [source, onReady, onError]);
   return <div ref={container} className="model-preview" aria-label="3D 模型预览区域" />;
 }

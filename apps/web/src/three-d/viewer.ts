@@ -1,13 +1,15 @@
 import { ACESFilmicToneMapping, AnimationMixer, Bone, Box3, DirectionalLight, Group, HemisphereLight, LoadingManager,
-  Mesh, PerspectiveCamera, Scene, SRGBColorSpace, Texture, Vector3, WebGLRenderer } from 'three';
+  Mesh, PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Texture, Vector3, WebGLRenderer } from 'three';
 import type { AnimationClip, BufferAttribute, InterleavedBufferAttribute, Material, Object3D, SkinnedMesh } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import type { VRM } from '@pixiv/three-vrm';
 import type { ModelSource, ModelSummary } from '../local-model';
 import { createModelAnimationController } from './animation-controller';
+import { createLumiStudio } from './lumi-studio';
 import type { ProceduralModelSource } from './lumi-model';
 
 export type DisplayModelSource = ModelSource | ProceduralModelSource;
@@ -87,7 +89,7 @@ export function inspectRenderedModel(root: Object3D, animations: AnimationClip[]
 }
 
 async function loadModel(source: DisplayModelSource): Promise<LoadedModel> {
-  if (source.format === 'procedural-lumi' || source.format === 'procedural-lili') {
+  if (source.format === 'procedural-lumi') {
     try {
       return { root: source.root, animations: source.animations, summary: inspectRenderedModel(source.root, source.animations), urls: new Set() };
     } catch (error) { disposeRoot(source.root); throw error; }
@@ -141,6 +143,9 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
   const scene = new Scene();
   const camera = new PerspectiveCamera(32, 1, 0.01, 100);
   const group = new Group();
+  const originalLili = loaded.root.getObjectByName('Lili_Original_Blender_Deer')?.userData.character_id === 'lili-original-v2';
+  let studioEnvironment: ReturnType<PMREMGenerator['fromScene']> | undefined;
+  let lumiStudio: ReturnType<typeof createLumiStudio>;
   const mixer = new AnimationMixer(loaded.root);
   const animations = createModelAnimationController(mixer, loaded.animations, name => {
     renderer.domElement.dataset.animation = name;
@@ -172,6 +177,8 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
     disposeRoot(loaded.root);
     for (const url of loaded.urls) URL.revokeObjectURL(url);
     renderer.dispose();
+    studioEnvironment?.dispose();
+    lumiStudio?.dispose();
     renderer.forceContextLoss();
     renderer.domElement.remove();
   };
@@ -184,11 +191,23 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
     group.add(loaded.root);
     group.scale.setScalar(2 / longest);
     group.position.copy(center).multiplyScalar(-2 / longest);
-    scene.add(group, new HemisphereLight(0xfff4e2, 0x746861, 2.8));
-    const light = new DirectionalLight(0xffffff, 3.2);
-    light.position.set(3, 4, 5);
+    scene.add(group, new HemisphereLight(0xfff4e2, 0x746861, originalLili ? 0.9 : 2.8));
+    const light = new DirectionalLight(0xffffff, originalLili ? 2.2 : 3.2);
+    light.position.set(originalLili ? -3 : 3, 4, 5);
     scene.add(light);
-    camera.position.set(options.interactive ? 1.6 : 0, 0.3, 4.4);
+    if (originalLili) {
+      const environment = new RoomEnvironment();
+      const generator = new PMREMGenerator(renderer);
+      try { studioEnvironment = generator.fromScene(environment, 0.04); }
+      finally { environment.dispose(); generator.dispose(); }
+      scene.environment = studioEnvironment.texture;
+      scene.environmentIntensity = 0.65;
+      const rim = new DirectionalLight(0xffe1bd, 1.8);
+      rim.position.set(3, 2, -3);
+      scene.add(rim);
+    }
+    lumiStudio = createLumiStudio(scene, renderer, loaded.root);
+    camera.position.set(options.interactive ? originalLili ? 0.65 : lumiStudio ? 1.1 : 1.6 : 0, originalLili || lumiStudio ? 0.12 : 0.3, 4.4);
     camera.lookAt(0, 0, 0);
     if (options.interactive) {
       controls = new OrbitControls(camera, renderer.domElement);
@@ -204,7 +223,9 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
       const height = container.clientHeight || 320;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
-      camera.position.z = Math.max(4.4, 4.4 / camera.aspect);
+      camera.position.z = originalLili || lumiStudio
+        ? Math.max(size.y, size.x / camera.aspect) / longest / Math.tan(camera.fov * Math.PI / 360) * 1.12
+        : Math.max(4.4, 4.4 / camera.aspect);
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
     }

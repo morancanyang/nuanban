@@ -21,9 +21,10 @@ export const lumiModel = {
 export const liliModel = {
   id: 'lili',
   name: '栗栗 Lili',
-  version: '1.0.0',
+  version: '2.0.0',
   fileName: 'Lili_Independent_Deer.glb',
-  sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327',
+  sha256: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c',
+  previousSha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327',
   modelUrl: `${import.meta.env.BASE_URL}models/lili/Lili_Independent_Deer.glb`,
   posterUrl: `${import.meta.env.BASE_URL}models/lili/poster.png`,
   manifestUrl: `${import.meta.env.BASE_URL}models/lili/character_manifest.json`,

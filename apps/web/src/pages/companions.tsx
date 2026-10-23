@@ -17,7 +17,7 @@ export function CompanionCatalog() {
       <div className="companion-card-copy">
         <span className="eyebrow">LILI · 栗栗小鹿</span>
         <h2>围一条暖围巾，陪你慢慢来。</h2>
-        <p>琥珀大眼、分叉鹿角和橙黄条纹围巾。客户端实时建模，可旋转预览，静态 3D 无需上传。</p>
+        <p>琥珀大眼、分叉鹿角和橙黄条纹围巾。参考图对应的原版模型，可旋转预览，静态 3D 无需上传。</p>
         <span className="companion-card-link">认识小鹿栗栗<ArrowUpRight size={20} aria-hidden="true" /></span>
       </div>
     </Link>
@@ -40,7 +40,7 @@ export function CompanionCatalog() {
 export function CompanionPage({ companion }: { companion: 'lili' | 'lumi' }) {
   const isLili = companion === 'lili';
   return <>
-    <PageTitle eyebrow="每个小伙伴，都有自己的小天地" title={isLili ? '小鹿栗栗' : '小猫露米'} subtitle={isLili ? '客户端实时生成的静态三维小鹿。先旋转预览，再决定是否请到桌面。' : '一只把陪伴变成小魔法的猫。在这里预览真实 3D 与动作，再决定是否请到桌面。'}>
+    <PageTitle eyebrow="每个小伙伴，都有自己的小天地" title={isLili ? '小鹿栗栗' : '小猫露米'} subtitle={isLili ? '加载参考图对应的原版三维小鹿。先旋转预览，再决定是否请到桌面。' : '一只把陪伴变成小魔法的猫。在这里预览真实 3D 与动作，再决定是否请到桌面。'}>
       <Link className="button secondary" to="/pets"><ArrowLeft size={18} aria-hidden="true" />返回伙伴收藏</Link>
     </PageTitle>
     <nav className="companion-switch" aria-label="选择伙伴详情">

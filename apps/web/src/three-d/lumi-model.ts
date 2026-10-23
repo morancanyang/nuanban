@@ -8,7 +8,7 @@ type Point = [number, number, number];
 export type ProceduralModelSource = {
   root: Group;
   animations: AnimationClip[];
-} & ({ format: 'procedural-lumi'; id: 'lumi' } | { format: 'procedural-lili'; id: 'lili' });
+} & { format: 'procedural-lumi'; id: 'lumi' };
 
 function material(color: number, roughness = 0.68, metalness = 0) {
   return new MeshStandardMaterial({ color, roughness, metalness });
