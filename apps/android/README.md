@@ -29,3 +29,10 @@ C01 的独立 `native-lab` 模块（`org.nuanban.nativelab`）保留为隔离实
 `pnpm android:room:check` 检查 Room 依赖、实体主键/索引、事务状态机、一次性点击令牌、迁移入口和通知拒绝路径，并在本机 Node SQLite 中预演 1→3 迁移；它记录 `roomMigrationPreflightVerified=true`，但仍保持 `deviceVerified=false`、`systemSchedulerVerified=false`，不安装 APK、不申请权限、不触发系统提醒。
 
 普通输出：`app/build/outputs/apk/debug/app-debug.apk`；独立输出：`standalone/build/outputs/apk/debug/standalone-debug.apk`。两者均为调试包，不是签名发布版。`check-standalone-packaging.ps1` 离线编译两个模块并用本机 `aapt2` 与实际 APK DEX 检查权限、包名、启动入口、服务注册及代码隔离；`-SkipBuild` 仅检查已有产物。构建的 Kotlin DSL/SDK XML 弃用提示不构成真机通过证据。
+
+## 2026-10-23 重新构建记录（共享 UI 更新后）
+
+- 流程：`pnpm android:build -Offline`（内部 `pnpm build` + `node scripts/sync-android.mjs` → `apps/web/dist` 全量复制到 `app/src/main/assets/ui` → `:app:assembleDebug`）；随后 `apps/android/check-standalone-packaging.ps1` 同时构建 `:app` 与 `:standalone`。
+- 产物：`app-debug.apk` 5,734,485 字节 `642d365d45c68b91a7793cbd93214d614631cc5b43db7d24375d82d0aab6fefc`；`standalone-debug.apk` 88,194,952 字节 `33b65a98f90e0e20324e5e10d8db53c1ffff9f47e0a276f7018e84e96ab3a27d`。
+- 校验：两个 APK 内 `assets/ui/**` 12 个文件与同批 `apps/web/dist/**` 逐文件 SHA256 一致；打包隔离校验 87/87 通过；`zipalign -c 4` 与 `apksigner verify` 均通过（v2、debug 证书）。
+- 边界：Android 端本次只更新了**共享 Web 界面**与重新出包。Windows 侧的连续共享、光标指引稳定性、模型网关图片缩放等改动属于 Electron 主进程实现，**不在 Android 端**；Android 自身能力（原生桌宠、采屏/悬浮窗、独立包本地 OCR/人脸与云出口）沿用原有实现，未在本次改动。仍为 debug 包、未做真机安装/权限/后台/悬浮窗验收，`deviceVerified=false`。

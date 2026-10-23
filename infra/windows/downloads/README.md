@@ -163,16 +163,18 @@ node scripts/check-d03-candidate.mjs
 
 ## 10. Android 构建产物（同批次，debug 包）
 
-> 构建记录来自同一次 2026-10-22 构建批次，细节见构建机 `.cache/android-build-report.json`。**debug 签名、未做 release 签名、未做真机验收**，与第 1 节的“未签名/未验收”边界一致。
+> 首批构建记录来自 2026-10-22；下表为 **2026-10-23 重新构建**（共享 UI 更新后重出包）。**debug 签名、未做 release 签名、未做真机验收**，与第 1 节的“未签名/未验收”边界一致。
 
 | 产物 | 绝对路径 | 大小 | SHA256 | 变体 |
 | --- | --- | --- | --- | --- |
-| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 5,734,485 字节（5.47 MiB） | `BBBA3458908DCD0004CC87FAB73158D6BF8D273C1347A572DB9AE626726C38D9` | debug，包名 `org.nuanban.assistant` |
-| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 88,034,866 字节（83.96 MiB） | `9B226EF7B4908228C3CE70B05268A883178950133CF218CCA056FA63C65E912E` | debug，包名 `org.nuanban.assistant.standalone` |
+| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 5,734,485 字节（5.47 MiB） | `642D365D45C68B91A7793CBD93214D614631CC5B43DB7D24375D82D0AAB6FEFC` | debug，包名 `org.nuanban.assistant` |
+| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 88,194,952 字节（84.11 MiB） | `33B65A98F90E0E20324E5E10D8DB53C1FFFF9F47E0A276F7018E84E96AB3A27D` | debug，包名 `org.nuanban.assistant.standalone` |
 
-- 构建命令：`pnpm android:build -Offline`（`:app:assembleDebug`，50s）；`apps/android/gradlew.bat -p apps/android :standalone:assembleDebug --no-daemon --offline`（23s）。两条命令退出码均为 0，依赖全部命中本机 Gradle 缓存。
+- 构建命令（2026-10-23）：`pnpm android:build -Offline`（内部执行 `pnpm android:sync` → 最新共享 UI 入 `app/src/main/assets/ui` → `:app:assembleDebug`，21s）；`apps/android/check-standalone-packaging.ps1`（同时构建 `:app` 与 `:standalone` 并做打包隔离校验，17s）。两条命令退出码均为 0，依赖全部命中本机 Gradle 缓存（build-tools 37.0.0）。
 - 两者均通过 `apksigner verify`（v2 scheme）与 `zipalign -c 4`；签名证书为构建机 `~/.android/debug.keystore` 的 Android Debug 证书，不能用于正式分发。
-- APK 内 `assets/ui/index.html` 与同批 `apps/web/dist/index.html` SHA256 一致（共享 UI 同步成功）。
+- 共享 UI：两个 APK 内 `assets/ui/**` 共 12 个文件与 `apps/web/dist/**` **逐文件 SHA256 全部一致**（0 缺失、0 多余、0 不一致），`index.html` 引用的 `assets/index-BgULGisa.js`、`assets/index-CeTjnOdW.css` 均在包内。
 - **真机验收条件不具备**：无真机/模拟器连接，未安装、未抓屏、未录音、未调用云服务；通知、精确闹钟、悬浮窗、MediaProjection 前台服务、OCR/后台提醒均未验证。构建成功不等于真机可用。
 - 距可发布仍缺：release 签名与 release 构建（无 signingConfigs/minify/AAB）、版本号仍为 demo/validation、商店政策与隐私合规、standalone 83.96 MiB 体积优化。
-- 与桌面端相同：**不要把 APK 提交到 git**（`build/` 已被忽略），本次未上传到服务器。
+- 与桌面端相同：**不要把 APK 提交到 git**（`build/` 已被忽略）。2026-10-23 已通过一次性上传通道发布到 `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` 与 `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk`，服务器端逐个校验 SHA256 一致。
+- 打包隔离校验（`apps/android/check-standalone-packaging.ps1`）通过 **87/87**：普通包不含 `INTERNET`/悬浮窗/前台服务/采屏权限与 nativehost 类，独立包含全部相关权限与 6 个组件，独立包 39 个 OCR/人脸模型资产指纹与 `AndroidScreenPolicy.MODEL_FINGERPRINT` 一致，且不含自动 CCT 传输后端。
+- `zipalign -c 4` 与 `apksigner verify` 对两个包均返回 0（v2 scheme，单一 debug 签名者）。

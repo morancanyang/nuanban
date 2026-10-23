@@ -181,13 +181,13 @@ node infra/windows/tools/push-downloads.mjs --instance i-2zedkag2x1e9e610v8jh
 4. 无论成败都恢复原 `web.config`、停掉接收进程、`iisreset`、删除令牌文件；成功时把文件移入 `C:\nuanban\web\downloads\` 并生成下载页；
 5. 之后只通过只读静态目录对外提供下载，`.zip`/`.apk` MIME 已在 `infra/iis/web.config*` 中补齐。
 
-本次已发布（2026-10-22）：
+本次已发布（2026-10-22 起；Android 两包于 2026-10-23 用最新共享 UI 重新构建并覆盖发布）：
 
 | 产物 | URL | 大小（字节） | SHA256 |
 | --- | --- | --- | --- |
 | Windows 桌面便携包（未签名） | `http://59.110.19.225/downloads/NuanbanDemo-0.1.0-win32-x64-portable-20261023-r10.zip` | 182,091,544 | `7481d0ef81b5fb0480360fe96326e6e7a925c310bf6675eacd9aab32f0cd1ce8` |
-| Android 普通客户端（debug） | `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` | 5,734,485 | `bbba3458908dcd0004cc87fab73158d6bf8d273c1347a572db9ae626726c38d9` |
-| Android 独立桌宠（debug） | `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk` | 88,034,866 | `9b226ef7b4908228c3ce70b05268a883178950133cf218cca056fa63c65e912e` |
+| Android 普通客户端（debug） | `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` | 5,734,485 | `642d365d45c68b91a7793cbd93214d614631cc5b43db7d24375d82d0aab6fefc` |
+| Android 独立桌宠（debug） | `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk` | 88,194,952 | `33b65a98f90e0e20324e5e10d8db53c1ffff9f47e0a276f7018e84e96ab3a27d` |
 | 下载页 | `http://59.110.19.225/downloads/` | — | 页面内联同样哈希 |
 
 注意：产物**未签名、未做真机/安装验收**；Windows 会有 SmartScreen 警告；不要把下载目录当可执行目录（IIS 只做静态读取）。上传通道是一次性的，成功/失败都会自动关闭，不要把它当成长期上传入口。
