@@ -4,6 +4,9 @@ const path = require('node:path');
 const { externalScriptPath } = require('../external-script-path.cjs');
 
 const wakePhrases = new Set(['暖伴', '暖伴暖伴', '小暖']);
+// C2: advisory microphone signal problems surfaced by the wake script. Anything outside this list is
+// ignored: signal events never fail an operation.
+const signalProblems = new Set(['none', 'TooNoisy', 'NoSignal', 'TooLoud', 'TooSoft', 'TooFast', 'TooSlow', 'Unknown']);
 
 function wakeError(code) { return Object.assign(new Error(code), { code }); }
 
@@ -19,7 +22,8 @@ function createWindowsLocalWake({ onWake = () => {}, onQuestion = () => {}, onSt
 
   function publish(next, reason, operation = active) {
     const potentiallyActive = Boolean(operation && operation.kind !== 'probe' && !operation.isClosed);
-    state = Object.freeze({ state: next, enabled: Boolean(potentiallyActive), microphoneActive: Boolean(potentiallyActive), generation, ...(reason ? { reason } : {}), localOnly: true, dictationAvailable: operation?.dictationAvailable === true });
+    if (operation) operation.phase = next;
+    state = Object.freeze({ state: next, enabled: Boolean(potentiallyActive), microphoneActive: Boolean(potentiallyActive), generation, ...(reason ? { reason } : {}), localOnly: true, dictationAvailable: operation?.dictationAvailable === true, ...(operation?.signal ? { signal: operation.signal } : {}) });
     notify(onState, state);
   }
 
@@ -60,6 +64,15 @@ function createWindowsLocalWake({ onWake = () => {}, onQuestion = () => {}, onSt
     if (!available(operation)) return;
     if (!event || typeof event !== 'object' || Array.isArray(event)) { fail(operation, 'wake_protocol_invalid'); return; }
     if (event.token !== operation.token || event.generation !== operation.generation) return;
+    if (event.kind === 'signal') {
+      // Advisory only: a valid signal refreshes the last known input level/problem, malformed payloads
+      // are ignored and never fail the running operation.
+      if (Number.isInteger(event.level) && event.level >= 0 && event.level <= 100 && typeof event.problem === 'string' && signalProblems.has(event.problem)) {
+        operation.signal = Object.freeze({ level: event.level, problem: event.problem });
+        if (operation.kind !== 'probe') publish(operation.phase ?? 'listening', undefined, operation);
+      }
+      return;
+    }
     if (event.kind === 'error') {
       fail(operation, typeof event.reason === 'string' && /^wake_[a-z_]{1,60}$/.test(event.reason) ? event.reason : 'wake_engine_failed');
       return;

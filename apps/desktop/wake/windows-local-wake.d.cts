@@ -1,3 +1,4 @@
+export type WindowsLocalWakeSignalProblem = 'none' | 'TooNoisy' | 'NoSignal' | 'TooLoud' | 'TooSoft' | 'TooFast' | 'TooSlow' | 'Unknown';
 export interface WindowsLocalWakeState {
   state: 'disabled' | 'starting' | 'listening' | 'question' | 'stopping' | 'unavailable' | 'error';
   enabled: boolean;
@@ -6,6 +7,8 @@ export interface WindowsLocalWakeState {
   reason?: string;
   localOnly: true;
   dictationAvailable: boolean;
+  /** C2: advisory input level/problem snapshot from the local engine; never affects the fail-closed policy. */
+  signal?: Readonly<{ level: number; problem: WindowsLocalWakeSignalProblem }>;
 }
 export interface WindowsLocalWakeProbe {
   status: 'complete' | 'unavailable';

@@ -47,6 +47,16 @@ node -e "(async()=>{const {createWindowsLocalWake}=require('./apps/desktop/wake/
 
 2026-10-18 的本机无麦 probe 真实返回 zh-CN 引擎 `MS-2052-80-DESK`、dictationAvailable true，状态保持 disabled。这不等于已经验证麦克风权限、实际唤醒率、实际听写或噪声表现；这些必须本人新确认后另行手工验收，本轮没有启麦测试。
 
+## 麦克风信号提示（C2，2026-10-23）
+
+现场实测：内置麦克风阵列音量 87% 且未静音、离线 zh-CN 引擎在位、helper 进程在运行，但拾音电平仅 31/100，引擎报 `TooSoft/TooNoisy/TooSlow`，识别置信度只有 0.03~0.05 → 被判为不确定而拒绝，界面**完全静默**。为此新增**建议性**信号事件，让"没反应"变成"看得到原因"：
+
+- 协议事件：`{ kind: 'signal', level: 0..100, problem: 'none'|'TooNoisy'|'NoSignal'|'TooLoud'|'TooSoft'|'TooFast'|'TooSlow'|'Unknown' }`。
+- 采集方式：`AudioLevelUpdated` / `AudioSignalProblemOccurred` 回调**只写脚本变量**（回调线程不写 stdout，避免协议行交错）；由主轮询循环按 500ms 节流发出，仅在 problem 变化或电平变化 ≥5 时发送。
+- 桥接侧：`windows-local-wake.cjs` 校验 `level` 为 0..100 整数且 problem 在白名单内，合法则写入 `status.signal` 并重新发布状态；**非法载荷一律忽略**，永不因此判定操作失败，也不改变 `enabled`/`microphoneActive`/`dictationAvailable` 语义。
+- UI 侧：`local-voice-panel.tsx` 显示实时电平条与 `micSignalHint()` 建议（信号过弱→靠近麦克风/提高输入音量；环境噪声→关闭噪声源或用耳机麦；语速或停顿→连贯说一句）。
+- **边界**：不改动 0.6/0.78 置信度阈值，不引入云端识别，信号提示不代表已识别成功；真实机型与真实房间的唤醒率/听写率仍需本人现场验收。
+
 ## 官方 API 核对
 
 - Microsoft SpeechRecognitionEngine、InstalledRecognizers、RecognizeAsync、SetInputToDefaultAudioDevice：https://learn.microsoft.com/en-us/dotnet/api/system.speech.recognition.speechrecognitionengine?view=netframework-4.8.1

@@ -3,6 +3,14 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $script:ProtocolToken = $null
 $script:ProtocolGeneration = 0
+# C2: advisory microphone signal state. Audio callbacks only write these variables; the main polling
+# loop emits throttled `signal` events, so protocol lines stay single-threaded and never interleave.
+$script:SignalLevel = 0
+$script:SignalProblem = ''
+$script:SignalEmittedLevel = -1
+$script:SignalEmittedProblem = ''
+$script:SignalNextEmitAt = [DateTime]::MinValue
+$script:SignalProblems = @('none', 'TooNoisy', 'NoSignal', 'TooLoud', 'TooSoft', 'TooFast', 'TooSlow', 'Unknown')
 $script:WakePhrases = @(
   (-join @([char]0x6696, [char]0x4F34)),
   (-join @([char]0x6696, [char]0x4F34, [char]0x6696, [char]0x4F34)),
@@ -122,6 +130,12 @@ try {
       if ($_.Exception.ToString().Contains('0x80070005') -or $_.Exception -is [UnauthorizedAccessException] -or $_.Exception.InnerException -is [UnauthorizedAccessException]) { throw 'wake_microphone_access_denied' }
       throw 'wake_microphone_unavailable'
     }
+    # C2: observe input level and signal problems. Callbacks must not write to stdout.
+    $engine.add_AudioLevelUpdated({ param($sender, $eventArgs) $script:SignalLevel = [int]$eventArgs.AudioLevel })
+    $engine.add_AudioSignalProblemOccurred({ param($sender, $eventArgs) $script:SignalProblem = [string]$eventArgs.AudioSignalProblem })
+    $script:SignalEmittedLevel = -1
+    $script:SignalEmittedProblem = ''
+    $script:SignalNextEmitAt = [DateTime]::MinValue
     try {
       if ($request.mode -eq 'dictation') {
         $engine.InitialSilenceTimeout = [TimeSpan]::FromSeconds(10)
@@ -189,6 +203,20 @@ try {
       }
       $recognition = $null
       $queuedEvents = $null
+      $now = [DateTime]::UtcNow
+      if ($now -ge $script:SignalNextEmitAt) {
+        $problem = $script:SignalProblem
+        if ([string]::IsNullOrEmpty($problem) -or $problem -ceq 'None') { $problem = 'none' }
+        elseif ($script:SignalProblems -notcontains $problem) { $problem = 'Unknown' }
+        $level = [int]$script:SignalLevel
+        $changed = ($problem -cne $script:SignalEmittedProblem) -or ([Math]::Abs($level - $script:SignalEmittedLevel) -ge 5)
+        if ($changed -or ($script:SignalEmittedLevel -lt 0 -and $level -gt 0)) {
+          Write-ProtocolEvent @{ kind = 'signal'; level = $level; problem = $problem }
+          $script:SignalEmittedLevel = $level
+          $script:SignalEmittedProblem = $problem
+        }
+        $script:SignalNextEmitAt = $now.AddMilliseconds(500)
+      }
       Start-Sleep -Milliseconds 20
     }
   }

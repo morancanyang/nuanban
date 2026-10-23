@@ -710,3 +710,57 @@ describe('Windows local wake owner and process boundaries', () => {
     expect(context.wake.snapshot().enabled).toBe(false);
   });
 });
+
+describe('C2 advisory microphone signal reporting', () => {
+  it('surfaces the latest level and problem without changing the running state', async () => {
+    const current = setup();
+    await current.enable();
+    expect(current.wake.snapshot().signal).toBeUndefined();
+    current.child().packet({ kind: 'signal', level: 31, problem: 'TooSoft' });
+    expect(current.wake.snapshot()).toMatchObject({ state: 'listening', enabled: true, microphoneActive: true, signal: { level: 31, problem: 'TooSoft' } });
+    current.child().packet({ kind: 'signal', level: 64, problem: 'none' });
+    expect(current.wake.snapshot()).toMatchObject({ state: 'listening', microphoneActive: true, signal: { level: 64, problem: 'none' } });
+    expect(current.wake.snapshot().reason).toBeUndefined();
+  });
+
+  it.each([
+    ['level above range', { kind: 'signal', level: 101, problem: 'none' }],
+    ['negative level', { kind: 'signal', level: -1, problem: 'none' }],
+    ['fractional level', { kind: 'signal', level: 12.5, problem: 'none' }],
+    ['unknown problem', { kind: 'signal', level: 20, problem: 'TooQuiet' }],
+    ['missing problem', { kind: 'signal', level: 20 }],
+    ['missing level', { kind: 'signal', problem: 'none' }],
+    ['non-object payload', { kind: 'signal', level: '20', problem: 'none' }],
+  ])('ignores a malformed signal (%s) and keeps the operation healthy', async (_label, payload) => {
+    const current = setup();
+    await current.enable();
+    current.child().packet(payload);
+    expect(current.wake.snapshot()).toMatchObject({ state: 'listening', microphoneActive: true });
+    expect(current.wake.snapshot().signal).toBeUndefined();
+    expect(current.onState).not.toHaveBeenCalledWith(expect.objectContaining({ state: 'error' }));
+    expect(current.wake.snapshot().enabled).toBe(true);
+  });
+
+  it('keeps a dictation transcript authoritative while signal events arrive', async () => {
+    const current = setup({ closeOnStop: false, closeOnKill: false });
+    const result = current.wake.dictate({ actor: 'owner', confirmed: true });
+    current.child().packet({ kind: 'signal', level: 8, problem: 'TooNoisy' });
+    expect(current.wake.snapshot()).toMatchObject({ state: 'question', signal: { level: 8, problem: 'TooNoisy' } });
+    current.child().question('把字体调大');
+    current.child().close();
+    await expect(result).resolves.toMatchObject({ status: 'complete', text: '把字体调大' });
+  });
+
+  it('emits the advisory signal from the polling loop and never from an audio callback', () => {
+    const helper = readFileSync('apps/desktop/wake/windows-local-wake.ps1', 'utf8');
+    const loop = helper.slice(helper.indexOf('while ($running)'), helper.indexOf('Start-Sleep -Milliseconds 20'));
+    expect(helper).toContain('add_AudioLevelUpdated');
+    expect(helper).toContain('add_AudioSignalProblemOccurred');
+    expect(loop).toContain("kind = 'signal'");
+    // audio callbacks may only record state; writing protocol lines from them would interleave stdout
+    for (const match of helper.matchAll(/add_Audio(?:LevelUpdated|SignalProblemOccurred)\(\{([^}]*)\}/g)) {
+      expect(match[1]).not.toContain('Write-ProtocolEvent');
+    }
+    expect(loop).toContain('$script:SignalNextEmitAt');
+  });
+});

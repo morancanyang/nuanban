@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { speechAvailable } from '../../apps/web/src/components';
-import { checkedDictationResult, checkedVoiceStatus } from '../../apps/web/src/local-voice';
+import { checkedDictationResult, checkedVoiceSignal, checkedVoiceStatus, micSignalHint } from '../../apps/web/src/local-voice';
 
 describe('语音播放能力边界', () => {
   it('只把存在 speechSynthesis 的环境视为可播放', () => {
@@ -42,5 +42,37 @@ describe('本地听写结果边界（低置信度不执行）', () => {
     expect(() => checkedVoiceStatus({ ...status, localOnly: false })).toThrow();
     expect(() => checkedVoiceStatus({ ...status, enabled: true })).toThrow();
     expect(() => checkedVoiceStatus({ ...status, phase: 'unavailable', message: '本机没有可用的离线中文语音识别，未开启麦克风。' })).not.toThrow();
+  });
+});
+
+describe('麦克风信号提示（只提示原因，不改变判定策略）', () => {
+  const listening = { phase: 'listening', enabled: true, microphoneActive: true, dictationAvailable: true, localOnly: true, message: '正在本机听写' } as const;
+
+  it('接受合法信号快照，缺省时保持无信号', () => {
+    expect(checkedVoiceSignal(undefined)).toBeUndefined();
+    expect(checkedVoiceStatus(listening).signal).toBeUndefined();
+    expect(checkedVoiceStatus({ ...listening, signal: { level: 31, problem: 'TooSoft' } })).toMatchObject({ signal: { level: 31, problem: 'TooSoft' } });
+    expect(checkedVoiceStatus({ ...listening, signal: { level: 0, problem: 'none' } })).toMatchObject({ signal: { level: 0, problem: 'none' } });
+  });
+
+  it('拒绝越界电平、未知问题与非对象信号', () => {
+    for (const signal of [{ level: 101, problem: 'none' }, { level: -1, problem: 'none' }, { level: 12.5, problem: 'none' },
+      { level: 20, problem: 'Loud' }, { level: 20 }, { problem: 'none' }, 'loud', 42]) {
+      expect(() => checkedVoiceStatus({ ...listening, signal })).toThrow();
+    }
+  });
+
+  it('把信号问题映射成可操作提示，且不声称已识别成功', () => {
+    expect(micSignalHint({ level: 31, problem: 'TooSoft' })).toContain('靠近麦克风');
+    expect(micSignalHint({ level: 5, problem: 'none' })).toContain('信号过弱');
+    expect(micSignalHint({ level: 80, problem: 'TooNoisy' })).toContain('噪声');
+    expect(micSignalHint({ level: 80, problem: 'TooSlow' })).toContain('连贯');
+    expect(micSignalHint({ level: 90, problem: 'TooLoud' })).toContain('失真');
+    expect(micSignalHint({ level: 0, problem: 'NoSignal' })).toContain('没有收到任何声音');
+    expect(micSignalHint({ level: 60, problem: 'none' })).toContain('电平 60/100');
+    expect(micSignalHint(undefined)).toContain('正在读取');
+    for (const hint of [micSignalHint({ level: 31, problem: 'TooSoft' }), micSignalHint({ level: 60, problem: 'none' })]) {
+      expect(hint).not.toContain('已识别');
+    }
   });
 });

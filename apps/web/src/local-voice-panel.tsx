@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, RefreshCw, Settings, Square } from 'lucide-react';
-import { checkedDictationResult, checkedVoiceStatus, localVoiceBridge, type LocalVoiceStatus } from './local-voice';
+import { checkedDictationResult, checkedVoiceStatus, localVoiceBridge, micSignalHint, type LocalVoiceStatus } from './local-voice';
 
 export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string) => void }) {
   const [bridge] = useState(localVoiceBridge);
@@ -103,6 +103,14 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
       <strong>{!status ? '麦克风状态待确认' : pending === 'dictate' && status.phase === 'question' ? '正在本机听写，请直接说话' : microphoneMayBeActive ? '桌宠语音正在运行或等待清理' : '桌宠麦克风未开启'}</strong>
       <p>{status?.message || '正在读取本机状态；打开这个面板不会开启麦克风。'}</p>
     </section>
+    {microphoneMayBeActive && <section className="confirmation-box" aria-label="麦克风信号" aria-live="polite">
+      <strong>麦克风信号</strong>
+      <div role="meter" aria-label="麦克风实时电平" aria-valuemin={0} aria-valuemax={100} aria-valuenow={status?.signal?.level ?? 0}
+        style={{ height: '0.6rem', borderRadius: '0.3rem', background: '#eee3d4', overflow: 'hidden' }}>
+        <div style={{ width: `${status?.signal?.level ?? 0}%`, height: '100%', background: (status?.signal?.level ?? 0) < 12 ? '#c9863f' : '#5d9c6b' }} />
+      </div>
+      <p>{micSignalHint(status?.signal)}</p>
+    </section>}
     {showEnableHint && <section id="local-voice-enable-hint" className="confirmation-box" aria-label="开启本地语音提示" aria-live="polite">
       <strong>{pending === 'enable' ? '还差一步：请本人确认开启' : pending === 'dictate' ? '请确认本次输入，再等候听写提示' : '想用语音和微光指引说话？'}</strong>
       <p>{pending === 'dictate'
