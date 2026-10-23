@@ -184,20 +184,21 @@ node scripts/check-d03-candidate.mjs
 
 > 本文件记录的是 2026-10-22 这一次构建的产物；重新构建后路径/大小/哈希都会变化，需要重新生成 `SHA256SUMS.txt` 与本说明。若产物内容或版本变化，本文件的“未签名、未真机验收、不是正式发布”结论必须重新评估。
 
-## 10. Android 构建产物（同批次，debug 包）
+## 10. Android 构建产物（冻结版：2026-10-23 21:10 线上发布，debug 包）
 
-> 首批构建记录来自 2026-10-22；下表为 **2026-10-23 重新构建**（共享 UI 更新后重出包）。**debug 签名、未做 release 签名、未做真机验收**，与第 1 节的“未签名/未验收”边界一致。
+> 冻结版为 **2026-10-23 21:10 通过一次性上传通道发布到试验服务器的那一对**；下表大小与哈希记录的是**线上实际文件**。**debug 签名、未做 release 签名、未做真机验收**，与第 1 节的“未签名/未验收”边界一致。
 
 | 产物 | 绝对路径 | 大小 | SHA256 | 变体 |
 | --- | --- | --- | --- | --- |
-| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 5,132,288 字节（4.895 MiB） | `5AE9627325135EFB74281DAE8DDA2883C97355DAE924BE109E66AEC9817545F9` | debug，包名 `org.nuanban.assistant` |
-| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 88,010,860 字节（83.934 MiB） | `1428CEB8C6A021D212B7789BFFB7E3E3897F465476AFBD1ED9249DB6B042E6DB` | debug，包名 `org.nuanban.assistant.standalone` |
+| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 7,570,810 字节（7.22 MiB） | `5AE9627325135EFB74281DAE8DDA2883C97355DAE924BE109E66AEC9817545F9` | debug，包名 `org.nuanban.assistant` |
+| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 90,449,913 字节（86.26 MiB） | `1428CEB8C6A021D212B7789BFFB7E3E3897F465476AFBD1ED9249DB6B042E6DB` | debug，包名 `org.nuanban.assistant.standalone` |
 
-- 构建命令（2026-10-23）：`pnpm android:build -Offline`（内部执行 `pnpm android:sync` → 最新共享 UI 入 `app/src/main/assets/ui` → `:app:assembleDebug`，21s）；`apps/android/check-standalone-packaging.ps1`（同时构建 `:app` 与 `:standalone` 并做打包隔离校验，17s）。两条命令退出码均为 0，依赖全部命中本机 Gradle 缓存（build-tools 37.0.0）。
+- 构建来源（2026-10-23）：`node scripts/sync-android.mjs` 把 `apps/web/dist`（2026-10-23 20:54 构建，14 个文件，含 Lili/Lumi 资源）同步到 `app/src/main/assets/ui`；随后离线执行 `apps/android/check-standalone-packaging.ps1` 重编 `:app` 与 `:standalone` 并做打包隔离校验（`BUILD SUCCESSFUL in 39s`）。构建完成后未再改动 APK。
 - 两者均通过 `apksigner verify`（v2 scheme）与 `zipalign -c 4`；签名证书为构建机 `~/.android/debug.keystore` 的 Android Debug 证书，不能用于正式分发。
-- 共享 UI：两个 APK 内 `assets/ui/**` 共 12 个文件与 `apps/web/dist/**` **逐文件 SHA256 全部一致**（0 缺失、0 多余、0 不一致），`index.html` 引用的 `assets/index-BgULGisa.js`、`assets/index-CeTjnOdW.css` 均在包内。
+- 共享 UI：构建时使用的 `assets/ui` 快照共 **14 个文件**（含 Lili/Lumi 资源；`index.html` 引用 `assets/index-DZjAi1Wj.js`、`assets/index-CeTjnOdW.css`），该快照仍保存在 `apps/android/app/src/main/assets/ui`，可离线复核。注意：2026-10-23 21:11 本地另有一次重编，注入了更新的未提交共享 UI（`assets/index-BWNOxrR6.js` 等），**不属于本冻结版**。
 - **真机验收条件不具备**：无真机/模拟器连接，未安装、未抓屏、未录音、未调用云服务；通知、精确闹钟、悬浮窗、MediaProjection 前台服务、OCR/后台提醒均未验证。构建成功不等于真机可用。
-- 距可发布仍缺：release 签名与 release 构建（无 signingConfigs/minify/AAB）、版本号仍为 demo/validation、商店政策与隐私合规、standalone 83.96 MiB 体积优化。
+- 距可发布仍缺：release 签名与 release 构建（无 signingConfigs/minify/AAB）、版本号仍为 demo/validation、商店政策与隐私合规、standalone 86.26 MiB 体积优化。
 - 与桌面端相同：**不要把 APK 提交到 git**（`build/` 已被忽略）。2026-10-23 已通过一次性上传通道发布到 `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` 与 `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk`，服务器端逐个校验 SHA256 一致。
-- 打包隔离校验（`apps/android/check-standalone-packaging.ps1`）通过 **87/87**：普通包不含 `INTERNET`/悬浮窗/前台服务/采屏权限与 nativehost 类，独立包含全部相关权限与 6 个组件，独立包 39 个 OCR/人脸模型资产指纹与 `AndroidScreenPolicy.MODEL_FINGERPRINT` 一致，且不含自动 CCT 传输后端。
+- 打包隔离校验（`apps/android/check-standalone-packaging.ps1`）通过 **89/89**：普通包不含 `INTERNET`/悬浮窗/前台服务/采屏权限与 nativehost 类，独立包含全部相关权限与 6 个组件，独立包 39 个 OCR/人脸模型资产指纹与 `AndroidScreenPolicy.MODEL_FINGERPRINT` 一致，普通包不含桌宠形象资源、独立包含该资源，且不含自动 CCT 传输后端。
+- **冻结说明**：本表冻结版为线上已发布的一对（`5ae96273…` / `1428ceb8…`）。2026-10-23 21:11 本地重编得到 `b14803ed…` / `3b196f0a…`，与线上双包内容不同（含更新的未提交共享 UI），**不是发布版本，不得对外分发**；debug 包每次重编哈希都会变化，冻结后不再重编、不再重新上传。
 - `zipalign -c 4` 与 `apksigner verify` 对两个包均返回 0（v2 scheme，单一 debug 签名者）。
