@@ -3,7 +3,7 @@
   "character": {
     "id": "lumi-magical-kitten",
     "name": "Lumi Magical Kitten",
-    "assetVersion": "2.0.0"
+    "assetVersion": "2.1.0"
   },
   "source": {
     "file": "microglow_cat.blend",
@@ -14,9 +14,9 @@
   "runtime": {
     "format": "glTF 2.0 binary (.glb)",
     "file": "Lumi_Magical_Kitten.glb",
-    "fileBytes": 5411364,
-    "sha256": "3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90",
-    "triangleCount": 97978,
+    "fileBytes": 10887504,
+    "sha256": "4cee02df06e168eb99612ab5d807a3efe6025d14c7dfec516616ff8825b0e9b3",
+    "triangleCount": 97976,
     "meshCount": 148,
     "materialCount": 19,
     "skeleton": {
@@ -24,12 +24,16 @@
     },
     "frameRate": 30,
     "groom": {
-      "method": "Tapered triangle ribbons from original curves and packed normal map",
-      "strands": 12364,
+      "method": "Five-strand alpha cards following original curves with surface-aligned normals and packed normal map",
+      "cards": 11003,
+      "strandsPerCard": 5,
+      "representedStrands": 55015,
       "lossless": false
     },
     "textures": [
+      "Microglow five-strand groom alpha atlas",
       "Microglow short-fur normal",
+      "Microglow baked contact occlusion",
       "Microglow woven cloak normal",
       "Microglow original blue iris baked"
     ],

@@ -3,7 +3,7 @@ import { Box, Check, Monitor, RotateCcw, Sparkles } from 'lucide-react';
 import { Badge, Modal } from '../components';
 import { localModelBridge } from '../local-model';
 import { showBrowserCompanion } from '../browser-companion';
-import { loadLumiModel, lumiModel } from './builtin-models';
+import { isBuiltinLumi, loadLumiModel, lumiModel } from './builtin-models';
 import type { createModelView } from './viewer';
 import './lumi-card.css';
 
@@ -25,7 +25,7 @@ export function LumiCard() {
     let disposed = false;
     let revision = 0;
     const update = (model: Awaited<ReturnType<typeof bridge.read>>) => {
-      if (!disposed) setActive(model.kind === 'model' && (model.id === lumiModel.sha256 || model.id === lumiModel.previousSha256));
+      if (!disposed) setActive(model.kind === 'model' && isBuiltinLumi(model.id));
     };
     const unsubscribe = bridge.onChanged(model => { revision++; update(model); });
     const initialRevision = revision;

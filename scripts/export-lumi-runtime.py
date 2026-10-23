@@ -34,9 +34,10 @@ def triangle_count(mesh):
 
 def geometry_budget(name):
     budgets = [
-        ("CAT_HEAD", 5100), ("CAT_BODY", 2800), ("CAT_CHEST", 1300),
+        ("CAT_HEAD", 5800), ("CAT_BODY", 3200), ("CAT_CHEST", 1300),
         ("CAT_CLOAK_tailored", 6800), ("CAT_EAR", 1500),
-        ("_iris", 1600), ("_corneal", 1200), ("_sclera", 1100),
+        ("_iris", 2200), ("_corneal", 1200), ("_sclera", 1100),
+        ("_limbal_ring", 1100), ("CAT_EYELID", 400),
         ("_vertical_pupil", 550), ("CAT_TAIL", 1500),
         ("CAT_MUZZLE", 850), ("CAT_CHIN", 650), ("CAT_NOSE", 700),
         ("CAT_ARM", 1100), ("CAT_FOOT", 800), ("CAT_LEG", 550),
@@ -98,15 +99,16 @@ print("RUNTIME_BASE_TRIANGLES", sum(triangle_count(obj.data) for obj in objects)
 
 
 def normal_texture(name, woven=False):
-    size = 512
+    size = 1024 if not woven else 512
     coordinates = np.arange(size, dtype=float)
     horizontal, vertical = np.meshgrid(coordinates, coordinates)
     if woven:
-        height = np.sin(horizontal * math.tau / 8) * np.cos(vertical * math.tau / 8) * 0.45
+        height = np.sin(horizontal * math.tau / 8) * np.cos(vertical * math.tau / 8) * 0.22
+        height += np.sin(horizontal * math.tau / 4) * 0.025
     else:
-        height = generator.normal(0, 0.17, (size, size))
-        height = height * 0.2 + np.roll(height, 1, axis=0) * 0.3 + np.roll(height, 2, axis=0) * 0.3 + np.roll(height, 3, axis=0) * 0.2
-        height += 0.08 * np.sin(horizontal * math.tau / 3 + 0.3 * np.sin(vertical * math.tau / 32))
+        noise = generator.normal(0, 0.24, (size, size))
+        height = sum(np.roll(noise, shift, axis=0) for shift in range(9)) / 9
+        height += 0.035 * np.sin(horizontal * math.tau / 5 + 0.5 * np.sin(vertical * math.tau / 64))
     gradient_vertical, gradient_horizontal = np.gradient(height)
     normals = np.stack((-gradient_horizontal * 4, -gradient_vertical * 4, np.ones_like(height)), axis=2)
     normals /= np.linalg.norm(normals, axis=2)[:, :, None]
@@ -128,6 +130,8 @@ for material in {slot.material for obj in objects for slot in obj.material_slots
         continue
     shader = principled(material)
     shader.inputs["Subsurface Weight"].default_value = 0
+    if material_name == "CAT | clear tear film cornea":
+        shader.inputs["Roughness"].default_value = 0.015
     for link in list(shader.inputs["Normal"].links):
         material.node_tree.links.remove(link)
     if material_name not in fur_names | cloth_names:
@@ -136,15 +140,25 @@ for material in {slot.material for obj in objects for slot in obj.material_slots
     links = material.node_tree.links
     coordinates = nodes.new("ShaderNodeTexCoord")
     mapping = nodes.new("ShaderNodeMapping")
-    mapping.inputs["Scale"].default_value = (18, 18, 1) if material_name in fur_names else (12, 12, 1)
+    mapping.inputs["Scale"].default_value = (1.25, 1, 1) if material_name in fur_names else (4, 4, 1)
     texture = nodes.new("ShaderNodeTexImage")
     texture.image = fur_normal if material_name in fur_names else cloth_normal
     normal = nodes.new("ShaderNodeNormalMap")
-    normal.inputs["Strength"].default_value = 0.35 if material_name in fur_names else 0.2
+    normal.inputs["Strength"].default_value = 0.45 if material_name in fur_names else 0.3
     links.new(coordinates.outputs["UV"], mapping.inputs["Vector"])
     links.new(mapping.outputs["Vector"], texture.inputs["Vector"])
     links.new(texture.outputs["Color"], normal.inputs["Color"])
     links.new(normal.outputs["Normal"], shader.inputs["Normal"])
+    if material_name in fur_names:
+        shader.inputs["Roughness"].default_value = 0.86
+        shader.inputs["Sheen Weight"].default_value = 0.25
+        shader.inputs["Sheen Roughness"].default_value = 0.75
+        shader.inputs["Sheen Tint"].default_value = (0.22, 0.21, 0.19, 1)
+    else:
+        shader.inputs["Roughness"].default_value = 0.8
+        shader.inputs["Sheen Weight"].default_value = 0.28
+        shader.inputs["Sheen Roughness"].default_value = 0.7
+        shader.inputs["Sheen Tint"].default_value = (0.15, 0.11, 0.2, 1)
 
 
 iris_object = next(obj for obj in objects if "EYE_L_iris" in obj.name)
@@ -155,7 +169,7 @@ iris_output = next(node for node in iris.node_tree.nodes if node.type == "OUTPUT
 emission = iris.node_tree.nodes.new("ShaderNodeEmission")
 iris.node_tree.links.new(iris_color, emission.inputs["Color"])
 iris.node_tree.links.new(emission.outputs[0], iris_output.inputs["Surface"])
-iris_image = bpy.data.images.new("Microglow original blue iris baked", width=1024, height=1024, alpha=False)
+iris_image = bpy.data.images.new("Microglow original blue iris baked", width=2048, height=2048, alpha=False)
 iris_texture = iris.node_tree.nodes.new("ShaderNodeTexImage")
 iris_texture.image = iris_image
 iris.node_tree.nodes.active = iris_texture
@@ -171,12 +185,112 @@ iris.node_tree.links.new(iris_texture.outputs["Color"], iris_shader.inputs["Base
 iris_image.pack()
 
 
-fur_material = bpy.data.materials.new("Microglow real-time groom ribbons")
+def bake_contact_occlusion():
+    matte_names = fur_names | cloth_names | {"CAT | chestnut soft leather"}
+    targets = [obj for obj in objects if any(slot.material.name.split(".")[0] in matte_names for slot in obj.material_slots)]
+    materials = {slot.material for obj in targets for slot in obj.material_slots}
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in bpy.context.scene.objects:
+        obj.hide_render = obj.name not in runtime.objects
+    for obj in targets:
+        obj.select_set(True)
+        obj.data.uv_layers.new(name="RuntimeAO")
+        obj.data.uv_layers.active = obj.data.uv_layers["RuntimeAO"]
+    bpy.context.view_layer.objects.active = targets[0]
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=1.1, island_margin=0.004, area_weight=0.4, scale_to_bounds=True)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    image = bpy.data.images.new("Microglow baked contact occlusion", width=1024, height=1024, alpha=False)
+    image.colorspace_settings.name = "Non-Color"
+    image.generated_color = (1, 1, 1, 1)
+    restoration = []
+    for material in materials:
+        nodes, links = material.node_tree.nodes, material.node_tree.links
+        material_output = next(node for node in nodes if node.type == "OUTPUT_MATERIAL")
+        previous = material_output.inputs["Surface"].links[0].from_socket
+        occlusion = nodes.new("ShaderNodeAmbientOcclusion")
+        occlusion.inputs["Distance"].default_value = 0.14
+        occlusion.samples = 16
+        soften = nodes.new("ShaderNodeMath")
+        soften.operation = "MULTIPLY_ADD"
+        soften.inputs[1].default_value = 0.65
+        soften.inputs[2].default_value = 0.35
+        emission = nodes.new("ShaderNodeEmission")
+        links.new(occlusion.outputs["AO"], soften.inputs[0])
+        links.new(soften.outputs[0], emission.inputs["Color"])
+        links.new(emission.outputs[0], material_output.inputs["Surface"])
+        texture = nodes.new("ShaderNodeTexImage")
+        texture.image = image
+        nodes.active = texture
+        restoration.append((material, previous, material_output, texture, (occlusion, soften, emission)))
+    bpy.context.scene.cycles.samples = 16
+    bpy.ops.object.bake(type="EMIT", use_clear=False, uv_layer="RuntimeAO", margin=8)
+    settings = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+    settings.interface.new_socket(name="Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+    for material, previous, material_output, texture, temporary in restoration:
+        nodes, links = material.node_tree.nodes, material.node_tree.links
+        links.new(previous, material_output.inputs["Surface"])
+        for node in temporary:
+            nodes.remove(node)
+        coordinates = nodes.new("ShaderNodeUVMap")
+        coordinates.uv_map = "RuntimeAO"
+        links.new(coordinates.outputs["UV"], texture.inputs["Vector"])
+        group = nodes.new("ShaderNodeGroup")
+        group.node_tree = settings
+        links.new(texture.outputs["Color"], group.inputs["Occlusion"])
+    for obj in targets:
+        obj.data.uv_layers.active_index = 0
+        obj.data.uv_layers[0].active_render = True
+    image.pack()
+
+
+bake_contact_occlusion()
+
+
+def groom_atlas():
+    width, height, variants = 512, 1024, 8
+    horizontal = (np.arange(width) + 0.5) / width
+    vertical = (np.arange(height) + 0.5) / height
+    grid_horizontal, grid_vertical = np.meshgrid(horizontal, vertical)
+    alpha = np.zeros((height, width), dtype=np.float32)
+    for variant in range(variants):
+        local_horizontal = grid_horizontal * variants - variant
+        local_alpha = np.zeros_like(alpha)
+        for strand_index in range(5):
+            center = (strand_index + 0.5) / 5 + generator.uniform(-0.035, 0.035)
+            bend = generator.uniform(-0.08, 0.08) * np.sin(grid_vertical * math.pi)
+            tip = generator.uniform(0.72, 0.99)
+            radius = generator.uniform(0.045, 0.06) * np.maximum(0, 1 - grid_vertical / tip) ** 0.6
+            stroke = np.clip((radius - np.abs(local_horizontal - center - bend)) * 220 + 0.5, 0, 1)
+            stroke *= np.clip((tip - grid_vertical) * 60, 0, 1)
+            local_alpha = np.maximum(local_alpha, stroke)
+        alpha = np.maximum(alpha, local_alpha * ((local_horizontal >= 0) & (local_horizontal <= 1)))
+    pixels = np.ones((height, width, 4), dtype=np.float32)
+    pixels[:, :, 3] = alpha
+    image = bpy.data.images.new("Microglow five-strand groom alpha atlas", width=width, height=height, alpha=True)
+    image.pixels.foreach_set(pixels.ravel())
+    image.pack()
+    return image
+
+
+fur_material = bpy.data.materials.new("Microglow real-time groom cards")
 fur_material.use_nodes = True
-fur_material.use_backface_culling = False
+fur_material.use_backface_culling = True
 fur_shader = principled(fur_material)
-fur_shader.inputs["Roughness"].default_value = 0.95
-fur_shader.inputs["Sheen Weight"].default_value = 0.18
+fur_shader.inputs["Roughness"].default_value = 0.86
+fur_shader.inputs["Sheen Weight"].default_value = 0.25
+fur_shader.inputs["Sheen Roughness"].default_value = 0.75
+fur_shader.inputs["Sheen Tint"].default_value = (0.22, 0.21, 0.19, 1)
+fur_material.alpha_threshold = 0.25
+fur_material.surface_render_method = "DITHERED"
+fur_alpha = fur_material.node_tree.nodes.new("ShaderNodeTexImage")
+fur_alpha.image = groom_atlas()
+fur_mask = fur_material.node_tree.nodes.new("ShaderNodeMath")
+fur_mask.operation = "GREATER_THAN"
+fur_mask.inputs[1].default_value = 0.25
+fur_material.node_tree.links.new(fur_alpha.outputs["Alpha"], fur_mask.inputs[0])
+fur_material.node_tree.links.new(fur_mask.outputs[0], fur_shader.inputs["Alpha"])
 attribute = fur_material.node_tree.nodes.new("ShaderNodeVertexColor")
 attribute.layer_name = "GroomColor"
 fur_material.node_tree.links.new(attribute.outputs["Color"], fur_shader.inputs["Base Color"])
@@ -198,7 +312,9 @@ for groom in grooms:
     vertices = []
     faces = []
     colors = []
-    pale = "pale" in groom.data.materials[0].name
+    normals = []
+    coordinates = []
+    base_color = tuple(principled(surface.material_slots[0].material).inputs["Base Color"].default_value)[:3]
     for strand in strands:
         start, middle, end = [Vector(strand[index]) for index in (0, 2, 4)]
         local = surface.matrix_world.inverted() @ start
@@ -207,21 +323,28 @@ for groom in grooms:
         width_axis = (end - start).cross(normal).normalized()
         if width_axis.length < 0.01:
             width_axis = normal.cross(Vector((0.36, 0.62, 0.7))).normalized()
-        width = generator.uniform(0.00055, 0.00105)
+        width = generator.uniform(0.0038, 0.006)
         offset = len(vertices)
-        vertices.extend([tuple(start - width_axis * width), tuple(start + width_axis * width), tuple(middle - width_axis * width * 0.65), tuple(middle + width_axis * width * 0.65), tuple(end)])
+        vertices.extend([tuple(start - width_axis * width), tuple(start + width_axis * width), tuple(middle - width_axis * width), tuple(middle + width_axis * width), tuple(end)])
         faces.extend([(offset, offset + 1, offset + 2), (offset + 1, offset + 3, offset + 2), (offset + 2, offset + 3, offset + 4)])
-        shade = generator.uniform(0.86, 1.0)
-        base_color = (0.95, 0.91, 0.80) if pale else (0.88, 0.84, 0.73)
-        colors.extend([(*(component * shade for component in base_color), 1)] * 5)
+        variant = int(generator.integers(0, 8))
+        minimum, maximum = (variant + 0.05) / 8, (variant + 0.95) / 8
+        coordinates.extend([(minimum, 0), (maximum, 0), (minimum, 0.5), (maximum, 0.5), ((minimum + maximum) / 2, 1)])
+        normals.extend([tuple(normal)] * 5)
+        shade = generator.uniform(0.985, 1.015)
+        colors.extend([(*(component * shade * value for component in base_color), 1) for value in (0.98, 0.98, 1, 1, 1.02)])
     mesh = bpy.data.meshes.new(groom.name + "_RIBBONS")
     mesh.from_pydata(vertices, [], faces)
     mesh.update()
+    uv_layer = mesh.uv_layers.new(name="GroomAtlasUV")
+    for loop in mesh.loops:
+        uv_layer.data[loop.index].uv = coordinates[loop.vertex_index]
     color_attribute = mesh.color_attributes.new(name="GroomColor", type="FLOAT_COLOR", domain="POINT")
     color_attribute.data.foreach_set("color", np.asarray(colors, dtype=np.float32).ravel())
     mesh.materials.append(fur_material)
     for polygon in mesh.polygons:
         polygon.use_smooth = True
+    mesh.normals_split_custom_set_from_vertices(normals)
     duplicate = bpy.data.objects.new(groom.name + "_RT", mesh)
     runtime.objects.link(duplicate)
     duplicate["source_object"] = groom.name
@@ -232,8 +355,8 @@ for groom in grooms:
 root = bpy.data.objects.new("Microglow_Original_Cat", None)
 runtime.objects.link(root)
 root["source_blend_sha256"] = source_hash
-root["asset_version"] = "2.0.0"
-root["groom_conversion"] = "Tapered mesh ribbons sampled from the original groom; packed short-fur normal texture"
+root["asset_version"] = "2.1.0"
+root["groom_conversion"] = "Five-strand alpha cards following the original groom, surface-aligned normals and packed short-fur normal texture"
 for obj in objects:
     obj.parent = root
 
@@ -266,14 +389,14 @@ if triangles > 100000 or document.get("cameras") or document.get("skins"):
     raise RuntimeError("The exported asset violates the character-only runtime contract")
 manifest = {
     "schemaVersion": "1.0.0",
-    "character": {"id": "lumi-magical-kitten", "name": "Lumi Magical Kitten", "assetVersion": "2.0.0"},
+    "character": {"id": "lumi-magical-kitten", "name": "Lumi Magical Kitten", "assetVersion": "2.1.0"},
     "source": {"file": source.name, "sha256": source_hash, "collection": character.name, "sourceGroomStrands": total_strands},
     "runtime": {
         "format": "glTF 2.0 binary (.glb)", "file": model_path.name, "fileBytes": len(data),
         "sha256": hashlib.sha256(data).hexdigest(), "triangleCount": triangles,
         "meshCount": len(document["meshes"]), "materialCount": len(document["materials"]),
         "skeleton": {"boneCount": 0}, "frameRate": 30,
-        "groom": {"method": "Tapered triangle ribbons from original curves and packed normal map", "strands": exported_strands, "lossless": False},
+        "groom": {"method": "Five-strand alpha cards following original curves with surface-aligned normals and packed normal map", "cards": exported_strands, "strandsPerCard": 5, "representedStrands": exported_strands * 5, "lossless": False},
         "textures": [image["name"] for image in document.get("images", [])],
         "animations": [{"name": animation["name"], "kind": "object-transform"} for animation in document.get("animations", [])],
         "limitations": ["The original source has no skeletal rig or facial blend shapes.", "Movie groom and procedural shaders are adapted for real-time rendering, not exported losslessly."],

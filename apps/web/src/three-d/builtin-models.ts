@@ -6,10 +6,13 @@ const root = `${import.meta.env.BASE_URL}models/lumi/`;
 export const lumiModel = {
   id: 'lumi',
   name: '露米 Lumi',
-  version: '2.0.0',
+  version: '2.1.0',
   fileName: 'Lumi_Magical_Kitten.glb',
-  sha256: '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90',
-  previousSha256: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b',
+  sha256: '4cee02df06e168eb99612ab5d807a3efe6025d14c7dfec516616ff8825b0e9b3',
+  previousSha256s: [
+    '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b',
+    '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90',
+  ],
   modelUrl: `${root}Lumi_Magical_Kitten.glb`,
   posterUrl: `${root}poster.png`,
   manifestUrl: `${root}character_manifest.json`,
@@ -17,6 +20,10 @@ export const lumiModel = {
     { name: 'idle', label: '陪伴' },
   ],
 } as const;
+
+export function isBuiltinLumi(id: string): boolean {
+  return id === lumiModel.sha256 || lumiModel.previousSha256s.some(hash => hash === id);
+}
 
 export const liliModel = {
   id: 'lili',

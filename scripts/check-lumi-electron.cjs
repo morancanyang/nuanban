@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..');
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
 const cache = path.join(root, '.cache', `lumi-electron-${Date.now()}`);
 const userData = path.join(cache, 'profile');
-const hash = '3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90';
+const hash = '4cee02df06e168eb99612ab5d807a3efe6025d14c7dfec516616ff8825b0e9b3';
 mkdirSync(cache, { recursive: true });
 const evidence = { nativePreview: false, nativeApply: false, switchedFromLili: false, defaultIdle: false, persistedAfterRestart: false, recalled: false, screenRequests: 0, errors: [] };
 
@@ -46,6 +46,7 @@ async function run() {
     await card.getByRole('button', { name: '预览 3D 与动作' }).click();
     await expect(card.locator('canvas')).toHaveAttribute('data-animation', 'idle', { timeout: 20000 });
     await expect(card.locator('canvas')).toHaveAttribute('data-render-source', 'glb');
+    await expect(card.locator('canvas')).toHaveAttribute('data-appearance-profile', 'lumi-original-detail-v2.1');
     await card.getByRole('button', { name: '陪伴', exact: true }).click();
     assert.deepEqual(await management.evaluate(() => window.nuanbanModel.read()), { kind: 'none' });
     evidence.nativePreview = true;
@@ -57,6 +58,7 @@ async function run() {
     await expect(pet.locator('#model-pet')).toHaveAttribute('data-model-id', hash, { timeout: 20000 });
     await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'idle');
     await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-render-source', 'glb');
+    await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-appearance-profile', 'lumi-original-detail-v2.1');
     await expect(pet.locator('#model-pet')).toBeVisible();
     await expect(pet.locator('#pet-window')).not.toHaveClass(/is-lili/);
     evidence.nativeApply = true; evidence.switchedFromLili = true; evidence.defaultIdle = true;
@@ -81,7 +83,7 @@ async function run() {
     await expect(secondCard.getByRole('button', { name: '再次召唤桌宠' })).toBeVisible();
     await expect(context.pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'idle', { timeout: 20000 });
     const persisted = await context.management.evaluate(async () => { const model = await window.nuanbanModel.read(); return model.kind === 'model' ? { id: model.id, byteLength: model.bytes.byteLength } : model; });
-    assert.deepEqual(persisted, { id: hash, byteLength: 5411364 });
+    assert.deepEqual(persisted, { id: hash, byteLength: 10887504 });
     evidence.persistedAfterRestart = true;
     await secondCard.getByRole('button', { name: '再次召唤桌宠' }).click();
     await expect(secondCard.getByRole('status')).toContainText('小猫已保存并调用到桌面', { timeout: 30000 });

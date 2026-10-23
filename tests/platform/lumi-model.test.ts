@@ -7,6 +7,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createModelAnimationController } from '../../apps/web/src/three-d/animation-controller';
 import { inspectRenderedModel } from '../../apps/web/src/three-d/viewer';
+import { isBuiltinLumi, lumiModel } from '../../apps/web/src/three-d/builtin-models';
 
 const { inspectModelContainer } = createRequire(import.meta.url)('../../apps/desktop/local-model.cjs');
 const assetPath = join(process.cwd(), 'apps/web/public/models/lumi/Lumi_Magical_Kitten.glb');
@@ -16,16 +17,25 @@ describe('露米随包模型与动作', () => {
     const card = readFileSync(join(process.cwd(), 'apps/web/src/three-d/lumi-card.tsx'), 'utf8');
     const desktop = readFileSync(join(process.cwd(), 'apps/web/src/three-d/desktop.ts'), 'utf8');
     expect(card).toContain('await loadLumiModel(controller.signal)');
-    expect(desktop).toContain('model.id === lumiModel.previousSha256 ? await loadLumiModel()');
+    expect(desktop).toContain('isBuiltinLumi(model.id) && model.id !== lumiModel.sha256 ? await loadLumiModel()');
     expect(card).not.toContain('createLumiModel');
     expect(desktop).not.toContain('createLumiModel');
     expect(card).not.toContain('9 个动作');
   });
 
+  it('只迁移已知内置小猫版本，不把个人模型或同名文件当成旧版', () => {
+    expect(isBuiltinLumi(lumiModel.sha256)).toBe(true);
+    for (const hash of lumiModel.previousSha256s) expect(isBuiltinLumi(hash)).toBe(true);
+    expect(isBuiltinLumi('Lumi_Magical_Kitten.glb')).toBe(false);
+    expect(isBuiltinLumi('a'.repeat(64))).toBe(false);
+  });
+
   it('原版 GLB 保留角色、配饰、原始来源与实时毛发，符合原生预算', async () => {
     const bytes = readFileSync(assetPath);
     const manifest = JSON.parse(readFileSync(join(process.cwd(), 'apps/web/public/models/lumi/character_manifest.json'), 'utf8'));
-    expect(createHash('sha256').update(bytes).digest('hex')).toBe('3ec165a265d28d00bec78c6262d4909542d9d5e8759759cc00cdb07fd7f95f90');
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(lumiModel.sha256);
+    expect(manifest.runtime.sha256).toBe(lumiModel.sha256);
+    expect(manifest.character.assetVersion).toBe(lumiModel.version);
     expect(bytes.length).toBe(manifest.runtime.fileBytes);
     expect(inspectModelContainer(bytes, 'glb')).toEqual({ format: 'glb' });
     const jsonBytes = bytes.readUInt32LE(12);
@@ -34,10 +44,22 @@ describe('露米随包模型与动作', () => {
     expect(document.skins).toBeUndefined();
     expect(document.images.map((image: { name: string }) => image.name)).toEqual(expect.arrayContaining([
       'Microglow short-fur normal', 'Microglow woven cloak normal', 'Microglow original blue iris baked',
+      'Microglow five-strand groom alpha atlas', 'Microglow baked contact occlusion',
     ]));
     expect(document.nodes.find((node: { name: string }) => node.name === 'Microglow_Original_Cat').extras.source_blend_sha256).toBe(manifest.source.sha256);
     expect(manifest.source).toMatchObject({ file: 'microglow_cat.blend', collection: 'MICROGLOW_CAT_ONLY', sourceGroomStrands: 173800 });
-    expect(manifest.runtime.groom).toMatchObject({ strands: 12364, lossless: false });
+    expect(manifest.runtime.groom).toMatchObject({ cards: 11003, strandsPerCard: 5, representedStrands: 55015, lossless: false });
+    const groomIndex = document.materials.findIndex((material: { name: string }) => material.name === 'Microglow real-time groom cards');
+    expect(document.materials[groomIndex]).toMatchObject({ alphaMode: 'MASK', alphaCutoff: 0.25 });
+    expect(document.materials[groomIndex].doubleSided ?? false).toBe(false);
+    for (const mesh of document.meshes) for (const primitive of mesh.primitives) {
+      if (primitive.material === groomIndex) expect(primitive.attributes).toEqual(expect.objectContaining({ NORMAL: expect.any(Number), TEXCOORD_0: expect.any(Number), COLOR_0: expect.any(Number) }));
+    }
+    const coat = document.materials.find((material: { name: string }) => material.name.startsWith('CAT | amethyst woven cloak'));
+    expect(coat.occlusionTexture.texCoord).toBe(1);
+    expect(coat.normalTexture.texCoord ?? 0).toBe(0);
+    const iris = document.materials.find((material: { name: string }) => material.name.startsWith('CAT | radial blue iris fibers'));
+    expect(iris.pbrMetallicRoughness.baseColorTexture.texCoord ?? 0).toBe(0);
     const binary = bytes.subarray(28 + jsonBytes);
     const geometry = { ...document, materials: document.materials.map((material: { name: string }) => ({ name: material.name })), images: [], textures: [] };
     const json = Buffer.from(JSON.stringify(geometry));
@@ -48,7 +70,7 @@ describe('露米随包模型与动作', () => {
     const binaryHeader = bytes.subarray(20 + jsonBytes, 28 + jsonBytes);
     const container = Buffer.concat([header, json, padding, binaryHeader, binary]);
     const model = await new GLTFLoader().parseAsync(new Uint8Array(container).buffer, '');
-    expect(inspectRenderedModel(model.scene, model.animations)).toMatchObject({ triangles: 97978, meshes: 149, bones: 0, animations: 1, textures: [] });
+    expect(inspectRenderedModel(model.scene, model.animations)).toMatchObject({ triangles: 97976, meshes: 149, bones: 0, animations: 1, textures: [] });
     expect(model.animations.map(clip => clip.name)).toEqual(['idle']);
     const names = new Set<string>();
     model.scene.traverse(object => names.add(object.name));
