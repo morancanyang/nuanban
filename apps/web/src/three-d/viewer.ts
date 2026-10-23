@@ -8,7 +8,9 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import type { VRM } from '@pixiv/three-vrm';
 import type { ModelSource, ModelSummary } from '../local-model';
 import { createModelAnimationController } from './animation-controller';
+import type { ProceduralModelSource } from './lumi-model';
 
+export type DisplayModelSource = ModelSource | ProceduralModelSource;
 interface LoadedModel { root: Object3D; animations: AnimationClip[]; vrm?: VRM; summary: ModelSummary; urls: Set<string>; }
 
 function materialTextures(material: Material): Texture[] {
@@ -84,7 +86,10 @@ export function inspectRenderedModel(root: Object3D, animations: AnimationClip[]
   return { triangles, meshes, bones, animations: animations.length, decodedBytes, textures: dimensions };
 }
 
-async function loadModel(source: ModelSource): Promise<LoadedModel> {
+async function loadModel(source: DisplayModelSource): Promise<LoadedModel> {
+  if (source.format === 'procedural-lumi') {
+    return { root: source.root, animations: source.animations, summary: inspectRenderedModel(source.root, source.animations), urls: new Set() };
+  }
   const manager = new LoadingManager();
   const urls = new Set<string>();
   let failed = false;
@@ -126,7 +131,7 @@ async function loadModel(source: ModelSource): Promise<LoadedModel> {
   }
 }
 
-export async function createModelView(container: HTMLElement, source: ModelSource, options: { interactive?: boolean; animate?: boolean; onError?: (message: string) => void; onAnimationChange?: (name: string) => void } = {}) {
+export async function createModelView(container: HTMLElement, source: DisplayModelSource, options: { interactive?: boolean; animate?: boolean; onError?: (message: string) => void; onAnimationChange?: (name: string) => void } = {}) {
   const loaded = await loadModel(source);
   let renderer: WebGLRenderer;
   try { renderer = new WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' }); }

@@ -8,11 +8,40 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createModelAnimationController } from '../../apps/web/src/three-d/animation-controller';
 import { inspectRenderedModel } from '../../apps/web/src/three-d/viewer';
+import { createLumiModel } from '../../apps/web/src/three-d/lumi-model';
 
 const { inspectModelContainer } = createRequire(import.meta.url)('../../apps/desktop/local-model.cjs');
 const assetPath = join(process.cwd(), 'apps/web/public/models/lumi/Lumi_Magical_Kitten.glb');
 
 describe('露米随包模型与动作', () => {
+  it('客户端程序化模型保留小猫本体、服装和配饰，并提供完整动作集', () => {
+    const model = createLumiModel();
+    const summary = inspectRenderedModel(model.root, model.animations);
+    expect(model.format).toBe('procedural-lumi');
+    expect(model.id).toBe('lumi');
+    expect(summary).toMatchObject({ animations: 16, textures: [] });
+    expect(summary.meshes).toBeGreaterThan(40);
+    expect(summary.triangles).toBeGreaterThan(1000);
+    expect(model.animations.map(animation => animation.name)).toEqual(expect.arrayContaining([
+      'idle', 'walk', 'wave', 'happy', 'think', 'cast', 'surprise', 'sleep', 'tap_react', 'blink',
+      'face_cast', 'face_happy', 'face_sleep', 'face_surprise', 'face_tap_react', 'face_think',
+    ]));
+    const names = new Set<string>();
+    model.root.traverse(object => names.add(object.name));
+    expect([...names]).toEqual(expect.arrayContaining(['LumiHead', 'Body', 'Cape_Back', 'Gem', 'Staff', 'ShoulderBag', 'Tail', 'Eye_L', 'Eye_R']));
+    const mixer = new AnimationMixer(model.root);
+    const controller = createModelAnimationController(mixer, model.animations);
+    for (const name of ['idle', 'walk', 'wave', 'happy', 'think', 'cast', 'surprise', 'sleep', 'tap_react']) {
+      expect(controller.play(name)).toBe(true);
+      mixer.update(0.25);
+      model.root.updateMatrixWorld(true);
+      model.root.traverse(object => expect(object.matrixWorld.elements.every(Number.isFinite)).toBe(true));
+    }
+    controller.dispose();
+    mixer.stopAllAction();
+    mixer.uncacheRoot(model.root);
+  });
+
   it('真实 GLB 通过原生检查与 Three 解析，带有全部身体、表情和骨骼', async () => {
     const bytes = readFileSync(assetPath);
     expect(createHash('sha256').update(bytes).digest('hex')).toBe('7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b');

@@ -3,7 +3,8 @@ import { Box, Check, Monitor, RotateCcw, Sparkles } from 'lucide-react';
 import { Badge, Modal } from '../components';
 import { localModelBridge } from '../local-model';
 import { showBrowserCompanion } from '../browser-companion';
-import { loadLumiModel, lumiModel } from './builtin-models';
+import { lumiModel } from './builtin-models';
+import { createLumiModel } from './lumi-model';
 import type { createModelView } from './viewer';
 import './lumi-card.css';
 
@@ -43,9 +44,10 @@ export function LumiCard() {
     let disposed = false;
     setError('');
     const fail = (message: string) => { if (!disposed) { setReady(false); setError(message); } };
-    void Promise.all([loadLumiModel(controller.signal), import('./viewer')]).then(async ([source, { createModelView }]) => {
+    void Promise.resolve(import('./viewer')).then(async ({ createModelView }) => {
       if (disposed || !stage.current) return;
-      const created = await createModelView(stage.current, source, {
+      controller.signal.throwIfAborted();
+      const created = await createModelView(stage.current, createLumiModel(), {
         interactive: true,
         onError: fail,
         onAnimationChange: name => { if (!disposed) setAction(name); },
@@ -70,7 +72,7 @@ export function LumiCard() {
       const model = await bridge.applyBuiltin('lumi');
       if (model.kind !== 'model' || model.id !== lumiModel.sha256) throw new Error('小猫资源状态未确认，请重试。');
       setActive(true); setConfirm(false);
-      setNotice('小猫已保存并调用到桌面。重启后会恢复，以后也可在这里再次召唤。');
+      setNotice('客户端建模小猫已保存并调用到桌面。重启后会恢复，以后也可在这里再次召唤。');
     } catch (failure) {
       setNotice(''); setError(failure instanceof Error ? failure.message : '小猫调用未完成，请重试。');
     } finally { setBusy(false); }
@@ -81,13 +83,13 @@ export function LumiCard() {
       <span className="lumi-stage-tag"><Sparkles size={14} aria-hidden="true" />本机珍藏 · 001</span>
       <div ref={stage} className="lumi-model-surface" aria-label="露米小猫 3D 预览区域" />
       {!ready && <img className="lumi-poster" src={lumiModel.posterUrl} alt="露米魔法小猫：奶油色毛发、紫色披风，手持星星魔杖" width="1000" height="1250" />}
-      <span className="lumi-stage-caption">{ready ? '拖动转一转 · 滚轮缩放' : preview && !error ? '正在打开真实 3D 模型…' : '一只把陪伴变成小魔法的猫'}</span>
+      <span className="lumi-stage-caption">{ready ? '拖动转一转 · 滚轮缩放' : preview && !error ? '正在生成客户端 3D 模型…' : '一只把陪伴变成小魔法的猫'}</span>
     </div>
     <div className="lumi-details">
       <div className="lumi-meta"><span className="eyebrow">原创三维伙伴 / MAGICAL KITTEN</span><Badge tone={active ? 'sage' : 'soft'}>{active ? '当前 3D 桌宠' : '已内置 · 无需导入'}</Badge></div>
       <h2 id="lumi-title">露米 <span>Lumi</span><Sparkles size={25} aria-hidden="true" /></h2>
       <p className="lumi-description">带着星星魔杖，陪你慢慢想、轻轻笑。之前制作的小猫模型已收进微光指引，随时都能再见面。</p>
-      <div className="lumi-facts"><span><Box size={16} aria-hidden="true" />真实 3D · 可旋转</span><span>9 个动作 · 自带表情</span><span>1.75 MiB · v{lumiModel.version}</span></div>
+      <div className="lumi-facts"><span><Box size={16} aria-hidden="true" />客户端实时建模 · 可旋转</span><span>9 个动作 · 自带表情</span><span>无需在线下载 · v{lumiModel.version}</span></div>
       <fieldset className="lumi-action-picker"><legend>和露米打个招呼</legend><div>{lumiModel.actions.map(item => <button type="button" key={item.name} disabled={!ready} aria-pressed={action === item.name} onClick={() => view.current?.playAnimation(item.name)}>{item.label}</button>)}</div></fieldset>
       <div className="lumi-buttons">
         <button type="button" className="button secondary" disabled={busy} onClick={() => setPreview(previous => !previous)}>{preview ? <RotateCcw size={18} /> : <Box size={18} />}{preview ? '收起 3D 预览' : '预览 3D 与动作'}</button>
