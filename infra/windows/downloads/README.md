@@ -1,5 +1,8 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-23 r14：** 桌面包含语音误触发修复（`a8ece51`，r13 起已在包内）与新的 **Lumi 小猫模型**（`c444732`，客户端本地生成，包内可见 `ui/models/lumi/Lumi_Magical_Kitten.glb` + 清单/海报）；单帧 `TIMEOUT` 修复保持不变。仍从**独立干净工作树**构建（HEAD `c444732`），r13→r14 的 zip 条目仅 `resources/app.asar` 变化（+83,098 字节）。Android 两个包同批重出：Web UI 12/12 逐文件一致（含 Lumi 资源），打包隔离校验 87/87；本次干净构建同时**剔除了此前混入的未提交 Lili 资源**，因此包体积变小（普通包 5.13 MiB、独立包 83.93 MiB）。发布前相关测试 1117/1117（16 个文件）通过。旧 r13 包已从下载目录移除。
+
+
 > **2026-10-23 r13：** 在 r12 的单帧 `TIMEOUT` 修复（provider 60s / 单帧 90s / 上传降采样 + 坐标还原 / 错误码中文提示）之上，纳入当日晚些时候提交的 `a8ece51`（本地语音听写在不确定时不执行）。仍从**独立干净工作树**构建（HEAD `63fc4bb`），与 r12 的 zip 条目逐项比对只有 `resources/app.asar`（+2,616 字节）与解包脚本 `wake/windows-local-wake.ps1`（+1,291 字节）变化，无新增/删除文件；发布前跑完 15 个相关测试文件 **1112/1112 通过**。r12 已被 r13 取代并从下载目录移除。
 
 
@@ -53,7 +56,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip` | 182,094,500 字节（173.652 MiB） | `3b28b4f3f9c59670b371890b7b1babcbfb5b0bcb7db3d4a6c7dadfa8b540d736` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r14.zip` | 182,120,166 字节（173.652 MiB） | `7f0196e797b264e75c7439894bfe13e9ff1dc42379e7ee4371294775abfce817` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -98,7 +101,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r14.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -162,11 +165,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r14.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r13.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r14.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
@@ -178,8 +181,8 @@ node scripts/check-d03-candidate.mjs
 
 | 产物 | 绝对路径 | 大小 | SHA256 | 变体 |
 | --- | --- | --- | --- | --- |
-| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 5,734,485 字节（5.47 MiB） | `642D365D45C68B91A7793CBD93214D614631CC5B43DB7D24375D82D0AAB6FEFC` | debug，包名 `org.nuanban.assistant` |
-| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 88,194,952 字节（84.11 MiB） | `33B65A98F90E0E20324E5E10D8DB53C1FFFF9F47E0A276F7018E84E96AB3A27D` | debug，包名 `org.nuanban.assistant.standalone` |
+| 普通客户端 `:app` | `apps\android\app\build\outputs\apk\debug\app-debug.apk` | 5,132,288 字节（4.895 MiB） | `6906304045FED55B8D15597359BB6B30E4B9860E921BA5A8C4B366CDA3762982` | debug，包名 `org.nuanban.assistant` |
+| 独立桌宠宿主 `:standalone` | `apps\android\standalone\build\outputs\apk\debug\standalone-debug.apk` | 88,010,860 字节（83.934 MiB） | `C6B1A6F36561B3B66535B29FC69FA57938CEA29B3564A628B0540DFABEB22CFF` | debug，包名 `org.nuanban.assistant.standalone` |
 
 - 构建命令（2026-10-23）：`pnpm android:build -Offline`（内部执行 `pnpm android:sync` → 最新共享 UI 入 `app/src/main/assets/ui` → `:app:assembleDebug`，21s）；`apps/android/check-standalone-packaging.ps1`（同时构建 `:app` 与 `:standalone` 并做打包隔离校验，17s）。两条命令退出码均为 0，依赖全部命中本机 Gradle 缓存（build-tools 37.0.0）。
 - 两者均通过 `apksigner verify`（v2 scheme）与 `zipalign -c 4`；签名证书为构建机 `~/.android/debug.keystore` 的 Android Debug 证书，不能用于正式分发。
