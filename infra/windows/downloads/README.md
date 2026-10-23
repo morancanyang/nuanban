@@ -1,5 +1,16 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-23 r20：** 修复 r19 **自身引入的听写回归**（如实记录，r19 已从下载目录撤下）。r19 用 `add_AudioLevelUpdated` / `add_AudioSignalProblemOccurred` 直接挂 .NET 事件委托；在 PowerShell 5.1 非交互脚本里这类脚本块会在识别引擎线程上执行并抛错，结果是听写助手**约 10 秒后异常退出（exit 2）且连错误事件都没发出**，宿主只能落到兜底文案"本次语音输入失败，请检查 Windows 默认输入设备、麦克风权限和离线中文语音引擎。"。
+>
+> **定位方式**：用与宿主相同的协议直接驱动助手做 A/B——r18 助手：`ready` → 20 秒内如实返回 `uncertain`/`wake_dictation_timeout` → exit 0；r19 助手：exit 2、无错误事件。差异即结论。
+>
+> **修复**：音频事件改为 `Register-ObjectEvent` 排队（与该脚本既有的 SpeechRecognized/RecognizeCompleted 同一套已验证模式），由主轮询循环取出并更新电平/问题变量，再由主线程按 500ms 节流发出 `signal` 事件；协议行始终单线程写入。**打包内助手**复测：听写 `ready → signal → uncertain → exit 0`，连续唤醒 `ready → signal → stop → exit 0`，两种模式均无错误事件。
+>
+> **核验**：`pnpm typecheck` 0；`desktop-local-wake` + `speech` + `desktop-pet-ui` 共 **312/312** 通过；新增静态回归守卫禁止再用 `add_Audio*` 跨线程委托，并要求循环内 `Get-Event` 排空与解注册完整。r19→r20 除助手与相关 UI/测试外的其余内容来自其他会话在本窗口内已提交的改动。
+>
+> **仍然成立的环境结论**：拾音电平偏低（实测 31/100、`TooSoft/TooNoisy`）需要本人靠近麦克风、提高输入音量/加强或改用耳机麦；代码负责把"静默失败"变成"看得见的原因"并如实报错。
+
+
 > **2026-10-23 r19：** 修复“语音功能听不见我说话”。现场实测：麦克风阵列音量 87% 且未静音、离线 zh-CN 引擎（`MS-2052-80-DESK`）在位、听写 helper 进程在运行，但拾音电平只有 **31/100**，引擎报 `TooSoft/TooNoisy/TooSlow`，识别置信度仅 **0.03~0.05**（乱码）→ 按既有策略判为不确定而拒绝，而界面**完全静默**，用户看不到任何原因。
 >
 > **改动**：唤醒脚本新增**建议性**信号事件 `{ kind: 'signal', level: 0..100, problem }`（音频回调只写变量、由主轮询循环按 500ms 节流发出，协议行不会交错）；桥接校验后写入 `status.signal`，非法载荷一律忽略且永不让操作失败；语音面板新增**实时电平条**与可操作建议（信号过弱→靠近麦克风/提高输入音量；环境噪声→关闭噪声源或用耳机麦；语速/停顿→连贯说一句）。**不改** 0.6/0.78 阈值、不引入云端识别、音频仍只在本机处理。
@@ -91,7 +102,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r19.zip` | 192,306,845 字节（183.395 MiB） | `4e26798caf4bb7539458c3cc7e4292b23b99389581dc76143237d9c54777c393` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip` | 197,124,604 字节（183.395 MiB） | `82b9f2282c8f23adf2baf3b391e89ab3efaedcff2e51046c2361d8e6c8d46272` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -136,7 +147,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r19.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -200,11 +211,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r19.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r19.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
