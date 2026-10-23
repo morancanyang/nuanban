@@ -1,4 +1,5 @@
 export type ModelFormat = 'glb' | 'vrm' | 'fbx';
+export type BuiltinModelId = 'lumi' | 'lili';
 export interface ModelSummary {
   triangles: number;
   meshes: number;
@@ -13,8 +14,8 @@ export type LocalModel = { kind: 'none' } | (Omit<ModelCandidate, 'token'> & { k
 export interface LocalModelBridge {
   read(): Promise<LocalModel>;
   choose(): Promise<ModelCandidate | null>;
-  readBuiltin?(id: 'lumi'): Promise<ModelSource>;
-  applyBuiltin?(id: 'lumi'): Promise<LocalModel>;
+  readBuiltin?(id: BuiltinModelId): Promise<ModelSource>;
+  applyBuiltin?(id: BuiltinModelId): Promise<LocalModel>;
   apply(token: string): Promise<LocalModel>;
   clear(): Promise<LocalModel>;
   discard(): Promise<boolean>;

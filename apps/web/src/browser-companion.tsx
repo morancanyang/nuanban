@@ -5,8 +5,8 @@ import { Pet } from './components';
 import './browser-companion.css';
 
 export type BrowserCompanionRequest =
-  | { kind: PetKind; label: string }
-  | { kind: 'lumi' | 'drawing'; label: string; imageUrl: string };
+  | { kind: Exclude<PetKind, 'lili'>; label: string }
+  | { kind: 'lumi' | 'lili' | 'drawing'; label: string; imageUrl: string };
 
 let currentCompanion: BrowserCompanionRequest | null = null;
 const listeners = new Set<() => void>();
@@ -41,7 +41,7 @@ export function BrowserCompanionOverlay() {
   const companion = useBrowserCompanion();
   if (!companion) return null;
 
-  const imageCompanion = companion.kind === 'lumi' || companion.kind === 'drawing';
+  const imageCompanion = companion.kind === 'lumi' || companion.kind === 'lili' || companion.kind === 'drawing';
   return <aside className="browser-companion-layer" aria-label={`网页陪伴：${companion.label}`}>
     <div className="browser-companion-card" data-companion-kind={companion.kind}>
       <div className="browser-companion-heading">

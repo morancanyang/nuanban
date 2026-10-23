@@ -87,8 +87,10 @@ export function inspectRenderedModel(root: Object3D, animations: AnimationClip[]
 }
 
 async function loadModel(source: DisplayModelSource): Promise<LoadedModel> {
-  if (source.format === 'procedural-lumi') {
-    return { root: source.root, animations: source.animations, summary: inspectRenderedModel(source.root, source.animations), urls: new Set() };
+  if (source.format === 'procedural-lumi' || source.format === 'procedural-lili') {
+    try {
+      return { root: source.root, animations: source.animations, summary: inspectRenderedModel(source.root, source.animations), urls: new Set() };
+    } catch (error) { disposeRoot(source.root); throw error; }
   }
   const manager = new LoadingManager();
   const urls = new Set<string>();
@@ -157,6 +159,7 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.domElement.setAttribute('aria-label', '本地 3D 模型预览');
   renderer.domElement.setAttribute('role', 'img');
+  renderer.domElement.dataset.renderSource = source.format;
   const dispose = () => {
     if (disposed) return;
     disposed = true;

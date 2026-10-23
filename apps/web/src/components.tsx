@@ -3,10 +3,10 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { X, ArrowRight, Check, Volume2, VolumeX } from 'lucide-react';
 import { announce, useApp, safely } from './store';
 import type { PetAppearance, PetKind } from '@nuanban/domain';
-import liliPreview from './assets/lili.png';
+import { liliModel } from './three-d/builtin-models';
 export function Pet({kind='cat',color='#D98347',action,className='',appearance}:{kind?:PetKind;color?:string;action?:string;className?:string;appearance?:PetAppearance}) {
   const preferences = useApp(state => state.snapshot?.preferences);
-  if (kind === 'lili') return <img className={'pet pet-lili '+className} src={liliPreview} width={384} height={384} alt="栗栗小鹿，围着条纹围巾、提着小黄灯的二维桌宠" draggable={false} style={{ objectFit: 'contain', animation: 'none' }} />;
+  if (kind === 'lili') return <img className={'pet pet-lili '+className} src={liliModel.posterUrl} width={1000} height={1250} alt="栗栗小鹿三维参考立绘，围着橙黄条纹围巾" draggable={false} style={{ objectFit: 'contain', animation: 'none' }} />;
   const tuning = appearance ?? (preferences?.pet === kind && preferences.petColor === color ? preferences.petAppearance : undefined);
   action = action ?? tuning?.action ?? 'idle';
   const eyes = tuning?.eyes ?? 'round';

@@ -8,7 +8,8 @@ import { Pet, PageTitle, Badge, Modal } from '../components';
 import './pet-settings.css';
 import { LocalModelPanel } from '../three-d/model-panel';
 import { CompanionCatalog } from './companions';
-import { localCompanionBridge, showLiliCompanion } from '../local-companion';
+import { localModelBridge } from '../local-model';
+import { liliModel } from '../three-d/builtin-models';
 import { showBrowserCompanion } from '../browser-companion';
 
 const pets = [{ id: 'cat', name: '小橘猫', color: '#D98347' }, { id: 'rabbit', name: '小白兔', color: '#D7C5AB' }, { id: 'dog', name: '小暖狗', color: '#C19165' }, { id: 'lili', name: '栗栗小鹿', color: '#A66B4B' }] as const;
@@ -24,7 +25,8 @@ export function PetsPage() {
   const [callStatus, setCallStatus] = useState('');
   const [callError, setCallError] = useState('');
   const isLili = draft.kind === 'lili';
-  const canCall = Boolean(localCompanionBridge());
+  const modelBridge = localModelBridge();
+  const canCall = Boolean(modelBridge?.applyBuiltin);
   const changed = !samePet(currentPet(preferences), draft);
   function selectPet(pet: typeof pets[number]) {
     setCallStatus(''); setCallError('');
@@ -36,13 +38,14 @@ export function PetsPage() {
     if (calling) return;
     setCalling(true); setCallStatus(''); setCallError('');
     try {
-      if (!canCall) {
-        showBrowserCompanion({ kind: 'lili', label: '栗栗' });
+      if (!modelBridge?.applyBuiltin) {
+        showBrowserCompanion({ kind: 'lili', label: '栗栗', imageUrl: liliModel.posterUrl });
         setCallStatus('栗栗已显示在当前页面；系统悬浮桌宠仍需使用桌面客户端。');
         return;
       }
-      const resource = await showLiliCompanion();
-      setCallStatus(`栗栗 ${resource.version} 已切换并显示在桌面。`);
+      const model = await modelBridge.applyBuiltin('lili');
+      if (model.kind !== 'model' || model.id !== liliModel.sha256) throw new Error('小鹿资源状态未确认，请重试。');
+      setCallStatus('客户端建模小鹿已保存并调用到桌面。');
     } catch (error) { setCallError(error instanceof Error ? error.message : '栗栗桌宠调用未完成，请重试。'); }
     finally { setCalling(false); }
   }
@@ -73,12 +76,12 @@ export function PetsPage() {
         <h2>让小伙伴，更像你喜欢的样子。</h2><p>选择与微调只改变本页预览，调用桌宠是单独操作。不上传画稿，不调用生成服务。</p>
         <fieldset><legend>选择内置伙伴</legend><div className="pet-kind-options">{pets.map(pet => <button key={pet.id} className={'button ' + (draft.kind === pet.id ? 'primary' : 'secondary')} aria-pressed={draft.kind === pet.id} disabled={calling} onClick={() => selectPet(pet)}>{pet.name}</button>)}</div></fieldset>
         {isLili && <section className="lili-resource-card" aria-label="栗栗角色资源">
-          <Badge tone="sage">本机二维角色 · 固定形象</Badge>
-          <h3>栗栗小鹿 · 提一盏暖灯，陪在身旁。</h3>
-          <p>使用已有角色工程导出的透明 PNG 素材；这里是静态预览，桌面运行时播放真实动作，不是三维模型。</p>
-          <div className="lili-resource-tags"><span>资源 ID：<code>lili</code></span><span>六种表情 · 六个动作</span></div>
-          <p className="small-note">确认应用会在本机记住伙伴；调用会立即切换桌面角色，不会替你保存本页预览。栗栗的五官、围巾、配色和持灯侧保持统一，不使用下方通用微调。</p>
-          <button className="button secondary" disabled={calling || busy} onClick={() => void callLili()}><Monitor size={18} />{calling ? '正在请栗栗陪伴…' : canCall ? '调用栗栗桌宠' : '在本页显示栗栗'}</button>
+          <Badge tone="sage">本机 3D 模型 · 固定角色</Badge>
+          <h3>栗栗小鹿 · 围一条暖围巾，陪在身旁。</h3>
+          <p>客户端本地生成栗栗三维模型，运行时无需打开 Blender。这里使用透明参考立绘，独立详情页支持真实三维旋转。</p>
+          <div className="lili-resource-tags"><span>资源 ID：<code>lili</code></span><span>静态 3D 模型 · 无内置动画</span></div>
+          <p className="small-note">确认应用会在本机记住伙伴；调用会校验并保存本机模型、切换桌面角色，不会替你保存本页候选设置。栗栗的五官、围巾和配色保持统一，不使用下方通用微调。</p>
+          <button className="button secondary" disabled={calling || busy} onClick={() => void callLili()}><Monitor size={18} />{calling ? '正在请栗栗陪伴…' : canCall ? '调用栗栗 3D 桌宠' : '在本页显示栗栗'}</button>
           {!canCall && <p className="small-note">手机浏览器会在当前页面显示栗栗；替换系统悬浮桌宠请使用微光指引桌面客户端。</p>}
           <p className="lili-call-status" role="status">{callStatus}</p>
           {callError && <p className="inline-error" role="alert">{callError}</p>}
@@ -89,7 +92,7 @@ export function PetsPage() {
           <label>动作姿态<select aria-label="动作姿态" disabled={isLili} value={draft.appearance.action} onChange={event => tune('action', event.target.value as PetAppearance['action'])}><option value="idle">安静陪伴</option><option value="greeting">招招手</option><option value="celebrating">一起庆祝</option></select></label>
           <label>伙伴颜色<input type="color" aria-label="伙伴颜色" disabled={isLili} value={draft.appearance.color} onChange={event => tune('color', event.target.value)} /></label>
         </div>
-        <p className="small-note">{isLili ? '动作在独立桌宠的菜单或微光指引事件中触发；运行桌宠无需打开 Blender。' : '通用微调只适用于猫、兔、狗的内置 SVG 形象，不代表生成动画。'}</p>
+        <p className="small-note">{isLili ? '小鹿由客户端实时建模，此版为静态模型，不包含动作动画。' : '通用微调只适用于猫、兔、狗的内置 SVG 形象，不代表生成动画。'}</p>
         <div className="stack"><button className="button primary" disabled={!changed || busy} onClick={() => setConfirmation('apply')}><Check size={19} />预览满意，确认应用</button><button className="button secondary" disabled={busy} onClick={reload}>放弃预览，读取当前设置</button><button className="button secondary" disabled={!preferences.previousPet || busy} onClick={() => setConfirmation('undo')}><RotateCcw size={18} />撤回上次应用</button></div>
       </section>
     </div>

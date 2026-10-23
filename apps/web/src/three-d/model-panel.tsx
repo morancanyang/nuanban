@@ -3,6 +3,8 @@ import { Box, Check, FolderOpen, RotateCcw } from 'lucide-react';
 import { Badge, Modal } from '../components';
 import { localModelBridge } from '../local-model';
 import type { LocalModel, ModelCandidate, ModelSource } from '../local-model';
+import { liliModel } from './builtin-models';
+import { createLiliModel } from './lili-model';
 import './model-panel.css';
 
 function ModelPreview({ source, onReady, onError }: { source: ModelSource; onReady: () => void; onError: (message: string) => void }) {
@@ -12,7 +14,8 @@ function ModelPreview({ source, onReady, onError }: { source: ModelSource; onRea
     let view: { dispose(): void } | undefined;
     void import('./viewer').then(async ({ createModelView }) => {
       if (disposed || !container.current) return;
-      const created = await createModelView(container.current, source, { interactive: true, onError });
+      const displaySource = 'id' in source && source.id === liliModel.sha256 ? createLiliModel() : source;
+      const created = await createModelView(container.current, displaySource, { interactive: true, onError });
       if (disposed) { created.dispose(); return; }
       view = created;
       onReady();

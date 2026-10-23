@@ -25,22 +25,37 @@ export const lumiModel = {
   ],
 } as const;
 
-export async function loadLumiModel(signal?: AbortSignal): Promise<ModelSource> {
+export const liliModel = {
+  id: 'lili',
+  name: '栗栗 Lili',
+  version: '1.0.0',
+  fileName: 'Lili_Independent_Deer.glb',
+  sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327',
+  modelUrl: `${import.meta.env.BASE_URL}models/lili/Lili_Independent_Deer.glb`,
+  posterUrl: `${import.meta.env.BASE_URL}models/lili/poster.png`,
+  manifestUrl: `${import.meta.env.BASE_URL}models/lili/character_manifest.json`,
+} as const;
+
+async function loadBuiltinModel(model: typeof lumiModel | typeof liliModel, signal?: AbortSignal): Promise<ModelSource> {
   signal?.throwIfAborted();
   const bridge = localModelBridge();
+  const label = model.id === 'lili' ? '小鹿' : '小猫';
   let bytes: Uint8Array<ArrayBuffer>;
   if (bridge?.readBuiltin) {
-    const source = await bridge.readBuiltin('lumi');
-    if (source.format !== 'glb') throw new Error('小猫模型格式不正确，请更新客户端。');
+    const source = await bridge.readBuiltin(model.id);
+    if (source.format !== 'glb') throw new Error(`${label}模型格式不正确，请更新客户端。`);
     bytes = new Uint8Array(source.bytes);
   } else {
-    const response = await fetch(lumiModel.modelUrl, { signal, credentials: 'omit' });
-    if (!response.ok) throw new Error('小猫模型未能读取，请检查客户端资源后重试。');
+    const response = await fetch(model.modelUrl, { signal, credentials: 'omit' });
+    if (!response.ok) throw new Error(`${label}模型未能读取，请检查客户端资源后重试。`);
     bytes = new Uint8Array(await response.arrayBuffer());
   }
   signal?.throwIfAborted();
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
-  if (hash !== lumiModel.sha256) throw new Error('小猫资源校验失败，请重新构建或安装客户端。');
+  if (hash !== model.sha256) throw new Error(`${label}资源校验失败，请重新构建或安装客户端。`);
   return { format: 'glb', bytes };
 }
+
+export const loadLumiModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(lumiModel, signal);
+export const loadLiliModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(liliModel, signal);

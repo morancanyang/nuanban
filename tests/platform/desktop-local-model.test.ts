@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -114,17 +115,21 @@ describe('模型 IPC 权限与通知', () => {
       isManagementTrusted: (event: unknown) => event === managementEvent || event === toolEvent, getManagementWindow: () => management, getToolWindow: () => tool, getPetWindow: () => pet, ...overrides });
     return { bridge, handlers, dialog, validate, activate, managementEvent, toolEvent, petEvent, management, tool, pet, store };
   }
-  it('内置小猫只读预览不暂存、不改当前伙伴；确认后验证并持久化', async () => {
+  it.each([
+    { id: 'lumi', bytes: 1836140, fileName: 'Lumi_Magical_Kitten.glb', sha256: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b' },
+    { id: 'lili', bytes: 1601548, fileName: 'Lili_Independent_Deer.glb', sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327' },
+  ])('内置 $id 只读预览不暂存、不改当前伙伴；确认后验证并持久化', async builtin => {
     const current = bridgeFixture();
     const first = current.store.stage(candidate());
-    const source = current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, 'lumi');
+    const source = current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, builtin.id);
     expect(source).toMatchObject({ format: 'glb', bytes: expect.any(Uint8Array) });
-    expect(source.bytes.byteLength).toBe(1836140);
+    expect(source.bytes.byteLength).toBe(builtin.bytes);
+    expect(createHash('sha256').update(source.bytes).digest('hex')).toBe(builtin.sha256);
     expect(current.store.read()).toEqual({ kind: 'none' });
     expect(current.validate).not.toHaveBeenCalled();
     expect(current.store.apply(first.token)).toMatchObject({ kind: 'model' });
-    const model = await current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, 'lumi');
-    expect(model).toMatchObject({ kind: 'model', id: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b', fileName: 'Lumi_Magical_Kitten.glb' });
+    const model = await current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, builtin.id);
+    expect(model).toMatchObject({ kind: 'model', id: builtin.sha256, fileName: builtin.fileName });
     expect(current.dialog.showOpenDialog).not.toHaveBeenCalled();
     expect(current.validate).toHaveBeenCalledOnce();
     expect(current.validate.mock.calls[0]).toHaveLength(1);
@@ -136,15 +141,35 @@ describe('模型 IPC 权限与通知', () => {
   });
   it('内置白名单不接收路径、额外参数或桌宠写入请求', async () => {
     const current = bridgeFixture();
-    for (const id of ['../lumi', 'C:\\secret.glb', null, {}, 'https://example.com/model.glb']) {
+    for (const id of ['../lumi', '../lili', '__proto__', 'C:\\secret.glb', null, {}, 'https://example.com/model.glb']) {
       expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, id)).toThrow('未知');
       await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, id)).rejects.toThrow('未知');
     }
-    expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.petEvent, 'lumi')).toThrow('只有本人');
-    await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.petEvent, 'lumi')).rejects.toThrow('只有本人');
-    expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, 'lumi', 'extra')).toThrow('额外');
-    await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, 'lumi', 'extra')).rejects.toThrow('未知');
+    for (const id of ['lumi', 'lili']) {
+      expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.petEvent, id)).toThrow('只有本人');
+      await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.petEvent, id)).rejects.toThrow('只有本人');
+      expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, id, 'extra')).toThrow('额外');
+      await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, id, 'extra')).rejects.toThrow('未知');
+    }
     expect(current.activate).not.toHaveBeenCalled();
+    current.bridge.dispose();
+  });
+  it('小鹿文件大小或摘要不匹配时拒绝应用，保留先前模型', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'nuanban-builtin-lili-'));
+    temporaryDirectories.push(directory);
+    mkdirSync(join(directory, 'lili'));
+    const filePath = join(directory, 'lili', 'Lili_Independent_Deer.glb');
+    const current = bridgeFixture({ builtinModelsPath: directory });
+    const previous = current.store.apply(current.store.stage(candidate()).token);
+    writeFileSync(filePath, Buffer.from([1, 2, 3]));
+    await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, 'lili')).rejects.toThrow('文件无效');
+    const bytes = readFileSync(join(process.cwd(), 'apps/web/public/models/lili/Lili_Independent_Deer.glb'));
+    bytes[bytes.length - 1] ^= 1;
+    writeFileSync(filePath, bytes);
+    await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, 'lili')).rejects.toThrow('校验失败');
+    expect(current.activate).not.toHaveBeenCalled();
+    expect(current.validate).not.toHaveBeenCalled();
+    expect(current.store.read()).toEqual(previous);
     current.bridge.dispose();
   });
   it('缺失、解析失败和角色停止失败时保留先前模型', async () => {

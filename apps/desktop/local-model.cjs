@@ -254,14 +254,18 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
   }
   const requireManagement = event => { if (!isManagementTrusted(event)) throw new Error('只有本人管理窗口可以导入或更换 3D 模型'); };
   function readBuiltin(id) {
-    if (id !== 'lumi') throw new Error('未知的内置三维伙伴');
-    const fileName = 'Lumi_Magical_Kitten.glb';
-    const filePath = path.join(builtinModelsPath, 'lumi', fileName);
-    if (!path.isAbsolute(builtinModelsPath) || !fs.existsSync(filePath)) throw new Error('客户端缺少小猫资源，请重新构建或安装后重试');
+    if (id !== 'lumi' && id !== 'lili') throw new Error('未知的内置三维伙伴');
+    const builtin = {
+      lumi: { fileName: 'Lumi_Magical_Kitten.glb', bytes: 1836140, sha256: '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b' },
+      lili: { fileName: 'Lili_Independent_Deer.glb', bytes: 1601548, sha256: '35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327' },
+    }[id];
+    const { fileName } = builtin;
+    const filePath = path.join(builtinModelsPath, id, fileName);
+    if (!path.isAbsolute(builtinModelsPath) || !fs.existsSync(filePath)) throw new Error('客户端缺少内置伙伴资源，请重新构建或安装后重试');
     const metadata = fs.lstatSync(filePath);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size !== 1836140) throw new Error('内置小猫文件无效，请重新构建或安装客户端');
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size !== builtin.bytes) throw new Error('内置伙伴文件无效，请重新构建或安装客户端');
     const bytes = fs.readFileSync(filePath);
-    if (createHash('sha256').update(bytes).digest('hex') !== '7fbe808f7de41e0e15181a0094038f79d6168ea99888dc8947846a2f70cf019b') throw new Error('内置小猫资源校验失败，原桌宠未替换');
+    if (createHash('sha256').update(bytes).digest('hex') !== builtin.sha256) throw new Error('内置伙伴资源校验失败，原桌宠未替换');
     inspectModelContainer(bytes, 'glb');
     return { fileName, format: 'glb', bytes: new Uint8Array(bytes) };
   }
@@ -295,22 +299,22 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
       return store.stage({ fileName: path.basename(selectedPath), format, bytes, summary });
     } finally { choosing = false; }
   });
-  const requireAvailable = () => { if (applyingBuiltin) throw new Error('正在调用内置小猫，请等待完成后再更换模型'); };
+  const requireAvailable = () => { if (applyingBuiltin) throw new Error('正在调用内置伙伴，请等待完成后再更换模型'); };
   ipcMain.handle(channels[2], (event, token) => { requireManagement(event); requireAvailable(); return publish(store.apply(token)); });
   ipcMain.handle(channels[3], event => { requireManagement(event); requireAvailable(); return publish(store.clear()); });
   ipcMain.handle(channels[4], event => { requireManagement(event); requireAvailable(); store.discard(); return true; });
   ipcMain.handle(channels[5], async (event, id, ...extra) => {
     requireManagement(event);
-    if (id !== 'lumi' || extra.length) throw new Error('未知的内置三维伙伴');
+    if ((id !== 'lumi' && id !== 'lili') || extra.length) throw new Error('未知的内置三维伙伴');
     if (choosing) throw new Error('已有模型正在选择或检查，请稍候');
     choosing = true;
     applyingBuiltin = true;
     try {
       const source = readBuiltin(id);
       const summary = validateModelSummary(await validate({ bytes: source.bytes, format: source.format }));
-      if (disposed || !isManagementTrusted(event)) throw new Error('管理窗口已关闭，小猫未应用');
+      if (disposed || !isManagementTrusted(event)) throw new Error('管理窗口已关闭，内置伙伴未应用');
       await activate();
-      if (disposed || !isManagementTrusted(event)) throw new Error('管理窗口已关闭，小猫未应用');
+      if (disposed || !isManagementTrusted(event)) throw new Error('管理窗口已关闭，内置伙伴未应用');
       const staged = store.stage({ ...source, summary });
       return publish(store.apply(staged.token));
     } finally { choosing = false; applyingBuiltin = false; }

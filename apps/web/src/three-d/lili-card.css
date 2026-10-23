@@ -1,0 +1,7 @@
+.lili-model-surface { position: absolute; inset: 38px 0 42px; }
+.lili-model-surface canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.lili-model-poster { position: absolute; top: 38px; left: 0; width: 100%; height: calc(100% - 80px); object-fit: contain; pointer-events: none; }
+.lili-model-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.lili-companion-stage .companion-number { z-index: 1; pointer-events: none; }
+.lili-stage-caption { pointer-events: none; }
+@media (max-width: 440px) { .lili-model-buttons { flex-direction: column; } }

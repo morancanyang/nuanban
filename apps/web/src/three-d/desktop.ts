@@ -1,7 +1,8 @@
 import { createModelView } from './viewer';
 import type { LocalModel } from '../local-model';
-import { lumiModel } from './builtin-models';
+import { liliModel, lumiModel } from './builtin-models';
 import { createLumiModel } from './lumi-model';
+import { createLiliModel } from './lili-model';
 
 const validationStage = document.getElementById('model-validation-stage');
 if (validationStage && window.nuanbanModelValidator) {
@@ -45,7 +46,8 @@ if (modelStage && window.nuanbanModel) {
     modelStage!.append(stage);
     modelStage!.hidden = false;
     try {
-      const source = model.kind === 'model' && model.id === lumiModel.sha256 ? createLumiModel() : model;
+      const source = model.id === lumiModel.sha256 ? createLumiModel()
+        : model.id === liliModel.sha256 ? createLiliModel() : model;
       const view = await createModelView(stage, source, { onError: text => {
         if (disposed || currentRevision !== revision) return;
         reset(); message(text);
@@ -56,6 +58,7 @@ if (modelStage && window.nuanbanModel) {
       currentView = view;
       modelStage!.dataset.modelId = model.id;
       modelStage!.dataset.format = model.format;
+      modelStage!.dataset.renderSource = source.format;
       visibility(true);
       message('');
     } catch (error) {

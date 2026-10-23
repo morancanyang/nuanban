@@ -5,12 +5,10 @@ import type { Material } from 'three';
 
 type Point = [number, number, number];
 
-export interface ProceduralModelSource {
-  format: 'procedural-lumi';
-  id: 'lumi';
+export type ProceduralModelSource = {
   root: Group;
   animations: AnimationClip[];
-}
+} & ({ format: 'procedural-lumi'; id: 'lumi' } | { format: 'procedural-lili'; id: 'lili' });
 
 function material(color: number, roughness = 0.68, metalness = 0) {
   return new MeshStandardMaterial({ color, roughness, metalness });

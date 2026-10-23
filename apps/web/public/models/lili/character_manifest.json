@@ -1,0 +1,188 @@
+{
+  "id": "lili",
+  "name": "栗栗 · Lili",
+  "version": "1.0.0",
+  "fileName": "Lili_Independent_Deer.glb",
+  "sha256": "35c40f0c66b08fab749f7b711e97dc12dfd911003f375b9a77445c16928d7327",
+  "bytes": 1601548,
+  "triangles": 76752,
+  "meshes": 39,
+  "decodedMeshes": 43,
+  "bones": 0,
+  "animations": 0,
+  "textures": 0,
+  "format": "glb",
+  "background": false,
+  "externalResources": false,
+  "optimizedFor": "本地客户端实时预览与透明桌宠",
+  "optimization": "采用 Blender MCP 将影视级雕刻网格降面；移除影视短绒与密集针织曲线，保留雕刻轮廓、鹿角、耳廓、分层眼睛、奶油色口鼻腹部、围巾主体与流苏。",
+  "sourceScene": "MICROGLOW_DEER_STANDALONE",
+  "createdVia": "Blender MCP execute_code",
+  "runtime": {
+    "renderer": "procedural-lili",
+    "factory": "createLiliModel",
+    "geometrySource": "客户端 Three.js 程序化生成",
+    "glbPurpose": "受信资源身份、持久化与完整性检查，不作为默认显示几何",
+    "animationCount": 0,
+    "background": false,
+    "posterPurpose": "Blender 参考立绘，用于不启用三维预览时的占位与浏览器页面陪伴"
+  },
+  "parts": [
+    {
+      "name": "DEER_BODY_CONTINUOUS_SCULPT",
+      "triangles": 23870
+    },
+    {
+      "name": "DEER_HEAD_SCULPT",
+      "triangles": 3024
+    },
+    {
+      "name": "DEER_CREAM_MUZZLE",
+      "triangles": 798
+    },
+    {
+      "name": "DEER_CREAM_BELLY_FLUSH_SURFACE",
+      "triangles": 797
+    },
+    {
+      "name": "DEER_NOSE",
+      "triangles": 798
+    },
+    {
+      "name": "DEER_GENTLE_SMILE",
+      "triangles": 102
+    },
+    {
+      "name": "DEER_HOOF_-1",
+      "triangles": 798
+    },
+    {
+      "name": "DEER_HOOF_SPLIT_-1",
+      "triangles": 40
+    },
+    {
+      "name": "DEER_HAND_CREASE",
+      "triangles": 20
+    },
+    {
+      "name": "DEER_HAND_CREASE.001",
+      "triangles": 20
+    },
+    {
+      "name": "DEER_HOOF_1",
+      "triangles": 798
+    },
+    {
+      "name": "DEER_HOOF_SPLIT_1",
+      "triangles": 40
+    },
+    {
+      "name": "DEER_HAND_CREASE.002",
+      "triangles": 20
+    },
+    {
+      "name": "DEER_HAND_CREASE.003",
+      "triangles": 20
+    },
+    {
+      "name": "DEER_TAIL",
+      "triangles": 798
+    },
+    {
+      "name": "DEER_TAIL_IVORY_TIP",
+      "triangles": 798
+    },
+    {
+      "name": "DEER_EAR_SHELL_-1",
+      "triangles": 3800
+    },
+    {
+      "name": "DEER_EAR_INNER_-1",
+      "triangles": 1739
+    },
+    {
+      "name": "DEER_EAR_SHELL_1",
+      "triangles": 3800
+    },
+    {
+      "name": "DEER_EAR_INNER_1",
+      "triangles": 1740
+    },
+    {
+      "name": "DEER_ANTLER_ORGANIC_-1",
+      "triangles": 2460
+    },
+    {
+      "name": "DEER_ANTLER_ORGANIC_1",
+      "triangles": 2344
+    },
+    {
+      "name": "DEER_EYE_GLOBE_-1",
+      "triangles": 2496
+    },
+    {
+      "name": "DEER_AMBER_IRIS_-1",
+      "triangles": 1919
+    },
+    {
+      "name": "DEER_PUPIL_-1",
+      "triangles": 2496
+    },
+    {
+      "name": "DEER_CORNEA_-1",
+      "triangles": 1919
+    },
+    {
+      "name": "DEER_SOFT_EYELID_-1",
+      "triangles": 1432
+    },
+    {
+      "name": "DEER_EXPRESSIVE_BROW_-1",
+      "triangles": 39
+    },
+    {
+      "name": "DEER_EYE_GLOBE_1",
+      "triangles": 2496
+    },
+    {
+      "name": "DEER_AMBER_IRIS_1",
+      "triangles": 1919
+    },
+    {
+      "name": "DEER_PUPIL_1",
+      "triangles": 2496
+    },
+    {
+      "name": "DEER_CORNEA_1",
+      "triangles": 1919
+    },
+    {
+      "name": "DEER_SOFT_EYELID_1",
+      "triangles": 1432
+    },
+    {
+      "name": "DEER_EXPRESSIVE_BROW_1",
+      "triangles": 39
+    },
+    {
+      "name": "DEER_SOFT_CHEEK_TINT_-1",
+      "triangles": 402
+    },
+    {
+      "name": "DEER_SOFT_CHEEK_TINT_1",
+      "triangles": 402
+    },
+    {
+      "name": "DEER_SCARF_SOFT_CONTINUOUS_COLLAR",
+      "triangles": 1728
+    },
+    {
+      "name": "DEER_SCARF_DRAPED_TAIL",
+      "triangles": 3920
+    },
+    {
+      "name": "DEER_SCARF_SOFT_FRINGE",
+      "triangles": 1074
+    }
+  ]
+}

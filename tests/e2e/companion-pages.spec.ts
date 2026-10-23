@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { installLiliModelBridge } from '../fixtures/lili-bridge';
 
 test('伙伴收藏分别打开小鹿和小猫的独立页面，手机浏览器可显示页面陪伴', async ({ page }) => {
   const errors: string[] = [];
@@ -9,12 +10,14 @@ test('伙伴收藏分别打开小鹿和小猫的独立页面，手机浏览器�
   await collection.getByRole('link', { name: /认识小鹿栗栗/ }).click();
   await expect(page).toHaveURL(/#\/pets\/lili$/);
   await expect(page.getByRole('heading', { name: '小鹿栗栗', exact: true })).toBeVisible();
-  await expect(page.getByRole('region', { name: '栗栗 Lili' })).toContainText('栗栗目前不是 3D 模型');
+  await expect(page.getByRole('region', { name: '栗栗 Lili' })).toContainText('客户端实时建模');
+  await expect(page.getByRole('region', { name: '栗栗 Lili' })).toContainText('静态 3D 模型 · 无内置动画');
   const liliButton = page.getByRole('button', { name: '在本页显示栗栗', exact: true });
   await expect(liliButton).toBeEnabled();
   await liliButton.click();
   await page.getByRole('button', { name: '确认在本页显示栗栗', exact: true }).click();
   await expect(page.locator('[aria-label="网页陪伴：栗栗"]')).toContainText('栗栗在这里陪你');
+  await expect(page.locator('[aria-label="网页陪伴：栗栗"] img')).toHaveAttribute('src', /models\/lili\/poster\.png$/);
   await expect(page.getByRole('status')).toContainText('栗栗已显示在当前页面');
   await page.getByRole('button', { name: '关闭页面陪伴', exact: true }).click();
   await expect(page.locator('[aria-label="网页陪伴：栗栗"]')).toHaveCount(0);
@@ -36,17 +39,7 @@ test('伙伴收藏分别打开小鹿和小猫的独立页面，手机浏览器�
 });
 
 test('小鹿独立页确认后才调用原生桥，失败可重试且不伪报成功', async ({ page }) => {
-  await page.addInitScript(() => {
-    let calls = 0;
-    window.nuanbanCompanion = {
-      async showLili() {
-        calls++;
-        sessionStorage.setItem('lili-detail-calls', String(calls));
-        if (calls === 1) throw new Error('测试角色资源读取失败');
-        return { id: 'lili', version: '1.0.0' };
-      },
-    };
-  });
+  await installLiliModelBridge(page, { failOnce: '测试角色资源读取失败' });
   await page.goto('/#/pets/lili');
   expect(await page.evaluate(() => sessionStorage.getItem('lili-detail-calls'))).toBeNull();
   await page.getByRole('button', { name: '请栗栗到桌面', exact: true }).click();
@@ -55,9 +48,45 @@ test('小鹿独立页确认后才调用原生桥，失败可重试且不伪报�
   await page.getByRole('button', { name: '请栗栗到桌面', exact: true }).click();
   await page.getByRole('button', { name: '确认切换并显示栗栗', exact: true }).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('测试角色资源读取失败');
-  await expect(page.getByText('栗栗 1.0.0 已切换并显示在桌面。', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('客户端建模小鹿已保存并调用到桌面。', { exact: false })).toHaveCount(0);
   await page.getByRole('button', { name: '确认切换并显示栗栗', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('栗栗 1.0.0 已切换并显示在桌面。');
+  await expect(page.getByRole('status')).toContainText('客户端建模小鹿已保存并调用到桌面。');
   expect(await page.evaluate(() => sessionStorage.getItem('lili-detail-calls'))).toBe('2');
+  await page.reload();
+  await expect(page.getByText('当前 3D 桌宠', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '再次召唤栗栗' })).toBeVisible();
+});
+
+test('客户端小鹿支持真实旋转，预览无内置动画、不调用或上传角色', async ({ page }) => {
+  const errors: string[] = [];
+  const uploads: string[] = [];
+  const glbRequests: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => {
+    if (request.method() === 'POST') uploads.push(request.url());
+    if (request.url().endsWith('Lili_Independent_Deer.glb')) glbRequests.push(request.url());
+  });
+  await page.goto('/#/pets/lili');
+  const card = page.getByRole('region', { name: '栗栗 Lili' });
+  await card.getByRole('button', { name: '预览小鹿 3D 模型' }).click();
+  const canvas = card.locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-render-source', 'procedural-lili');
+  expect(await canvas.getAttribute('data-animation')).toBeNull();
+  const before = await canvas.screenshot();
+  const bounds = (await canvas.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width * 0.4, bounds.y + bounds.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * 0.7, bounds.y + bounds.height * 0.5, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(async () => before.equals(await canvas.screenshot())).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await card.screenshot({ path: test.info().outputPath('lili-client-model.png') });
+  await card.getByRole('button', { name: '收起 3D 预览' }).click();
+  await expect(canvas).toHaveCount(0);
+  await expect(card.getByRole('img', { name: /栗栗小鹿三维参考立绘/ })).toBeVisible();
+  expect(errors).toEqual([]);
+  expect(uploads).toEqual([]);
+  expect(glbRequests).toEqual([]);
 });

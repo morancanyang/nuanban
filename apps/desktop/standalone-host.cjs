@@ -643,7 +643,7 @@ function createStandaloneHost(options) {
     return Menu.buildFromTemplate([
       { label: '微光指引 · 独立桌宠', enabled: false }, { type: 'separator' },
       { label: '角色', submenu: [
-        { label: '栗栗 · 本地二维小鹿', type: 'radio', checked: lili.snapshot().enabled, click: () => runAction(() => selectLili(true)) },
+        { label: '栗栗 · 兼容二维小鹿', type: 'radio', checked: lili.snapshot().enabled, click: () => runAction(() => selectLili(true)) },
         { label: '原有形象（花环水獭 / 原画 / 本地模型）', type: 'radio', checked: !lili.snapshot().enabled, click: () => runAction(() => selectLili(false)) },
       ] },
       ...(lili.snapshot().enabled ? liliMenuItems() : []),
@@ -753,11 +753,11 @@ function createStandaloneHost(options) {
     if (!live(petWindow)) throw new Error('独立桌宠尚未就绪，请重新打开客户端。');
     if (['connecting', 'ready', 'cleanup_failed'].includes(avatarService?.status().phase)) {
       const stopped = await avatarService.stop();
-      if (stopped?.stopped !== true) throw new Error('原角色尚未停止，小猫未切换。请稍后重试。');
+      if (stopped?.stopped !== true) throw new Error('原角色尚未停止，内置伙伴未切换。请稍后重试。');
     }
     if (lili.snapshot().enabled) {
       const selected = await selectLili(false);
-      if (selected?.ok !== true) throw new Error('原角色未能切换，小猫未应用。请重试。');
+      if (selected?.ok !== true) throw new Error('原角色未能切换，内置伙伴未应用。请重试。');
     }
     await showPetPanel({ focusInput: false });
     return true;
