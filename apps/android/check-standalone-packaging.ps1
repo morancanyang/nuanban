@@ -110,6 +110,16 @@ foreach ($descriptor in @('Lcom/google/mlkit/vision/text/TextRecognizer;', 'Lcom
     Assert-Case ('normal_excludes_' + $descriptor) (-not $normalDex.Contains($descriptor))
     Assert-Case ('standalone_contains_' + $descriptor) ($standaloneDex.Contains($descriptor))
 }
+function Read-ApkEntryNames([string]$Apk) {
+    $archive = [IO.Compression.ZipFile]::OpenRead($Apk)
+    try { return @($archive.Entries | ForEach-Object { $_.FullName }) } finally { $archive.Dispose() }
+}
+$normalEntries = Read-ApkEntryNames $normalApk
+$standaloneEntries = Read-ApkEntryNames $standaloneApk
+$normalPetAsset = @($normalEntries | Where-Object { $_ -match 'nuanban_pet_preview' })
+$standalonePetAsset = @($standaloneEntries | Where-Object { $_ -match 'nuanban_pet_preview' })
+Assert-Case 'normal_has_no_pet_preview_asset' ($normalPetAsset.Count -eq 0)
+Assert-Case 'standalone_has_pet_preview_asset' ($standalonePetAsset.Count -ge 1)
 $normalBuild = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'app/build.gradle.kts') -Raw
 Assert-Case 'normal_source_set_does_not_include_standalone' (-not $normalBuild.Contains('src/standalone'))
 Assert-Case 'normal_has_no_standalone_project_dependency' (-not $normalBuild.Contains('project(":standalone")'))

@@ -7,7 +7,7 @@
 - 普通 `:app` 的 `app/src/main/AndroidManifest.xml` 恢复仅通知/精确闹钟与管理 Launcher；不含捕获/浮层/FGS 权限或桌宠/捕获组件。`app/src/normal/java/AndroidHostRuntime` 仅报告不可采集，不导入捕获实现。
 - 独立 `:standalone` 模块使用 `standalone/src/main/AndroidManifest.xml`、`app/src/standalone/java` 和单独 applicationId `org.nuanban.assistant.standalone`。捕获/桌宠服务及状态机只进入这个模块，不依赖普通 app APK，也不依赖 C01 native-lab。只有无系统 API 的 `FrameRisk` / `GateDecision` DTO 为共享 `FlowAdapter` 保留在 main。
 - Launcher 进入 `PetControlActivity`，默认不启动服务、不申请权限、不抓屏、不录音。本人点击启动、悬浮权限与可见停止通知齐备后，`PetRuntimeService` 使用 `specialUse` 前台服务及 `TYPE_APPLICATION_OVERLAY` 持有桌宠。
-- 点击/拖动浮球、原生小输入面板、停止教学、停止全部观察/教学、打开管理与退出均不依赖 WebView。问题输入不落盘，提交后清空；常驻通知提供原生停止和退出。
+- 点击/拖动本地静态形象浮层、原生小输入面板、停止教学、停止全部观察/教学、打开管理与退出均不依赖 WebView。问题输入不落盘，提交后清空；常驻通知提供原生停止和退出。
 - `MainActivity` 是管理端，暂停/关闭只发 `nuanban:management-pause` / `nuanban:management-destroy`，不再冒充锁屏或进程终止。原生服务才处理真实熄屏、锁屏和权限丢失。
 - 共享 WebView 仍可能因 `visibilitychange` 发送旧 `stop_all`；Android 的 `PetManagementBoundary` 拒绝其影响独立观察/教学及未释放的 Pet-owned 捕获。旧桥没有 scoped-stop/stop-error 合约，保护分支返回 `bridge_error`，现有严格 JS 校验会拒绝为未确认停止，**不谎报全局已停止**。管理页原生按钮可以打开桌宠控制页。无独立会话时只停止旧管理捕获，资源清理完成才返回精确的旧成功结构。
 
@@ -31,6 +31,7 @@
 3. 没有本地离线 wake 引擎，状态为 `unavailable_no_offline_wake_engine`；不申请录音，不用系统 SpeechRecognizer 冒充离线唤醒。
 4. 教学笔记、本人掌握确认、AI 复习建议确认、家属媒体邀请、真实跨应用教学效果未实现或未接线。没有伪造完整支持。
 5. FGS `specialUse` 的分发审批、Android/厂商后台限制、键盘/浮层、锁屏/撤权实际时序、电量/性能均待真机验证。声明服务和离线编译不构成商店审批或设备支持承诺。
+6. 独立桌宠的悬浮形象是随包打包的产品角色**本地静态预览**（`nuanban_pet_preview.png`，含 400×560 透明 PNG，来源于 Windows 端同款花环水獭静态预览），不是实时 3D 建模，也不连接星云、不抓屏、不联网。实时 3D 形象仍只在 Windows 端；Android 端如后续要做实时 3D，需要单独设计并完成真机性能、触摸与浮层验收，本次没有实现。管理页文字模型同样未接入 Android（服务端受控会话引导未实现），不以此声称模型已连接。
 
 ## 离线验证
 

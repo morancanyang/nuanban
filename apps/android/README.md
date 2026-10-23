@@ -36,3 +36,33 @@ C01 的独立 `native-lab` 模块（`org.nuanban.nativelab`）保留为隔离实
 - 产物：`app-debug.apk` 5,734,485 字节 `642d365d45c68b91a7793cbd93214d614631cc5b43db7d24375d82d0aab6fefc`；`standalone-debug.apk` 88,194,952 字节 `33b65a98f90e0e20324e5e10d8db53c1ffff9f47e0a276f7018e84e96ab3a27d`。
 - 校验：两个 APK 内 `assets/ui/**` 12 个文件与同批 `apps/web/dist/**` 逐文件 SHA256 一致；打包隔离校验 87/87 通过；`zipalign -c 4` 与 `apksigner verify` 均通过（v2、debug 证书）。
 - 边界：Android 端本次只更新了**共享 Web 界面**与重新出包。Windows 侧的连续共享、光标指引稳定性、模型网关图片缩放等改动属于 Electron 主进程实现，**不在 Android 端**；Android 自身能力（原生桌宠、采屏/悬浮窗、独立包本地 OCR/人脸与云出口）沿用原有实现，未在本次改动。仍为 debug 包、未做真机安装/权限/后台/悬浮窗验收，`deviceVerified=false`。
+
+## 2026-10-23 独立桌宠形象修复（文字占位 → 角色静态形象）
+
+- 问题：独立桌宠悬浮层此前用 `TextView` 显示“微光\n指引”四个字，没有角色形象；用户反馈“打开桌宠是微光指引四个字，没有建模”。普通管理包的页面陪伴入口不受影响。
+- 修改：`PetRuntimeService.addBubble()` 改为 `ImageView` + 随包 `res/drawable-nodpi/nuanban_pet_preview.png`（400×560 透明 PNG，SHA256 `a0b637938f866d4bbc0a24ad1d9158d3bdd30139c123a76d8c4915ad422ed947`，取自 `apps/desktop/assets/xingyun-floral-otter-preview.png`，即产品默认花环水獭的本地静态预览）；保留拖动、单击打开原生面板、`FLAG_SECURE`、`filterTouchesWhenObscured`，轻摇动效遵守系统动画开关。资源放入独立源集 `app/src/standalone/res`，普通包不携带；打包校验新增 `normal_has_no_pet_preview_asset` 与 `standalone_has_pet_preview_asset`。
+- 边界：这是**本地静态形象，不是实时 3D 建模**；不连接星云、不抓屏、不联网。实时 3D 形象仍只在 Windows 端实现；Android 端如要做实时 3D 需单独设计并做真机性能/触摸/浮层验收，本次未做。
+- 模型说明：Android 管理页的文字模型仍未接入。服务端已配置文本供应商，但公共 HTTP 面只有 device-challenge/exchange/refresh，没有安全的账户/设备会话开通路径；把令牌打进 APK 的 JS 会违反既有安全边界（`infra/windows/README.md` 已记录）。本次没有伪造“模型已连接”，需要产品/安全决策后再做受控会话引导。
+- 同步与构建：`node scripts/sync-android.mjs` 把最新 `apps/web/dist`（2026-10-23 20:54，含 Lili/Lumi 与页面陪伴改动，14 个文件）复制到 `app/src/main/assets/ui`；`apps/android/check-standalone-packaging.ps1` 离线重编**双包 BUILD SUCCESSFUL in 39s**，打包隔离 **89/89** 通过，`deviceVerified=false, captureExecuted=false, cloudExecuted=false`。
+- 产物（debug，未签名发布版）：
+  - `app/build/outputs/apk/debug/app-debug.apk`：7,570,810 字节（7.22 MiB），SHA256 `5AE9627325135EFB74281DAE8DDA2883C97355DAE924BE109E66AEC9817545F9`。
+  - `standalone/build/outputs/apk/debug/standalone-debug.apk`：90,449,913 字节（86.26 MiB），SHA256 `1428CEB8C6A021D212B7789BFFB7E3E3897F465476AFBD1ED9249DB6B042E6DB`；包内 `res/drawable-nodpi-v4/nuanban_pet_preview.png` 存在，普通包不含该资源。
+- 校验：两包均为 Android Debug v2 证书，`zipalign -c 4` 通过；39 个随包 OCR/人脸模型资产清单 SHA-256 仍为 `4f5fa874d4808f27f9afca0ccb6a69debc0f8ab67d59ece2981704f4a54224a6`（与运行时信任锚一致）。
+- 未做：本机 `adb devices` 为空且没有可用 AVD，未安装运行、未申请悬浮窗/通知权限、未截图或真机验收；服务器下载目录中的旧 APK 需负责人确认后再重新上传，不能以本地重编声称线上已更新。
+
+## 2026-10-23 WebView 宿主修复：图片选择器与系统 TTS（未解决的产品边界另列）
+
+- 反馈与定位：“安卓端图片传不上去、语音功能无法使用”。实测代码根因是 `MainActivity` **没有设置 `WebChromeClient`**：聊天页的隐藏 `<input type="file">` 点“选图片”时不会弹出任何系统文件选择器（WebView 静默忽略），这是“图片传不上去”的直接原因；同一 WebView 也没有 `window.speechSynthesis`（Android WebView 不实现 Web Speech API），所以朗读/“再讲一遍”只能走“系统没有可用的语音播放”降级。
+- 宿主修复（**零新增权限**，普通包权限仍只有 `POST_NOTIFICATIONS`/`SCHEDULE_EXACT_ALARM`）：
+  - `MainActivity` 新增 `WebChromeClient.onShowFileChooser`：按 `acceptTypes` 用 `Intent.ACTION_GET_CONTENT` + `CATEGORY_OPENABLE` 打开系统文件选择器（图片时 `image/*`，支持多选），结果经 `WebChromeClient.FileChooserParams.parseResult` 回填；`onActivityResult`/`onDestroy` 释放未完成回调。`onPermissionRequest` 明确 `deny()`，网页内容不能直接申请相机/麦克风。
+  - 系统 `TextToSpeech`（`zh-CN`，本地引擎）经 `addJavascriptInterface("nuanbanTts")` + `WebViewCompat.addDocumentStartJavaScript` 注入最小 `SpeechSynthesisUtterance`/`speechSynthesis` 垫片；原生 `UtteranceProgressListener` 驱动 `onend`/`onerror`，`cancel()` 调 `stop()`，`setSpeechRate` 映射语速。TTS 引擎缺失/中文语言不可用时 `speechSynthesis` 保持 `undefined`，网页继续显示“没有可用语音播放”的降级提示，不假装成功。TTS 仅本机朗读字幕，无网络、无麦克风。
+  - 新增静态回归断言（`tests/platform/android-standalone-runtime.test.ts`）：要求文件选择器/TTS 垫片存在，且 `MainActivity` 不得出现 `RECORD_AUDIO`/`CAMERA`/`SpeechRecognizer`/`getUserMedia`/`MediaRecorder`。
+- 仍未解决（**产品边界缺口，不是 WebView 缺陷**，不能按“已修复”对外说明）：
+  - 图片“上传给模型”仍不可用：图片问答端口只接受 Windows 桌面 IPC（`window.nuanbanImageQuestion`）。文件选择器修好后可选图、预览并明确提示“当前没有可用的桌面图片接口”，但**不会上传、也不会假装识别**。
+  - 语音听写仍不可用：Android 两包均不声明 `RECORD_AUDIO`/`CAMERA`（官方打包隔离校验与测试明令禁止），要开麦克风必须改产品权限边界、安全策略与验收范围。
+  - 文字 AI 同样未接入 Android：共享 UI 为 local 模式且无 `nuanbanTextQuestion` 桥；要同 Windows 能力需接服务端受控设备会话（见上一节模型说明）。
+- 构建与验证：`apps/android/check-standalone-packaging.ps1`（离线）`BUILD SUCCESSFUL in 1m 5s`，打包隔离 **89/89** 通过；`zipalign -c 4`、`apksigner verify`（v2、debug 证书）通过；新增 vitest 断言通过；TTS 垫片在 Node 模拟 `window`/host 下验证可用性、speak/语速、cancel、onend、onerror、引擎未就绪时 `undefined` 六条语义。
+- 产物（debug、未签名发布版；与上一节尺寸/哈希不同是因为本次构建含本节宿主改动）：
+  - `app/build/outputs/apk/debug/app-debug.apk`：7,570,810 字节（7.22 MiB），SHA256 `B14803EDDBECE1AD73735D2F6AD84882CA2FA8173CB36EA4D62E4753EDA8609F`。
+  - `standalone/build/outputs/apk/debug/standalone-debug.apk`：90,481,515 字节（86.29 MiB），SHA256 `3B196F0AD7FEC45D03708E243D4A884822E276459D84C1BC2F55B6261F8FE53D`。
+- 未做：没有连接真机/模拟器，**未安装、未点击真实文件选择器、未播放真实 TTS**，`deviceVerified=false`；上述宿主修复只证明可编译、DEX/权限隔离与 JS 垫片语义，真实机型文件选择器行为、TTS 引擎可用性与朗读音质仍需真机验收。C17/验收门禁指纹因 `MainActivity.kt` 变更需按仓库流程重跑后再作为证据。

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -76,6 +76,20 @@ describe('Android 独立桌宠原生安全闭环', () => {
     expect(host).toContain('standalone_build_required');
   });
 
+  it('WebView 宿主接入系统文件选择器与本地 TTS，同时明确拒绝网页直接申请采集权限', () => {
+    const activity = readAndroid('app/src/main/java/org/nuanban/assistant/MainActivity.kt');
+    expect(activity).toContain('onShowFileChooser');
+    expect(activity).toContain('WebChromeClient.FileChooserParams.parseResult');
+    expect(activity).toContain('Intent.ACTION_GET_CONTENT');
+    expect(activity).toContain('override fun onPermissionRequest');
+    expect(activity).toContain('request.deny()');
+    expect(activity).toContain('android.speech.tts.TextToSpeech');
+    expect(activity).toContain('addJavascriptInterface(SpeechJavascriptBridge(), "nuanbanTts")');
+    expect(activity).toContain('addDocumentStartJavaScript');
+    expect(activity).toContain('__nuanbanTtsEvent');
+    expect(activity).not.toMatch(/RECORD_AUDIO|CAMERA|SpeechRecognizer|getUserMedia|MediaRecorder/);
+  });
+
   it('驻留桌宠实际拥有原生输入、通知停止与退出，不依赖 Activity 或 WebView 持有', () => {
     const service = readAndroid(nativeRoot + 'PetRuntimeService.kt');
     expect(service).toContain('class PetRuntimeService : Service()');
@@ -85,6 +99,10 @@ describe('Android 独立桌宠原生安全闭环', () => {
     expect(service).toContain('AndroidGuidanceRuntime.verify');
     expect(service).toContain('AndroidGuidanceRuntime.finishTeaching');
     expect(service).toContain('question.text.clear()');
+    expect(service).toContain('R.drawable.nuanban_pet_preview');
+    expect(service).toContain('ImageView(this)');
+    expect(service).not.toMatch(/text = "[^"]*\\n[^"]*"/);
+    expect(existsSync(androidRoot + 'app/src/standalone/res/drawable-nodpi/nuanban_pet_preview.png')).toBe(true);
     expect(service).toContain('PetStopReceiver.ACTION_STOP');
     expect(service).toContain('PetStopReceiver.ACTION_EXIT');
     expect(service).toContain('START_NOT_STICKY');

@@ -1,5 +1,7 @@
 package org.nuanban.assistant.nativehost
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -21,9 +23,11 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -33,7 +37,8 @@ import kotlin.math.abs
 
 class PetRuntimeService : Service() {
     private val handler = Handler(Looper.getMainLooper())
-    private var bubble: TextView? = null
+    private var bubble: ImageView? = null
+    private var bubbleAnimator: ObjectAnimator? = null
     private var panel: ScrollView? = null
     private var status: TextView? = null
     private var guidance: AndroidGuidanceOverlay? = null
@@ -117,15 +122,16 @@ class PetRuntimeService : Service() {
 
     private fun addBubble() {
         val manager = getSystemService(WindowManager::class.java)
-        val size = (64 * resources.displayMetrics.density).toInt()
-        val layout = parameters(size, size)
-        val pet = TextView(this).apply {
-            text = "微光\n指引"
-            textSize = 17f
-            gravity = Gravity.CENTER
-            setTextColor(0xff234635.toInt())
-            setBackgroundColor(0xffe2f2df.toInt())
-            contentDescription = "微光指引独立桌宠，点击打开原生输入和停止面板，拖动移动位置"
+        val metrics = resources.displayMetrics
+        val width = (88 * metrics.density).toInt()
+        val height = (width * 1.4f).toInt()
+        val layout = parameters(width, height)
+        // 本地静态形象使用随包打包的产品角色预览图（与 Windows 离线本地静态预览同源）。
+        // 这不是实时 3D 建模；不连接星云、不抓屏、不联网。
+        val pet = ImageView(this).apply {
+            setImageResource(R.drawable.nuanban_pet_preview)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "微光指引独立桌宠本地静态形象，点击打开原生输入和停止面板，拖动移动位置"
             filterTouchesWhenObscured = true
             setOnClickListener { togglePanel() }
         }
@@ -140,9 +146,9 @@ class PetRuntimeService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val deltaX = event.rawX - startRawX
                     val deltaY = event.rawY - startRawY
-                    if (abs(deltaX) + abs(deltaY) > 12 * resources.displayMetrics.density) dragged = true
-                    layout.x = (startX - deltaX.toInt()).coerceIn(0, (resources.displayMetrics.widthPixels - size).coerceAtLeast(0))
-                    layout.y = (startY + deltaY.toInt()).coerceIn(0, (resources.displayMetrics.heightPixels - size).coerceAtLeast(0))
+                    if (abs(deltaX) + abs(deltaY) > 12 * metrics.density) dragged = true
+                    layout.x = (startX - deltaX.toInt()).coerceIn(0, (metrics.widthPixels - layout.width).coerceAtLeast(0))
+                    layout.y = (startY + deltaY.toInt()).coerceIn(0, (metrics.heightPixels - layout.height).coerceAtLeast(0))
                     try { manager.updateViewLayout(pet, layout) } catch (_: Exception) { PetRuntime.privacyPause(this, "overlay_lost"); stopSelf() }
                     true
                 }
@@ -153,6 +159,14 @@ class PetRuntimeService : Service() {
         }
         bubble = pet
         manager.addView(pet, layout)
+        if (ValueAnimator.areAnimatorsEnabled()) {
+            bubbleAnimator = ObjectAnimator.ofFloat(pet, View.TRANSLATION_Y, 0f, -3 * metrics.density, 0f).apply {
+                duration = 2600
+                repeatCount = ObjectAnimator.INFINITE
+                interpolator = AccelerateDecelerateInterpolator()
+                start()
+            }
+        }
     }
 
     private fun togglePanel() {
@@ -214,6 +228,8 @@ class PetRuntimeService : Service() {
         PetRuntime.stopWork(this, "pet_runtime_destroyed")
         PetRuntime.running = false
         handler.removeCallbacksAndMessages(null)
+        bubbleAnimator?.cancel()
+        bubbleAnimator = null
         hidePanel()
         bubble?.let { runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(it) } }
         bubble = null
