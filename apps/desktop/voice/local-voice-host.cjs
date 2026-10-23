@@ -2,8 +2,9 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { createLocalConversation } = require('./local-conversation.cjs');
+const { contentProtectionRequired } = require('../capture-visibility.cjs');
 
-function createLocalVoiceHost({ electron, showDialog, beforeStart = async () => {}, onState = () => {}, onTranscript = () => {}, presentation = 'window', provider, createConversation = createLocalConversation }) {
+function createLocalVoiceHost({ electron, showDialog, beforeStart = async () => {}, onState = () => {}, onTranscript = () => {}, presentation = 'window', provider, contentProtected = contentProtectionRequired(process.argv, 'pet'), createConversation = createLocalConversation }) {
   if (!['window', 'pet'].includes(presentation)) throw new TypeError('语音显示方式无效');
   const { BrowserWindow, ipcMain, session, screen } = electron;
   const page = path.join(__dirname, '..', 'realtime-voice.html');
@@ -134,7 +135,7 @@ function createLocalVoiceHost({ electron, showDialog, beforeStart = async () => 
         title: '微光指引 · 本地语音对话', show: false, backgroundColor: '#fff8ed', alwaysOnTop: true, autoHideMenuBar: true,
         webPreferences: { preload: path.join(__dirname, '..', 'realtime-voice-preload.cjs'), session: privateSession, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
       const opened = window;
-      opened.setContentProtection(true);
+      opened.setContentProtection(contentProtected === true);
       opened.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       opened.webContents.on('will-navigate', event => { event.preventDefault(); void stop('navigation'); });
       opened.webContents.on('will-attach-webview', event => event.preventDefault());

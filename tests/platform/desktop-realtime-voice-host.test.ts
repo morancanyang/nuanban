@@ -96,7 +96,7 @@ describe('独立实时语音宿主权限与生命周期（合成窗口）', () =
     expect(current.beforeStart).toHaveBeenCalledTimes(1);
     expect(current.session.fromPartition.mock.calls[0][0]).toMatch(/^nuanban-voice-/u);
     expect(current.windows[0].settings).toMatchObject({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, session: current.privateSession } });
-    expect(current.windows[0].protection).toBe(true);
+    expect(current.windows[0].protection).toBe(false);
     expect(current.host.snapshot()).toMatchObject({ active: true, microphoneActive: true });
   });
 

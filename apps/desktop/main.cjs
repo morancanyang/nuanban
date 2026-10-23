@@ -23,6 +23,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const { PRODUCT_ICON_PATH } = require('./brand.cjs');
+const { createCaptureVisibility } = require('./capture-visibility.cjs');
 const indexPath = path.join(__dirname, 'ui', 'index.html');
 const developmentIndex = path.join(__dirname, '..', 'web', 'dist', 'index.html');
 const managementIndex = () => !app.isPackaged && fs.existsSync(developmentIndex) ? developmentIndex : indexPath;
@@ -40,7 +41,8 @@ let imageQuestionBridge;
 let textQuestionBridge;
 let aiProvider;
 let workspaceBridge;
-const managementVisibility = createManagementWindowVisibility({ displayCompatible: process.argv.includes('--client-display-compatible') });
+const captureVisibility = createCaptureVisibility(process.argv);
+const managementVisibility = createManagementWindowVisibility({ displayCompatible: captureVisibility.clientVisible });
 const petTools = createPetToolWindow({ BrowserWindow, getIndexPath: managementIndex, preloadPath: path.join(__dirname, 'preload.cjs'),
   onLifecycle: (name, window) => {
     if (name !== 'nuanban:host-window-moved') { imageQuestionBridge?.stop(); textQuestionBridge?.stop(); }
@@ -163,8 +165,10 @@ app.on('second-instance', (_event, argumentsList) => {
   if (argumentsList.includes('--pet-lili')) void standaloneHost?.selectLili(true);
   if (argumentsList.includes('--pet-default')) void standaloneHost?.selectLili(false);
   if (argumentsList.includes('--pet-display-compatible')) standaloneHost?.setPetDisplayCompatibility(true);
+  if (argumentsList.includes('--protect-pet')) standaloneHost?.setPetDisplayCompatibility(false);
   if (argumentsList.includes('--management')) {
-    if (argumentsList.includes('--client-display-compatible')) managementVisibility.enableCompatibility(mainWindow);
+    if (argumentsList.includes('--client-display-compatible')) managementVisibility.setCompatibility(mainWindow, true);
+    if (argumentsList.includes('--protect-client')) managementVisibility.setCompatibility(mainWindow, false);
     void app.whenReady().then(() => showMainWindow('/')).catch(() => dialog.showErrorBox('管理窗口未打开', '请从桌宠重新打开管理窗口。'));
   }
   else standaloneHost?.showPetPanel();
@@ -188,7 +192,7 @@ if (ownsInstance) app.whenReady().then(async () => {
   registerBridge();
   standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow,
     liliEnabled: process.argv.includes('--pet-lili') || (!process.argv.includes('--pet-default') && process.env.NUANBAN_DESKTOP_PET === 'lili'),
-    petDisplayCompatible: process.argv.includes('--pet-display-compatible'),
+    petDisplayCompatible: captureVisibility.petVisible || process.argv.includes('--pet-display-compatible'),
     showPetTool: route => petTools.show(route),
     onObservationState: observation => managementVisibility.updateObservation(observation, mainWindow),
     analyzer: aiProvider ? createProviderAnalysisClient({ provider: aiProvider }) : undefined,

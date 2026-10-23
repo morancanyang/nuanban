@@ -17,9 +17,13 @@ function createManagementWindowVisibility(options = {}) {
     syncProtection(window);
   }
 
-  function enableCompatibility(window) {
-    displayCompatible = true;
+  function setCompatibility(window, compatible) {
+    displayCompatible = compatible === true;
     syncProtection(window);
+  }
+
+  function enableCompatibility(window) {
+    setCompatibility(window, true);
   }
 
   async function show(window, { route = '/', ready } = {}) {
@@ -37,7 +41,7 @@ function createManagementWindowVisibility(options = {}) {
     return true;
   }
 
-  return { syncProtection, updateObservation, enableCompatibility, show };
+  return { syncProtection, updateObservation, enableCompatibility, setCompatibility, show };
 }
 
 module.exports = { createManagementWindowVisibility };

@@ -19,7 +19,7 @@ if ($repairedRuntimeFiles.Count -gt 0) {
 }
 $launchArguments = @("`"$desktop`"", '--management')
 if ($CompatibleDisplay) { $launchArguments += '--client-display-compatible' }
-if (-not $ProtectPet) { $launchArguments += '--pet-display-compatible' }
+if ($ProtectPet) { $launchArguments += '--protect-pet' }
 $previousRunAsNode = $env:ELECTRON_RUN_AS_NODE
 try {
     Remove-Item -LiteralPath Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue

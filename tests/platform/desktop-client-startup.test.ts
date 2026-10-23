@@ -122,14 +122,14 @@ describe.skipIf(process.platform !== 'win32')('Windows client startup integrity'
     const result = launchProbe({ compatible: true });
     expect(result.error).toBeNull();
     expect(result.launch).toMatchObject({ windowStyle: 'Normal', runAsNode: null });
-    expect(result.launch.arguments).toEqual([expect.stringContaining('apps\\desktop'), '--management', '--client-display-compatible', '--pet-display-compatible']);
+    expect(result.launch.arguments).toEqual([expect.stringContaining('apps\\desktop'), '--management', '--client-display-compatible']);
     expect(result.restoredRunAsNode).toBe('synthetic-existing-value');
   });
 
   it('keeps optional display compatibility and pet protection explicit', () => {
     const result = launchProbe({ protectPet: true });
     expect(result.error).toBeNull();
-    expect(result.launch.arguments).toEqual([expect.stringContaining('apps\\desktop'), '--management']);
+    expect(result.launch.arguments).toEqual([expect.stringContaining('apps\\desktop'), '--management', '--protect-pet']);
   });
 
   it('refuses to launch when the runtime integrity check fails', () => {

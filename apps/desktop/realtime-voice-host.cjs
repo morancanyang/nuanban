@@ -3,11 +3,12 @@ const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { createRealtimeVoiceClient, audioOnlySdp } = require('./realtime-voice-client.cjs');
 const { createLocalVoiceHost } = require('./voice/local-voice-host.cjs');
+const { contentProtectionRequired } = require('./capture-visibility.cjs');
 
-function createRealtimeVoiceHost({ electron, showDialog, beforeStart, onState = () => {}, onTranscript = () => {}, presentation = 'window', client = createRealtimeVoiceClient(), provider }) {
+function createRealtimeVoiceHost({ electron, showDialog, beforeStart, onState = () => {}, onTranscript = () => {}, presentation = 'window', client = createRealtimeVoiceClient(), provider, contentProtected = contentProtectionRequired(process.argv, 'pet') }) {
   if (!['window', 'pet'].includes(presentation)) throw new TypeError('语音显示方式无效');
   if (!client.status().configured && process.platform === 'win32' && typeof provider?.answer === 'function') {
-    return createLocalVoiceHost({ electron, showDialog, beforeStart, onState, onTranscript, presentation, provider });
+    return createLocalVoiceHost({ electron, showDialog, beforeStart, onState, onTranscript, presentation, provider, contentProtected });
   }
   const { BrowserWindow, ipcMain, session, screen } = electron;
   const page = path.join(__dirname, 'realtime-voice.html');
@@ -157,7 +158,7 @@ function createRealtimeVoiceHost({ electron, showDialog, beforeStart, onState = 
         && allowed(contents, details) && Array.isArray(details.mediaTypes) && details.mediaTypes.length === 1 && details.mediaTypes[0] === 'audio'));
       privateSession.setDisplayMediaRequestHandler((_request, callback) => callback({}));
       privateSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
-      window.setContentProtection(true);
+      window.setContentProtection(contentProtected === true);
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       window.webContents.on('will-navigate', event => { event.preventDefault(); stop('navigation'); });
       window.webContents.on('will-attach-webview', event => event.preventDefault());

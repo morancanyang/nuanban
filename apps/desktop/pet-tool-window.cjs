@@ -1,6 +1,7 @@
 const { PRODUCT_ICON_PATH } = require('./brand.cjs');
+const { contentProtectionRequired } = require('./capture-visibility.cjs');
 
-function createPetToolWindow({ BrowserWindow, getIndexPath, preloadPath, onLifecycle = () => {}, onClosed = () => {} }) {
+function createPetToolWindow({ BrowserWindow, getIndexPath, preloadPath, contentProtected = contentProtectionRequired(process.argv, 'pet'), onLifecycle = () => {}, onClosed = () => {} }) {
   let toolWindow;
   let loading;
   let revision = 0;
@@ -12,7 +13,7 @@ function createPetToolWindow({ BrowserWindow, getIndexPath, preloadPath, onLifec
       webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
     toolWindow = window;
     window.on('page-title-updated', event => event.preventDefault());
-    window.setContentProtection(true);
+    window.setContentProtection(contentProtected === true);
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
     window.webContents.on('will-attach-webview', event => event.preventDefault());

@@ -14,7 +14,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture(load: () => Promise<unknown> = async () => undefined) {
+function fixture(load: () => Promise<unknown> = async () => undefined, options: Record<string, unknown> = {}) {
   const windows: TestWindow[] = [];
   class TestWindow extends EventEmitter {
     destroyed = false;
@@ -33,12 +33,12 @@ function fixture(load: () => Promise<unknown> = async () => undefined) {
   }
   const onLifecycle = vi.fn();
   const onClosed = vi.fn();
-  const tools = createPetToolWindow({ BrowserWindow: TestWindow, getIndexPath: () => 'local-client/index.html', preloadPath: 'local-client/preload.cjs', onLifecycle, onClosed });
+  const tools = createPetToolWindow({ BrowserWindow: TestWindow, getIndexPath: () => 'local-client/index.html', preloadPath: 'local-client/preload.cjs', onLifecycle, onClosed, ...options });
   return { windows, tools, onLifecycle, onClosed };
 }
 
 describe('桌宠独立工具窗口，不复用或修改客户端主窗口', () => {
-  it('按需创建工具并保持隔离、沙箱、内容保护和本地加载限制', async () => {
+  it('按需创建工具并保持隔离、沙箱、可截图录屏与本地加载限制', async () => {
     const current = fixture();
     expect(current.tools.getWindow()).toBeUndefined();
     expect(current.windows).toHaveLength(0);
@@ -46,7 +46,7 @@ describe('桌宠独立工具窗口，不复用或修改客户端主窗口', () =
     const window = current.windows[0]!;
     expect(window.options).toMatchObject({ title: '微光指引桌宠 · 工具小屋', icon: PRODUCT_ICON_PATH, show: false, webPreferences: { preload: 'local-client/preload.cjs', contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true } });
     expect(window.loadFile).toHaveBeenCalledExactlyOnceWith('local-client/index.html');
-    expect(window.setContentProtection).toHaveBeenCalledWith(true);
+    expect(window.setContentProtection).toHaveBeenCalledWith(false);
     expect(window.webContents.setWindowOpenHandler.mock.calls[0]![0]()).toEqual({ action: 'deny' });
     const preventTitleDefault = vi.fn();
     window.emit('page-title-updated', { preventDefault: preventTitleDefault });
@@ -58,6 +58,12 @@ describe('桌宠独立工具窗口，不复用或修改客户端主窗口', () =
     expect(window.webContents.executeJavaScript).toHaveBeenCalledWith('window.location.hash = "/pets/draw";', true);
     expect(window.show).toHaveBeenCalledTimes(1);
     expect(window.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('显式保护参数下仍把工具窗口排除出截图与录屏', async () => {
+    const current = fixture(undefined, { contentProtected: true });
+    await expect(current.tools.show('/pets/draw')).resolves.toBe(true);
+    expect(current.windows[0]!.setContentProtection).toHaveBeenCalledWith(true);
   });
 
   it('并发打开多个功能只创建一个独立工具，以最后选择的页面为准', async () => {

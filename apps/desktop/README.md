@@ -37,9 +37,7 @@ Windows 可双击仓库根目录的 `启动暖伴客户端.bat`，不必先启�
 
 需要直接打开完整客户端时，双击根目录 `启动暖伴客户端.bat` 或运行 `pnpm desktop:client`。该入口使用已有本机运行时和构建产物，不安装、不联网、不重建；缺少产物会明确提示先执行的命令。重复运行会恢复、显示并前置已有管理窗口，不另外启动一套桌宠；窗口显示不再等待页面路由执行或桌宠加载完成。原 `启动暖伴.bat` 仍是网页开发服务器入口，不是桌面客户端。
 
-客户端专用入口显式启用 `--client-display-compatible`：只有确认屏幕观察不在采集时，管理窗口才取消禁止捕获，以兼容基于桌面捕获的远程显示；这意味着客户端本身可能出现在截图或录屏里。开启观察前恢复保护，采集仍在停止或状态未知时保持保护，确认停止后才恢复兼容显示。普通 `pnpm desktop` 或不带 `-CompatibleDisplay` 的 `scripts/start-desktop-client.ps1` 不启用管理窗口的兼容例外。
-
-根据用户对远程和录屏可见的要求，`启动暖伴客户端.bat`、`pnpm desktop:client` 和 `scripts/start-desktop-client.ps1` 现在独立传入 `--pet-display-compatible`：屏幕观察明确关闭时，桌宠允许被远程共享或录屏捕获，包含桌宠面板、问题和语音气泡；不会因此启动任何录制、采集或语音。桌宠右键可取消“远程与录屏可见（观察期间暂停）”恢复保护；启动脚本加 `-ProtectPet` 则不启用桌宠兼容。字幕、教学指引和独立工具窗仍始终保护。开始本地观察前桌宠恢复保护，停止未确认时保持保护，确认停止后再允许捕获。设置仅影响本次进程，不替用户授权其他采集权限。已运行的新版本可通过第二次启动启用，更新前的旧进程须在保存草稿后退出重开一次；不通过跨进程注入关闭保护，不强杀旧客户端。
+**2026-10-23 起默认允许截图与录屏**：Windows 上 `setContentProtection(true)` 会通过 `SetWindowDisplayAffinity` 把窗口从截图 / 录屏（Snipping Tool、Xbox Game Bar、OBS 等）中排除，导致用户拍不到桌宠与管理界面。新的默认策略由 `apps/desktop/capture-visibility.cjs` 决定：**桌宠、桌宠工具小屋、语音气泡和管理界面默认可见**（可被截图与录屏捕获），屏幕观察 / 单帧采集处于活动状态时仍自动恢复保护（`management-window-visibility.cjs` 与 `standalone-host.cjs` 的 `captureActive` 逻辑），避免自身窗口污染共享画面。需要旧行为时显式传参：`--protect-pet`（桌宠侧）、`--protect-client`（管理界面）、`--protect-display`（全部）；旧的 `--pet-display-compatible` / `--client-display-compatible` 继续作为"允许捕获"别名接受。`scripts/start-desktop-client.ps1` 的 `-ProtectPet` 现在传递 `--protect-pet`，`-CompatibleDisplay` 保留为兼容别名。字幕与教学指引箭头仍始终保护，不会出现在截图或录屏里。该设置只影响本次进程，不替用户授权任何采集权限。
 
 运行 `node scripts/test-desktop-client-visibility.mjs` 可在独立缓存资料中验证真实客户端窗口、第二进程唤起、最小化恢复与捕获保护隔离，并保存客户端自身截图；检查禁止用户桌面采集，不启用麦克风，也不会重启正在使用的产品实例。
 
