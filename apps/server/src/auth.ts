@@ -31,6 +31,29 @@ export interface AuthenticatedSession {
   session: SessionRecord;
 }
 
+/** Per-issuance lifetime override for the controlled device-session channel. */
+export interface DeviceSessionTtlPolicy {
+  accessTtlMs?: number;
+  refreshTtlMs?: number;
+}
+
+export interface IssuedSession {
+  session: SessionDto;
+  device_id: string;
+  platform: DeviceDto['platform'];
+  access_expires_at: string;
+  refresh_expires_at: string;
+}
+
+export interface DeviceChallengeWithDevice extends DeviceChallengeResponse {
+  device_id: string;
+}
+
+export interface SessionRevocationResult {
+  revoked: true;
+  device_revoked: boolean;
+}
+
 const defaultClock: Clock = () => Date.now();
 
 function hashToken(value: string): string {
@@ -111,37 +134,99 @@ export class AuthService {
   }
 
   exchangeDeviceChallenge(challengeId: string, signature: string): { session: SessionDto } {
+    return { session: this.completeDeviceExchange(challengeId, signature).session };
+  }
+
+  /**
+   * Controlled-session exchange used by the Android device-session channel. It
+   * reuses the exact device-challenge semantics above and additionally reports
+   * the issued session's absolute expiries so the caller can apply its own
+   * (shorter) lifetime policy.
+   */
+  exchangeDeviceSession(challengeId: string, signature: string, policy?: DeviceSessionTtlPolicy): IssuedSession {
+    return this.completeDeviceExchange(challengeId, signature, policy);
+  }
+
+  /**
+   * Issues a challenge bound to an existing session's device. The client must
+   * sign this nonce with the device secret before a refresh is accepted, so a
+   * stolen refresh token alone cannot rotate the controlled session.
+   */
+  issueSessionChallenge(refreshToken: string): DeviceChallengeWithDevice {
+    const current = this.activeSession(refreshToken);
+    const device = this.repositories.devices.get(current.device_id);
+    if (!device) throw authenticationExpired('Device binding is not active');
+    const challenge: ChallengeRecord = {
+      challenge_id: randomUUID(),
+      device_id: device.device_id,
+      account_id: device.account_id,
+      nonce: randomBytes(32).toString('base64url'),
+      expires_at: instant(this.now, this.challengeTtlMs),
+      used_at: null,
+    };
+    this.repositories.challenges.save(challenge);
+    return { challenge_id: challenge.challenge_id, challenge: challenge.nonce, expires_at: challenge.expires_at, device_id: device.device_id };
+  }
+
+  /**
+   * Device-signed refresh: a single-use challenge that is bound to the same
+   * device as the presented refresh token. The presented token is revoked as
+   * part of the rotation, exactly like refreshSession().
+   */
+  refreshDeviceSession(refreshToken: string, challengeId: string, signature: string, policy?: DeviceSessionTtlPolicy): IssuedSession {
+    const current = this.activeSession(refreshToken);
+    const device = this.repositories.devices.get(current.device_id);
+    if (!device || device.status !== 'bound' || device.account_id !== current.account_id) throw authenticationExpired('Device binding is not active');
     const challenge = this.repositories.challenges.get(challengeId);
-    if (!challenge) throw authenticationFailed('Unknown device challenge');
+    if (!challenge || challenge.device_id !== device.device_id || challenge.account_id !== current.account_id) throw authenticationFailed('Unknown device challenge');
     if (challenge.used_at !== null) throw authenticationFailed('Device challenge was already used');
     challenge.used_at = instant(this.now);
     this.repositories.challenges.save(challenge);
     if (Date.parse(challenge.expires_at) <= this.now()) throw authenticationExpired('Device challenge expired');
-    const device = this.repositories.devices.get(challenge.device_id);
-    if (!device || device.status !== 'bound' || device.account_id !== challenge.account_id) throw authenticationFailed('Device binding is not active');
     if (!secureEqual(signDeviceChallenge(device.device_secret, challenge.nonce), signature)) throw authenticationFailed('Invalid device signature');
-    device.last_seen_at = instant(this.now);
-    this.repositories.devices.save(device);
-    return { session: this.createSession(device.account_id, device.device_id) };
+    current.revoked_at = instant(this.now);
+    this.repositories.sessions.save(current);
+    return this.createSession(current.account_id, current.device_id, policy);
+  }
+
+  /**
+   * Read-only resolution of the device behind an active refresh token. The
+   * device-session channel uses it to apply per-device rate limits *before* a
+   * rotation, so a throttled refresh never revokes the caller's live token.
+   */
+  resolveRefreshSessionDevice(refreshToken: string): { account_id: string; device_id: string } {
+    const current = this.activeSession(refreshToken);
+    return { account_id: current.account_id, device_id: current.device_id };
+  }
+
+  /**
+   * Deny-only revocation. A known refresh token may always revoke its own
+   * session, even after it expired, because revocation only removes access. The
+   * stronger device-binding revocation requires a still-active session.
+   */
+  revokeSessionByRefreshToken(refreshToken: string, options: { revokeDevice?: boolean } = {}): SessionRevocationResult {
+    const session = this.repositories.sessions.getByRefreshHash(hashToken(refreshToken));
+    if (!session) throw authenticationFailed('Refresh token is not recognized');
+    const device = this.repositories.devices.get(session.device_id);
+    const active = session.revoked_at === null && Date.parse(session.refresh_expires_at) > this.now()
+      && !!device && device.status === 'bound' && device.account_id === session.account_id;
+    if (options.revokeDevice === true) {
+      if (!active) throw authenticationExpired('An active device session is required to revoke the device binding');
+      this.revokeDevice(session.account_id, session.device_id);
+      return { revoked: true, device_revoked: true };
+    }
+    if (session.revoked_at === null) {
+      session.revoked_at = instant(this.now);
+      this.repositories.sessions.save(session);
+    }
+    return { revoked: true, device_revoked: false };
   }
 
   refreshSession(refreshToken: string): { session: SessionDto } {
-    const current = this.repositories.sessions.getByRefreshHash(hashToken(refreshToken));
-    if (!current || current.revoked_at !== null) throw authenticationExpired('Refresh token is not active');
-    if (Date.parse(current.refresh_expires_at) <= this.now()) {
-      current.revoked_at = instant(this.now);
-      this.repositories.sessions.save(current);
-      throw authenticationExpired('Refresh token expired');
-    }
-    const device = this.repositories.devices.get(current.device_id);
-    if (!device || device.status !== 'bound' || device.account_id !== current.account_id) {
-      current.revoked_at = instant(this.now);
-      this.repositories.sessions.save(current);
-      throw authenticationExpired('Device binding is not active');
-    }
+    const current = this.activeSession(refreshToken);
     current.revoked_at = instant(this.now);
     this.repositories.sessions.save(current);
-    return { session: this.createSession(current.account_id, current.device_id) };
+    return { session: this.createSession(current.account_id, current.device_id).session };
   }
 
   authenticateAccessToken(accessToken: string): AuthenticatedSession {
@@ -169,20 +254,68 @@ export class AuthService {
     return { revoked: true };
   }
 
-  private createSession(accountId: string, deviceId: string): SessionDto {
+  private completeDeviceExchange(challengeId: string, signature: string, policy?: DeviceSessionTtlPolicy): IssuedSession {
+    const challenge = this.repositories.challenges.get(challengeId);
+    if (!challenge) throw authenticationFailed('Unknown device challenge');
+    if (challenge.used_at !== null) throw authenticationFailed('Device challenge was already used');
+    challenge.used_at = instant(this.now);
+    this.repositories.challenges.save(challenge);
+    if (Date.parse(challenge.expires_at) <= this.now()) throw authenticationExpired('Device challenge expired');
+    const device = this.repositories.devices.get(challenge.device_id);
+    if (!device || device.status !== 'bound' || device.account_id !== challenge.account_id) throw authenticationFailed('Device binding is not active');
+    if (!secureEqual(signDeviceChallenge(device.device_secret, challenge.nonce), signature)) throw authenticationFailed('Invalid device signature');
+    device.last_seen_at = instant(this.now);
+    this.repositories.devices.save(device);
+    return this.createSession(device.account_id, device.device_id, policy);
+  }
+
+  private activeSession(refreshToken: string): SessionRecord {
+    const current = this.repositories.sessions.getByRefreshHash(hashToken(refreshToken));
+    if (!current || current.revoked_at !== null) throw authenticationExpired('Refresh token is not active');
+    if (Date.parse(current.refresh_expires_at) <= this.now()) {
+      current.revoked_at = instant(this.now);
+      this.repositories.sessions.save(current);
+      throw authenticationExpired('Refresh token expired');
+    }
+    const device = this.repositories.devices.get(current.device_id);
+    if (!device || device.status !== 'bound' || device.account_id !== current.account_id) {
+      current.revoked_at = instant(this.now);
+      this.repositories.sessions.save(current);
+      throw authenticationExpired('Device binding is not active');
+    }
+    return current;
+  }
+
+  private ttl(value: number | undefined, fallback: number): number {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : fallback;
+  }
+
+  private createSession(accountId: string, deviceId: string, policy?: DeviceSessionTtlPolicy): IssuedSession {
+    const device = this.repositories.devices.get(deviceId);
+    if (!device || device.status !== 'bound' || device.account_id !== accountId) throw authenticationFailed('Device binding is not active');
+    const accessTtlMs = this.ttl(policy?.accessTtlMs, this.accessTtlMs);
+    const refreshTtlMs = this.ttl(policy?.refreshTtlMs, this.refreshTtlMs);
     const accessToken = `nb_access_${randomBytes(32).toString('base64url')}`;
     const refreshToken = `nb_refresh_${randomBytes(48).toString('base64url')}`;
+    const accessExpiresAt = instant(this.now, accessTtlMs);
+    const refreshExpiresAt = instant(this.now, refreshTtlMs);
     const session: SessionRecord = {
       access_token_hash: hashToken(accessToken),
       refresh_token_hash: hashToken(refreshToken),
       account_id: accountId,
       device_id: deviceId,
-      access_expires_at: instant(this.now, this.accessTtlMs),
-      refresh_expires_at: instant(this.now, this.refreshTtlMs),
+      access_expires_at: accessExpiresAt,
+      refresh_expires_at: refreshExpiresAt,
       revoked_at: null,
     };
     this.repositories.sessions.save(session);
-    return { access_token: accessToken, refresh_token: refreshToken, expires_in: Math.floor(this.accessTtlMs / 1000), account_id: accountId };
+    return {
+      session: { access_token: accessToken, refresh_token: refreshToken, expires_in: Math.floor(accessTtlMs / 1000), account_id: accountId },
+      device_id: deviceId,
+      platform: device.platform,
+      access_expires_at: accessExpiresAt,
+      refresh_expires_at: refreshExpiresAt,
+    };
   }
 }
 

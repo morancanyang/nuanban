@@ -2,6 +2,131 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { crc32, inflateSync } from 'node:zlib';
 
+// --- Shared redacted-image validation and safety vocabulary ---------------
+// These helpers intentionally live in this file: the release-readiness gate
+// loads standalone-guidance.ts in an offline probe that only provides
+// node:crypto, node:net and node:zlib, so this module must stay free of
+// relative imports. The image-question route imports this same single source
+// (via text-conversation.ts) instead of keeping a drifting copy.
+
+export const forbiddenTextPattern = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
+
+export const riskyContentPattern = /付款|支付|转账|轉帳|汇款|匯款|银行|銀行|银行卡|信用卡|密码|密碼|口令|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|助记词|助記詞|私钥|私鑰|身份证|身份證|刷脸|人脸验证|人臉驗證|远程控制|遠端控制|关闭.{0,6}(?:安全|防护)|關閉.{0,6}(?:安全|防護)|\b(?:password|passcode|otp|pin|cvv|cvc|payment|checkout|banking|bank\s+account|credit\s+card|wire\s+transfer|verification\s+code|security\s+code|private\s+key|seed\s+phrase|remote\s+(?:control|access))\b/iu;
+
+export const unsafeActionPattern = /自动(?:点击|输入|填表|提交|操作)|自動(?:點擊|輸入|提交)|(?:代替|替您|替你|帮你|幫你).{0,12}(?:点击|點擊|输入|輸入|提交|操作)|执行.{0,8}(?:脚本|代码|命令)|執行.{0,8}(?:腳本|代碼|命令)|powershell|cmd\.exe|javascript\s*:|<\s*script|\beval\s*\(|\b(?:curl|wget|sendinput|robotjs|pyautogui|autohotkey|shell|terminal)\b|\b(?:automatically|programmatically)\s+(?:click|type|submit|operate)|\b(?:run|execute|paste)\b.{0,24}\b(?:script|command|code)\b|https?:\/\/|data:|file:|Win\s*\+\s*R/iu;
+
+const riskyPattern = riskyContentPattern;
+
+export function riskyRequestText(value: string): boolean {
+  const normalized = value.normalize('NFKC');
+  return riskyContentPattern.test(normalized) || unsafeActionPattern.test(normalized);
+}
+
+export interface RedactedImageLimits {
+  imageBytes: number;
+  imageBase64Characters: number;
+  imageDimension: number;
+  imagePixels: number;
+}
+
+export interface ValidatedRedactedImage {
+  bytes: Buffer;
+  width: number;
+  height: number;
+}
+
+export class PngValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PngValidationError';
+  }
+}
+
+export const redactedImageLimits: RedactedImageLimits = Object.freeze({
+  imageBytes: 2_000_000,
+  imageBase64Characters: 2_700_000,
+  imageDimension: 4096,
+  imagePixels: 8_388_608,
+});
+
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const ancillaryLengths: Record<string, number> = { sRGB: 1, gAMA: 4, cHRM: 32, pHYs: 9 };
+
+function invalidPng(message: string): never {
+  throw new PngValidationError(message);
+}
+
+/**
+ * Structural validation for a client-side redacted PNG. It fails closed:
+ * canonical base64, a real PNG container with verified chunk checksums, no
+ * metadata chunks, bounded dimensions, and a pixel stream that inflates to
+ * exactly the declared raster. It cannot prove that redaction happened; it only
+ * proves the bytes are a bounded, well-formed PNG.
+ */
+export function validateBoundedRedactedPng(encoded: unknown, limits: RedactedImageLimits): ValidatedRedactedImage {
+  if (typeof encoded !== 'string' || encoded.length === 0 || encoded.length > limits.imageBase64Characters
+    || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) invalidPng('Image must be bounded canonical base64');
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length > limits.imageBytes || bytes.length < 57
+    || bytes.toString('base64') !== encoded || !bytes.subarray(0, 8).equals(pngSignature)) invalidPng('Image must be a valid bounded PNG');
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let channels = 0;
+  let ended = false;
+  let dataEnded = false;
+  const dataChunks: Buffer[] = [];
+  const seenAncillary = new Set<string>();
+  while (offset < bytes.length) {
+    if (offset + 12 > bytes.length) invalidPng('PNG chunk is truncated');
+    const length = bytes.readUInt32BE(offset);
+    const chunkEnd = offset + 12 + length;
+    if (chunkEnd > bytes.length) invalidPng('PNG chunk is truncated');
+    const type = bytes.toString('latin1', offset + 4, offset + 8);
+    const payload = bytes.subarray(offset + 8, chunkEnd - 4);
+    if (crc32(bytes.subarray(offset + 4, chunkEnd - 4)) !== bytes.readUInt32BE(chunkEnd - 4)) invalidPng('PNG chunk checksum is invalid');
+    if (offset === 8 && type !== 'IHDR') invalidPng('PNG header is missing');
+    if (type === 'IHDR') {
+      if (offset !== 8 || length !== 13) invalidPng('PNG header is invalid');
+      width = payload.readUInt32BE(0);
+      height = payload.readUInt32BE(4);
+      if (width === 0 || height === 0 || width > limits.imageDimension
+        || height > limits.imageDimension || width * height > limits.imagePixels) invalidPng('PNG dimensions exceed the redacted image limits');
+      if (payload[8] !== 8 || ![0, 2, 4, 6].includes(payload[9]) || payload[10] !== 0 || payload[11] !== 0 || payload[12] !== 0) invalidPng('PNG must be non-interlaced 8-bit grayscale, RGB or RGBA');
+      channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 } as Record<number, number>)[payload[9]];
+    } else if (type === 'IDAT') {
+      if (dataEnded || length === 0) invalidPng('PNG image data is invalid');
+      dataChunks.push(payload);
+    } else if (type === 'IEND') {
+      if (length !== 0 || dataChunks.length === 0 || chunkEnd !== bytes.length) invalidPng('PNG end marker is invalid');
+      ended = true;
+    } else {
+      if (!Object.hasOwn(ancillaryLengths, type) || length !== ancillaryLengths[type]
+        || seenAncillary.has(type) || dataChunks.length > 0) invalidPng('PNG metadata is not allowed');
+      seenAncillary.add(type);
+    }
+    if (dataChunks.length > 0 && type !== 'IDAT') dataEnded = true;
+    offset = chunkEnd;
+  }
+  if (!ended) invalidPng('PNG end marker is missing');
+  const expectedBytes = (width * channels + 1) * height;
+  const compressed = Buffer.concat(dataChunks);
+  try {
+    const inflated = inflateSync(compressed, { maxOutputLength: expectedBytes, info: true }) as unknown as {
+      buffer: Buffer;
+      engine: { bytesWritten: number };
+    };
+    if (inflated.buffer.length !== expectedBytes || inflated.engine.bytesWritten !== compressed.length) invalidPng('PNG pixel stream is invalid');
+    const stride = width * channels + 1;
+    for (let row = 0; row < height; row += 1) {
+      if (inflated.buffer[row * stride] > 4) invalidPng('PNG row filter is invalid');
+    }
+  } catch {
+    invalidPng('PNG pixel stream is invalid');
+  }
+  return { bytes, width, height };
+}
+
 export interface StandaloneGuidanceElement {
   id: string;
   label: string;
@@ -85,10 +210,7 @@ export interface StandaloneGuidanceService {
 }
 
 export const standaloneGuidanceLimits = Object.freeze({
-  imageBytes: 2_000_000,
-  imageBase64Characters: 2_700_000,
-  imageDimension: 4096,
-  imagePixels: 8_388_608,
+  ...redactedImageLimits,
   frameAgeMs: 30_000,
   futureSkewMs: 5_000,
   elements: 80,
@@ -107,13 +229,9 @@ export const standaloneGuidanceLimits = Object.freeze({
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const sha256Pattern = /^[a-fA-F0-9]{64}$/;
-const forbiddenTextPattern = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
-const riskyPattern = /付款|支付|转账|轉帳|汇款|匯款|银行|銀行|银行卡|信用卡|密码|密碼|口令|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|助记词|助記詞|私钥|私鑰|身份证|身份證|刷脸|人脸验证|人臉驗證|远程控制|遠端控制|关闭.{0,6}(?:安全|防护)|關閉.{0,6}(?:安全|防護)|\b(?:password|passcode|otp|pin|cvv|cvc|payment|checkout|banking|bank\s+account|credit\s+card|wire\s+transfer|verification\s+code|security\s+code|private\s+key|seed\s+phrase|remote\s+(?:control|access))\b/iu;
-const unsafeActionPattern = /自动(?:点击|输入|填表|提交|操作)|自動(?:點擊|輸入|提交)|(?:代替|替您|替你|帮你|幫你).{0,12}(?:点击|點擊|输入|輸入|提交|操作)|执行.{0,8}(?:脚本|代码|命令)|執行.{0,8}(?:腳本|代碼|命令)|powershell|cmd\.exe|javascript\s*:|<\s*script|\beval\s*\(|\b(?:curl|wget|sendinput|robotjs|pyautogui|autohotkey|shell|terminal)\b|\b(?:automatically|programmatically)\s+(?:click|type|submit|operate)|\b(?:run|execute|paste)\b.{0,24}\b(?:script|command|code)\b|https?:\/\/|data:|file:|Win\s*\+\s*R/iu;
 const coordinatePattern = /\b(?:x|y|left|top|width|height)\s*[:=]\s*-?\d|坐标|座標|\(\s*\d{2,}\s*[,，]\s*\d{2,}\s*\)|\b\d+\s*(?:px|pixels)\b/iu;
 const confidentCandidatePattern = /已(?:经|經)?(?:确认|確認|找到|定位|匹配)|确定就是|確定就是|\b(?:matched|confirmed|located|definitely|certainly)\b/iu;
 const clarificationPrivatePattern = /私聊|聊天记录|私人聊天|发送给|收款|交易确认|安全密钥|访问令牌|one[ -]?time|private (?:chat|message)|transfer money|bearer\s|api[ _-]?key|secret key|(?:\b1[3-9]\d{9}\b)|(?:\b\d{17}[\dXx]\b)|(?:[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})|(?:\b(?:sk|pk)[-_][A-Za-z0-9]{16,})/iu;
-const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 const systemPrompt = [
   'You are a cautious desktop teaching assistant, not a computer-control agent.',
@@ -194,68 +312,12 @@ function parseInstant(value: unknown): number {
 }
 
 function validatePng(encoded: unknown): { bytes: Buffer; width: number; height: number } {
-  if (typeof encoded !== 'string' || encoded.length === 0 || encoded.length > standaloneGuidanceLimits.imageBase64Characters
-    || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) invalidInput('Image must be bounded canonical base64');
-  const bytes = Buffer.from(encoded, 'base64');
-  if (bytes.length > standaloneGuidanceLimits.imageBytes || bytes.length < 57
-    || bytes.toString('base64') !== encoded || !bytes.subarray(0, 8).equals(pngSignature)) invalidInput('Image must be a valid bounded PNG');
-  let offset = 8;
-  let width = 0;
-  let height = 0;
-  let channels = 0;
-  let ended = false;
-  let dataEnded = false;
-  const dataChunks: Buffer[] = [];
-  const ancillaryLengths: Record<string, number> = { sRGB: 1, gAMA: 4, cHRM: 32, pHYs: 9 };
-  const seenAncillary = new Set<string>();
-  while (offset < bytes.length) {
-    if (offset + 12 > bytes.length) invalidInput('PNG chunk is truncated');
-    const length = bytes.readUInt32BE(offset);
-    const chunkEnd = offset + 12 + length;
-    if (chunkEnd > bytes.length) invalidInput('PNG chunk is truncated');
-    const type = bytes.toString('latin1', offset + 4, offset + 8);
-    const payload = bytes.subarray(offset + 8, chunkEnd - 4);
-    if (crc32(bytes.subarray(offset + 4, chunkEnd - 4)) !== bytes.readUInt32BE(chunkEnd - 4)) invalidInput('PNG chunk checksum is invalid');
-    if (offset === 8 && type !== 'IHDR') invalidInput('PNG header is missing');
-    if (type === 'IHDR') {
-      if (offset !== 8 || length !== 13) invalidInput('PNG header is invalid');
-      width = payload.readUInt32BE(0);
-      height = payload.readUInt32BE(4);
-      if (width === 0 || height === 0 || width > standaloneGuidanceLimits.imageDimension
-        || height > standaloneGuidanceLimits.imageDimension || width * height > standaloneGuidanceLimits.imagePixels) invalidInput('PNG dimensions exceed guidance limits');
-      if (payload[8] !== 8 || ![0, 2, 4, 6].includes(payload[9]) || payload[10] !== 0 || payload[11] !== 0 || payload[12] !== 0) invalidInput('PNG must be non-interlaced 8-bit grayscale, RGB or RGBA');
-      channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 } as Record<number, number>)[payload[9]];
-    } else if (type === 'IDAT') {
-      if (dataEnded || length === 0) invalidInput('PNG image data is invalid');
-      dataChunks.push(payload);
-    } else if (type === 'IEND') {
-      if (length !== 0 || dataChunks.length === 0 || chunkEnd !== bytes.length) invalidInput('PNG end marker is invalid');
-      ended = true;
-    } else {
-      if (!Object.hasOwn(ancillaryLengths, type) || length !== ancillaryLengths[type]
-        || seenAncillary.has(type) || dataChunks.length > 0) invalidInput('PNG metadata is not allowed');
-      seenAncillary.add(type);
-    }
-    if (dataChunks.length > 0 && type !== 'IDAT') dataEnded = true;
-    offset = chunkEnd;
-  }
-  if (!ended) invalidInput('PNG end marker is missing');
-  const expectedBytes = (width * channels + 1) * height;
-  const compressed = Buffer.concat(dataChunks);
   try {
-    const inflated = inflateSync(compressed, { maxOutputLength: expectedBytes, info: true }) as unknown as {
-      buffer: Buffer;
-      engine: { bytesWritten: number };
-    };
-    if (inflated.buffer.length !== expectedBytes || inflated.engine.bytesWritten !== compressed.length) invalidInput('PNG pixel stream is invalid');
-    const stride = width * channels + 1;
-    for (let row = 0; row < height; row += 1) {
-      if (inflated.buffer[row * stride] > 4) invalidInput('PNG row filter is invalid');
-    }
-  } catch {
-    invalidInput('PNG pixel stream is invalid');
+    return validateBoundedRedactedPng(encoded, standaloneGuidanceLimits);
+  } catch (error) {
+    if (error instanceof PngValidationError) invalidInput(error.message);
+    throw error;
   }
-  return { bytes, width, height };
 }
 
 function validateInput(value: unknown, now: number): StandaloneGuidanceInput {

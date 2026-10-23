@@ -1,5 +1,13 @@
 export { AuthService, signDeviceChallenge } from './auth.ts';
-export type { AuthenticatedSession, AuthOptions, BindDeviceInput, CreateAccountInput, Clock } from './auth.ts';
+export type { AuthenticatedSession, AuthOptions, BindDeviceInput, CreateAccountInput, Clock, DeviceChallengeWithDevice, DeviceSessionTtlPolicy, IssuedSession, SessionRevocationResult } from './auth.ts';
+export { DeviceSessionService, createDeviceSessionService, defaultDeviceSessionLimits } from './device-session.ts';
+export type { DeviceChallengeDto, DeviceSessionDto, DeviceSessionLimits, DeviceSessionRateLimit, DeviceSessionServiceOptions } from './device-session.ts';
+export { createFixedWindowRateLimiter, defaultMaximumRateLimitKeys } from './rate-limit.ts';
+export type { RateLimitDecision, RateLimiter, RateLimiterOptions } from './rate-limit.ts';
+export { PngValidationError, redactedImageLimits, validateBoundedRedactedPng } from './standalone-guidance.ts';
+export type { RedactedImageLimits, ValidatedRedactedImage } from './standalone-guidance.ts';
+export { createTextConversationService, imageQuestionLimits, TextConversationService, TextProviderFailure } from './text-conversation.ts';
+export type { TextConversationOptions, TextConversationProvider, TextProviderOptions } from './text-conversation.ts';
 export { FamilyService, supportedScopes } from './family.ts';
 export type { ConsentInput, FamilyOptions, RelationAcceptInput, RelationInvitationInput } from './family.ts';
 export { DomainError } from './errors.ts';

@@ -5,6 +5,7 @@ export type ServerErrorCode = ServiceErrorCode;
 export interface ErrorDetails {
   current_version?: number;
   conflict_id?: string;
+  retry_after_seconds?: number;
 }
 
 export class DomainError extends Error {
@@ -45,5 +46,18 @@ export function scopeDenied(message = 'Requested scope is not granted'): DomainE
 
 export function consentRequired(message = 'A current consent is required'): DomainError {
   return new DomainError(403, 'CONSENT_REQUIRED', message);
+}
+
+export function riskPaused(message = 'This request is paused by the local safety policy'): DomainError {
+  return new DomainError(403, 'RISK_PAUSED', message);
+}
+
+export function rateLimited(retryAfterSeconds: number, message = 'Too many requests'): DomainError {
+  const seconds = Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds : 1;
+  return new DomainError(429, 'RATE_LIMITED', message, true, { retry_after_seconds: seconds });
+}
+
+export function providerUnavailable(message = 'The model provider is not configured'): DomainError {
+  return new DomainError(503, 'PROVIDER_UNAVAILABLE', message, false);
 }
 

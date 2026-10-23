@@ -1,8 +1,10 @@
 import { createServer as createNodeServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { schemaVersion as contractVersion } from '../../../packages/contracts/src/spec/primitives.ts';
 import type { Scope } from '@nuanban/contracts';
 import { AuthService, type AuthenticatedSession, type AuthOptions, type Clock } from './auth.ts';
+import { DeviceSessionService, type DeviceSessionServiceOptions } from './device-session.ts';
 import { DomainError, authenticationFailed, invalidRequest } from './errors.ts';
 import { FamilyService, type FamilyOptions } from './family.ts';
 import { createInMemoryRepositories, type ServerRepositories } from './repositories.ts';
@@ -68,7 +70,14 @@ export interface ServerOptions {
   standaloneGuidance?: StandaloneGuidanceService;
   desktopVoice?: DesktopVoiceService;
   textConversation?: TextConversationService;
+  deviceSessions?: DeviceSessionService;
+  deviceSession?: Omit<DeviceSessionServiceOptions, 'now'>;
   webOrigins?: readonly string[];
+  /**
+   * Only enable behind a reverse proxy that overwrites X-Forwarded-For.
+   * Otherwise rate limiting keys on the socket address.
+   */
+  trustProxyHeaders?: boolean;
 }
 
 export interface ServerApplication {
@@ -78,9 +87,11 @@ export interface ServerApplication {
   repositories: ServerRepositories;
   modules?: ServerServiceModules;
   textConversation: TextConversationService;
+  deviceSessions: DeviceSessionService;
 }
 
 const maxBodyBytes = 1024 * 1024;
+const imageQuestionBodyBytes = 3 * 1024 * 1024;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const corsAllowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 const corsAllowedHeaders = ['Authorization', 'Content-Type', 'Accept', 'X-Request-ID', 'Idempotency-Key', 'If-Match'] as const;
@@ -156,6 +167,7 @@ function sendError(response: ServerResponse, status: number, requestIdValue: str
   response.statusCode = status;
   response.setHeader('content-type', 'application/json; charset=utf-8');
   response.setHeader('x-request-id', requestIdValue);
+  if ('details' in error && error.details?.retry_after_seconds) response.setHeader('retry-after', String(error.details.retry_after_seconds));
   response.end(JSON.stringify({ ...errorPayload(error), request_id: requestIdValue, schema_version: contractVersion }));
 }
 
@@ -210,6 +222,21 @@ function pathParts(url: string): string[] {
   return url.split('?')[0].split('/').filter(Boolean);
 }
 
+/**
+ * Rate-limit scope for unauthenticated routes. The socket address is used by
+ * default; X-Forwarded-For is honoured only when the deployment explicitly
+ * declares a trusted reverse proxy, and only for a bare IP value.
+ */
+function clientKey(request: IncomingMessage, trustProxyHeaders: boolean): string {
+  if (trustProxyHeaders) {
+    const forwarded = request.headers['x-forwarded-for'];
+    const candidate = typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined;
+    if (candidate && isIP(candidate) !== 0) return candidate;
+  }
+  const address = request.socket.remoteAddress;
+  return typeof address === 'string' && address.length > 0 ? address : 'unknown';
+}
+
 export function createApplication(options: ServerOptions = {}): ServerApplication {
   const repositories = options.repositories ?? (options.storage?.kind === 'sqlite'
     ? createSqliteRepositories({
@@ -223,7 +250,9 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
   const standaloneGuidance = options.standaloneGuidance ?? createStandaloneGuidanceService();
   const desktopVoice = options.desktopVoice ?? createDesktopVoiceService();
   const textConversation = options.textConversation ?? createTextConversationService();
+  const deviceSessions = options.deviceSessions ?? new DeviceSessionService(auth, { ...options.deviceSession, now });
   const webOrigins = normalizeWebOrigins(options.webOrigins);
+  const trustProxyHeaders = options.trustProxyHeaders ?? (process.env.NUANBAN_TRUST_PROXY_HEADERS === 'true');
 
   const server = createNodeServer(async (request, response) => {
     const correlationId = requestId(request);
@@ -252,15 +281,24 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
     const isVoiceStatus = method === 'GET' && parts.join('/') === 'internal/desktop/voice/status';
     const isVoiceCall = method === 'POST' && parts.join('/') === 'internal/desktop/voice/call';
     const isDesktopVoice = isVoiceStatus || isVoiceCall;
+    const isImageResponse = method === 'POST' && parts[0] === 'v1' && parts[1] === 'conversations' && !!parts[2] && parts[3] === 'image-responses';
+    const isDeviceSession = method === 'POST' && parts[0] === 'v1' && parts[1] === 'device-sessions';
     const context: RequestHookContext = { requestId: correlationId, method, url, path: parts, body: {}, request, extensions: {} };
     const hookContext = isStandaloneGuidance ? { ...context, body: { standalone_guidance: true } }
-      : isDesktopVoice ? { ...context, body: { desktop_voice: true } } : context;
+      : isDesktopVoice ? { ...context, body: { desktop_voice: true } }
+        : isImageResponse ? { ...context, body: { image_response: true } }
+          : isDeviceSession ? { ...context, body: { device_session: true } } : context;
     try {
-      context.body = method === 'GET' || method === 'DELETE' ? {} : await readBody(request, isStandaloneGuidance ? 3 * 1024 * 1024 : isVoiceCall ? 96 * 1024 : maxBodyBytes);
+      context.body = method === 'GET' || method === 'DELETE' ? {}
+        : await readBody(request, isStandaloneGuidance ? 3 * 1024 * 1024 : isImageResponse ? imageQuestionBodyBytes : isVoiceCall ? 96 * 1024 : maxBodyBytes);
       await options.hooks?.onRequest?.(hookContext);
       const emit = async (status: number, data: unknown, version?: number): Promise<void> => {
         const envelope = { data, request_id: hookContext.requestId, schema_version: contractVersion };
-        await notifyResponse(options.hooks, hookContext, response, status, isDesktopVoice ? { desktop_voice: true, request_id: hookContext.requestId } : envelope);
+        // Sessions, image bytes and desktop voice payloads stay out of generic
+        // hooks so deployment instrumentation cannot log credentials.
+        const hooked = isDesktopVoice ? { desktop_voice: true, request_id: hookContext.requestId }
+          : isDeviceSession ? { device_session: true, request_id: hookContext.requestId } : envelope;
+        await notifyResponse(options.hooks, hookContext, response, status, hooked);
         send(response, status, context.requestId, data, version);
       };
       const actor = async (): Promise<AuthenticatedSession> => {
@@ -361,6 +399,10 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
         await emit(201, textConversation.respond(await actor(), parts[2], context.body));
         return;
       }
+      if (method === 'POST' && parts[0] === 'v1' && parts[1] === 'conversations' && parts[2] && parts[3] === 'image-responses') {
+        await emit(201, textConversation.respondImage(await actor(), parts[2], context.body));
+        return;
+      }
       if (method === 'POST' && parts[0] === 'v1' && parts[1] === 'requests' && parts[2] && parts[3] === 'cancel') {
         await emit(200, textConversation.cancel(await actor(), parts[2]));
         return;
@@ -373,6 +415,22 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
         return;
       }
 
+      if (method === 'POST' && parts.join('/') === 'v1/device-sessions/challenges') {
+        await emit(201, deviceSessions.issueChallenge(context.body, clientKey(request, trustProxyHeaders)));
+        return;
+      }
+      if (method === 'POST' && parts.join('/') === 'v1/device-sessions') {
+        await emit(201, deviceSessions.createSession(context.body, clientKey(request, trustProxyHeaders)));
+        return;
+      }
+      if (method === 'POST' && parts.join('/') === 'v1/device-sessions/refresh') {
+        await emit(201, deviceSessions.refreshSession(context.body, clientKey(request, trustProxyHeaders)));
+        return;
+      }
+      if (method === 'POST' && parts.join('/') === 'v1/device-sessions/revoke') {
+        await emit(200, deviceSessions.revokeSession(context.body, clientKey(request, trustProxyHeaders)));
+        return;
+      }
       if (method === 'POST' && parts.join('/') === 'v1/auth/device-challenges') {
         await emit(201, auth.issueDeviceChallenge(stringField(context.body, 'binding_id')));
         return;
@@ -433,7 +491,7 @@ export function createApplication(options: ServerOptions = {}): ServerApplicatio
     }
   });
 
-  return { server, auth, family, repositories, modules: options.modules, textConversation };
+  return { server, auth, family, repositories, modules: options.modules, textConversation, deviceSessions };
 }
 
 export function createServer(options: ServerOptions = {}): Server {
