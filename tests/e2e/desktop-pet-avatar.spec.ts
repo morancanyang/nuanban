@@ -6,6 +6,7 @@ const sdkFixture = `export default class SyntheticAvatar {
     this.options = options;
     window.avatarAudit.options = { audio: options.audio, reconnect: options.reconnect, sentry: options.sentry };
     window.avatarAudit.dimensions = { width: options.container.offsetWidth, height: options.container.offsetHeight };
+    window.avatarAudit.sdkClass = options.agentCallbacks ? 'agent' : 'base';
     window.avatarLateCallbacks = options.agentCallbacks;
   }
   setVolume(value) { window.avatarAudit.volume = value; window.avatarAudit.volumes.push(value); }
@@ -40,7 +41,7 @@ const sdkFixture = `export default class SyntheticAvatar {
     await fetch(this.options.gatewayServer, { method: 'POST', body: JSON.stringify({ request_id: 'synthetic-request' }) });
     onDownloadProgress(100);
     if (window.avatarMode === 'pending') await new Promise(resolve => window.addEventListener('synthetic-avatar-resolve', resolve, { once: true }));
-    if (window.avatarMode === 'error') { this.options.agentCallbacks.onError({ code: 'synthetic-error' }); throw new Error('synthetic-error'); }
+    if (window.avatarMode === 'error') { this.options.agentCallbacks?.onError?.({ code: 'synthetic-error' }); throw new Error('synthetic-error'); }
     const canvas = document.createElement('canvas'); canvas.width = 100; canvas.height = 100;
     canvas.style.pointerEvents = 'auto';
     for (const name of ['pointerdown', 'pointermove', 'pointerup', 'click', 'contextmenu']) canvas.addEventListener(name, event => event.stopPropagation());
@@ -56,13 +57,15 @@ async function fixture(page: Page, mode = 'ready') {
     if (filename === 'avatar-runtime/default-pet.json') return route.fulfill({ body: 'export default ' + readFileSync(new URL('../../apps/desktop/default-pet.json', import.meta.url), 'utf8'), contentType: 'text/javascript' });
     if (filename === 'assets/xingyun-floral-otter-preview.png') return route.fulfill({ body: readFileSync(new URL('../../apps/desktop/assets/xingyun-floral-otter-preview.png', import.meta.url)), contentType: 'image/png' });
     if (filename === 'avatar-runtime/sdk-fixture.js') return route.fulfill({ body: sdkFixture, contentType: 'text/javascript' });
-    if (filename === 'avatar-runtime/xingyun-renderer.js') return route.fulfill({ body: readFileSync(new URL('../../apps/desktop/xingyun-renderer.js', import.meta.url), 'utf8').replace("'@xmov/avatar/agent'", "'./sdk-fixture.js'"), contentType: 'text/javascript' });
+    if (filename === 'avatar-runtime/xingyun-renderer.js') return route.fulfill({ body: readFileSync(new URL('../../apps/desktop/xingyun-renderer.js', import.meta.url), 'utf8')
+      // 两种模式各有一个真实入口：仅形象用 '@xmov/avatar'，实时对话用 '@xmov/avatar/agent'；合成 SDK 覆盖两者。
+      .replace("'@xmov/avatar/agent'", "'./sdk-fixture.js'").replace("'@xmov/avatar'", "'./sdk-fixture.js'"), contentType: 'text/javascript' });
     if (!['pet.html', 'pet.css', 'pet.js', 'pet-artwork.js'].includes(filename)) return route.abort();
     return route.fulfill({ body: readFileSync(new URL('../../apps/desktop/' + filename, import.meta.url)), contentType: filename.endsWith('.html') ? 'text/html; charset=utf-8' : filename.endsWith('.css') ? 'text/css' : 'text/javascript' });
   });
   await page.addInitScript(({ mode }) => {
     const audit = { begins: 0, exchanges: 0, stops: 0, failures: 0, destroyed: 0, management: 0, microphones: 0, menus: 0, drags: [] as string[], motions: [] as string[],
-      confirms: 0, modes: [] as string[], asrStarts: 0, asrStops: 0, interrupts: 0, volumes: [] as number[], asr: 'idle' };
+      confirms: 0, modes: [] as string[], asrStarts: 0, asrStops: 0, interrupts: 0, volumes: [] as number[], asr: 'idle', failDetail: '' };
     let listener: ((value: unknown) => void) | undefined;
     let runtimeListener: ((value: unknown) => void) | undefined;
     let state = { configured: mode !== 'mismatch', configurationMismatch: mode === 'mismatch', phase: mode === 'mismatch' ? 'unconfigured' : 'idle', message: mode === 'mismatch' ? '本机仍是其他星云应用，请先更新为应用 188337 的完整凭证。' : '本机应用已配置', appId: '031ce3cd-synthetic-application', mode: 'render', conversation: { enabled: false, phase: 'idle' } };
@@ -85,7 +88,7 @@ async function fixture(page: Page, mode = 'ready') {
       confirmConversation: async () => { audit.confirms++; return mode !== 'conversation-cancel'; },
       exchange: async () => { audit.exchanges++; return { status: 200, body: { error_code: 0, data: { resource_pack: {} } } }; },
       ready: async () => { publish('ready', '花环水獭已启用'); return true; },
-      fail: async () => { audit.failures++; return publish('error', '加载失败；不会自动重连'); },
+      fail: async (_lease: string, _kind: string, detail: string) => { audit.failures++; audit.failDetail = detail; return publish('error', '加载失败；不会自动重连'); },
       stop: async () => { audit.stops++; publish('stopping', '正在停止'); state = { ...state, conversation: { enabled: false, phase: 'idle' } }; return { stopped: true, ...publish('idle', '云端会话已停止，恢复本机桌宠') }; },
     } });
     window.addEventListener('test-avatar-messages', event => {
@@ -112,7 +115,7 @@ test('真实动作入口只控制已连接的星云角色，点击互动而拖�
   await expect(page.locator('#avatar-motion-idle')).toBeEnabled();
   expect(await audit(page)).toMatchObject({ motions: [] });
   for (const name of ['interactive', 'listen', 'think', 'idle']) await page.locator('#avatar-motion-' + name).click();
-  expect(await audit(page)).toMatchObject({ motions: ['interactiveidle', 'listen', 'think', 'idle'], begins: 1, exchanges: 1, microphones: 0 });
+  expect(await audit(page)).toMatchObject({ motions: ['interactiveidle', 'listen', 'think', 'idle'], begins: 1, exchanges: 1, microphones: 0, sdkClass: 'base' });
   await page.locator('#collapse-panel').click();
   const bounds = await page.locator('#pet-toggle').boundingBox();
   if (!bounds) throw new Error('Pet not visible');
@@ -306,7 +309,7 @@ test('明确启用才显示形象，容器非零；停止恢复原桌宠且重�
   await expect(page.locator('#xingyun-pet')).toBeVisible();
   await expect(page.locator('#builtin-pet')).toBeHidden();
   const running = await audit(page);
-  expect(running).toMatchObject({ begins: 1, exchanges: 1, volume: 0, options: { audio: { inputEnabled: false }, reconnect: { enabled: false, maxAttempts: 0 }, sentry: { enabled: false } } });
+  expect(running).toMatchObject({ begins: 1, exchanges: 1, volume: 0, sdkClass: 'base', options: { audio: { inputEnabled: false }, reconnect: { enabled: false, maxAttempts: 0 }, sentry: { enabled: false } } });
   expect((running.dimensions as { width: number }).width).toBeGreaterThan(0);
   expect((running.dimensions as { height: number }).height).toBeGreaterThan(0);
   await page.locator('#avatar-stop').click();
@@ -325,6 +328,9 @@ test('资源失败退回原桌宠，不自动重连', async ({ page }) => {
   await expect(page.locator('#builtin-pet')).toBeVisible();
   await page.waitForTimeout(700);
   expect(await audit(page)).toMatchObject({ begins: 1, exchanges: 1, failures: 1, destroyed: 1 });
+  // 失败必须带上真实阶段与原因，而不是只有"加载失败"一句话。
+  expect(String((await audit(page)).failDetail)).toContain('形象资源');
+  expect(String((await audit(page)).failDetail)).toContain('synthetic-error');
   await expect(page.locator('#avatar-start')).toBeDisabled();
 });
 
@@ -384,7 +390,7 @@ test('实时对话确认后开麦聆听、显示识别与回答，停止确认�
   await expect.poll(async () => page.evaluate(() => (window as unknown as { avatarConversationLog: string[] }).avatarConversationLog))
     .toEqual(expect.arrayContaining(['listening:listening', 'speaking:listening']));
   expect(await audit(page)).toMatchObject({ begins: 1, confirms: 1, modes: ['conversation'], asrStarts: 1, asrStops: 0,
-    volume: 1, volumes: [1], exchanges: 1, destroyed: 0, stops: 0,
+    volume: 1, volumes: [1], exchanges: 1, destroyed: 0, stops: 0, sdkClass: 'agent',
     options: { audio: { inputEnabled: true }, reconnect: { enabled: false, maxAttempts: 0 }, sentry: { enabled: false } } });
   await page.locator('#avatar-conversation-stop').click();
   await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'stopped');
@@ -402,7 +408,7 @@ test('仅形象会话运行中也能进入实时对话：按钮可用、先停�
   await page.locator('#avatar-start').click();
   await expect(page.locator('#avatar-motion-idle')).toBeEnabled();
   const enabledAudit = await audit(page);
-  expect(enabledAudit).toMatchObject({ begins: 1, modes: ['render'], asrStarts: 0 });
+  expect(enabledAudit).toMatchObject({ begins: 1, modes: ['render'], asrStarts: 0, sdkClass: 'base' });
 
   await expect(page.locator('#avatar-conversation-start')).toBeEnabled();
   await expect(page.locator('#avatar-conversation-start')).toHaveText('切换到实时对话');
@@ -411,7 +417,7 @@ test('仅形象会话运行中也能进入实时对话：按钮可用、先停�
   await page.locator('#avatar-conversation-start').click();
   await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'speaking');
   expect(await audit(page)).toMatchObject({ confirms: 1, modes: ['render', 'conversation'], stops: 1, destroyed: 1,
-    asrStarts: 1, volume: 1, microphones: 0 });
+    asrStarts: 1, volume: 1, microphones: 0, sdkClass: 'agent' });
   expect(errors).toEqual([]);
 
   await page.locator('#avatar-conversation-stop').click();

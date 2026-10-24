@@ -54,6 +54,42 @@ let disposed = false;
 let lease;
 let mode = 'render';
 
+// 失败分级：会话（begin/exchange）、资源（init/下载）、实时通道（socket/agent）、渲染（onRenderChange）、
+// 麦克风权限、超时。失败时必须把阶段与真实原因一起上屏并写入 avatar-trace.log，避免再出现"只知道失败"的现场。
+const FAILURE_STAGES = {
+  session: '会话建立', resource: '形象资源', realtime: '实时通道', render: '形象渲染', permission: '麦克风权限', timeout: '等待超时',
+};
+function cleanReason(value) {
+  if (typeof value !== 'string' || !value) return '';
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/(e2e_token|token|secret|appSecret|authorization|lease|signature|session_id|request_id)\s*[=:]\s*[^\s,;"']+/gi, '$1=[已隐藏]')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[标识已隐藏]')
+    .replace(/[A-Za-z0-9+/_=-]{32,}/g, '[标识已隐藏]')
+    .replace(/https?:\/\/\S+/g, '[地址已隐藏]')
+    .replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+// SDK 错误对象字段随版本变化：依次取常见字段，全部缺失时退回 error 的字符串形式。
+function errorReason(error) {
+  if (error === undefined || error === null) return '';
+  if (typeof error === 'string') return cleanReason(error);
+  const code = error.code ?? error.error_code ?? error.errorCode;
+  const text = error.message ?? error.error_reason ?? error.reason ?? error.msg ?? error.description;
+  const parts = [];
+  if (code !== undefined && code !== null && String(code) !== '') parts.push('code=' + cleanReason(String(code)));
+  if (typeof text === 'string' && text) parts.push(cleanReason(text));
+  if (!parts.length) parts.push(cleanReason(String(error)));
+  return parts.join(' ').slice(0, 200);
+}
+function failureSummary(stage, detail) {
+  const label = FAILURE_STAGES[stage] ?? '连接';
+  const reason = cleanReason(detail);
+  return reason ? label + '：' + reason : label;
+}
+function traceAvatar(kind, message) {
+  try { bridge?.trace?.({ kind, message: String(message ?? '').slice(0, 500) }); } catch {}
+}
+
 function displayState() {
   const label = element('avatar-display-state');
   if (!label) return;
@@ -205,9 +241,11 @@ async function startListening(token, target) {
     await target.startASR();
     if (!isCurrent(token, target)) return;
     publishConversation({ state: 'listening', asr: 'listening' });
-  } catch {
+  } catch (error) {
     if (!isCurrent(token, target)) return;
-    publishConversation({ state: 'error', asr: 'failed', error: '本次未能开启麦克风：请检查系统麦克风权限后重新开启实时对话。' });
+    const summary = failureSummary('permission', errorReason(error));
+    traceAvatar('stage', 'asr-failed ' + summary);
+    publishConversation({ state: 'error', asr: 'failed', error: '本次未能开启麦克风（' + summary + '）：请检查系统麦克风权限后重新开启实时对话。' });
   }
 }
 
@@ -264,21 +302,25 @@ async function start(nextMode = 'render') {
   render();
   let currentLease;
   let currentInstance;
+  let currentStage = 'session';
   try {
     const session = await bridge.begin(true, mode);
     currentLease = session.lease;
     lease = currentLease;
+    currentStage = 'resource';
     if (disposed || current !== generation) { await bridge.stop(); return; }
     let initialized = false;
     let rendered = false;
     let markedReady = false;
     let reportingFailure = false;
-    const fail = kind => {
+    const fail = (kind, stage = 'realtime', detail = '') => {
       if (disposed || current !== generation || reportingFailure) return;
       reportingFailure = true;
-      if (conversationMode) publishConversation({ state: 'error', asr: 'off', error: '实时对话未能建立或已中断；不会自动重连，请检查网络与麦克风权限后重试。' });
+      const summary = failureSummary(stage, detail);
+      traceAvatar('stage', 'fail kind=' + kind + ' mode=' + mode + ' ' + summary);
+      if (conversationMode) publishConversation({ state: 'error', asr: 'off', error: '实时对话未能建立或已中断（' + summary + '）；不会自动重连，请检查网络与麦克风权限后重试。' });
       destroyLocal();
-      void bridge.fail(currentLease, kind).then(receive).catch(() => {
+      void bridge.fail(currentLease, kind, summary).then(receive).catch(() => {
         receive({ ...state, phase: 'cleanup_failed', message: '形象停止尚未确认，请重试停止或在星云后台检查会话。' });
       });
     };
@@ -288,32 +330,36 @@ async function start(nextMode = 'render') {
       clearTimeout(timeout);
       void bridge.ready(currentLease).then(accepted => {
         if (!accepted || disposed || current !== generation) return;
+        traceAvatar('stage', 'ready mode=' + mode);
         visibility(true);
         if (conversationMode) void startListening(current, currentInstance);
-      }).catch(() => fail('load_failed'));
+      }).catch(error => fail('load_failed', 'session', errorReason(error)));
     };
-    timeout = setTimeout(() => fail('timeout'), 120000);
-    const { default: XingyunAvatarAgent } = await import('@xmov/avatar/agent');
+    timeout = setTimeout(() => fail('timeout', 'timeout', '等待形象就绪超过 120 秒'), 120000);
+    // 按模式选类：仅形象只渲染形象，用公开基类 XmovAvatar（不建立 Agent 的 E2E/ASR/Brain 管线，
+    // 实时通道抖动不会拖垮仅形象会话）；实时对话才用 XingyunAvatarAgent。
+    const { default: AvatarClass } = conversationMode ? await import('@xmov/avatar/agent') : await import('@xmov/avatar');
     if (disposed || current !== generation) return;
     container.replaceChildren();
     surface.hidden = false;
     surface.style.visibility = 'hidden';
-    const created = new XingyunAvatarAgent({
+    traceAvatar('stage', 'init mode=' + mode + ' sdk=' + (conversationMode ? 'agent' : 'base'));
+    const created = new AvatarClass({
       containerId: '#xingyun-canvas', container,
       appId: session.appId, appSecret: 'main-process-signing-only',
       gatewayServer: session.gatewayServer + '?lease=' + encodeURIComponent(currentLease),
       audio: { inputEnabled: conversationMode }, reconnect: { enabled: false, maxAttempts: 0 },
       features: conversationMode
-        ? { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: true } }
+        ? { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: false } }
         : { auto_send_asr_to_llm: false, speech_frontend: { enabled: false } },
       sentry: { enabled: false }, enableLogger: false, enableDebugger: false,
       useAlphaMask: true, scaleDownBy: 2,
-      onMessage: error => { if (![50002, 30001].includes(Number(error.code))) fail('load_failed'); },
+      onMessage: error => { if (![50002, 30001].includes(Number(error.code))) fail('load_failed', 'realtime', errorReason(error)); },
       onRenderChange: renderState => { if (['rendering', 'resumed'].includes(renderState)) { rendered = true; markReady(); } },
       agentCallbacks: conversationMode ? {
-        onAgentStateChange: agentState => { if (['failed', 'reconnecting'].includes(agentState)) fail('load_failed'); },
-        onSocketStateChange: socketState => { if (['closed', 'error'].includes(socketState)) fail('load_failed'); },
-        onError: error => { if (![50002, 30001].includes(Number(error.code))) fail('load_failed'); },
+        onAgentStateChange: agentState => { if (['failed', 'reconnecting'].includes(agentState)) fail('load_failed', 'realtime', 'agent=' + cleanReason(String(agentState))); },
+        onSocketStateChange: socketState => { if (['closed', 'error'].includes(socketState)) fail('load_failed', 'realtime', 'socket=' + cleanReason(String(socketState))); },
+        onError: error => { if (![50002, 30001].includes(Number(error.code))) fail('load_failed', 'realtime', errorReason(error)); },
         onASRStateChange: asrState => {
           if (!isCurrent(current, currentInstance)) return;
           const mapped = { 'requesting-permission': 'requesting', starting: 'starting', listening: 'listening', stopping: 'stopping', idle: 'off', failed: 'failed' }[asrState] ?? 'off';
@@ -345,11 +391,7 @@ async function start(nextMode = 'render') {
           if (value.includes('start')) publishConversation({ state: 'speaking' });
           else if (value.includes('end') || value.includes('complete') || value.includes('stop')) publishConversation({ state: conversation.asr === 'listening' ? 'listening' : 'paused' });
         },
-      } : {
-        onAgentStateChange: agentState => { if (['failed', 'reconnecting'].includes(agentState)) fail('load_failed'); },
-        onSocketStateChange: socketState => { if (['closed', 'error'].includes(socketState)) fail('load_failed'); },
-        onError: error => { if (![50002, 30001].includes(Number(error.code))) fail('load_failed'); },
-      },
+      } : undefined,
     });
     if (disposed || current !== generation) { void created.destroy('load_failed').catch(() => {}); return; }
     instance = created;
@@ -363,12 +405,14 @@ async function start(nextMode = 'render') {
     if (disposed || current !== generation) return;
     initialized = true;
     markReady();
-  } catch {
+  } catch (error) {
     if (disposed || current !== generation) return;
-    if (conversationMode) publishConversation({ state: 'error', asr: 'off', error: '实时对话未能建立；不会自动重连，请检查网络与麦克风权限后重试。' });
+    const summary = failureSummary(currentStage, errorReason(error));
+    traceAvatar('stage', 'error mode=' + mode + ' ' + summary);
+    if (conversationMode) publishConversation({ state: 'error', asr: 'off', error: '实时对话未能建立（' + summary + '）；不会自动重连，请检查网络与麦克风权限后重试。' });
     destroyLocal();
-    try { receive(currentLease ? await bridge.fail(currentLease, 'load_failed') : await bridge.status()); }
-    catch { receive({ ...state, phase: 'error', message: '本次连接未完成；不会自动重连，请检查本机配置或网络后重试。' }); }
+    try { receive(currentLease ? await bridge.fail(currentLease, 'load_failed', summary) : await bridge.status()); }
+    catch { receive({ ...state, phase: 'error', message: '本次连接未完成（' + summary + '）；不会自动重连，请检查本机配置或网络后重试。' }); }
   }
 }
 
@@ -421,7 +465,7 @@ if (bridge && container && surface && startButton && stopButton && consent) {
   window.addEventListener('nuanban:avatar-interaction', () => playMotion(motions[1]));
   renderConversation();
   void bridge.status().then(receive).catch(() => receive({ ...state, phase: 'error', message: '本机形象配置读取失败，原桌宠保持不变。' }));
-  window.addEventListener('offline', () => { if (lease && instance) { const failedLease = lease; destroyLocal(); void bridge.fail(failedLease, 'load_failed').then(receive).catch(() => {}); } });
+  window.addEventListener('offline', () => { if (lease && instance) { const failedLease = lease; const summary = failureSummary('realtime', '本机网络已断开'); traceAvatar('stage', 'offline ' + summary); destroyLocal(); void bridge.fail(failedLease, 'load_failed', summary).then(receive).catch(() => {}); } });
   window.addEventListener('pagehide', () => { disposed = true; destroyLocal(); sourceObserver.disconnect(); unsubscribe(); void bridge.stop().catch(() => {}); }, { once: true });
 } else if (startButton) {
   receive({ ...state, phase: 'unconfigured', message: '请在独立桌宠中使用。浏览器预览不会连接形象服务。' });

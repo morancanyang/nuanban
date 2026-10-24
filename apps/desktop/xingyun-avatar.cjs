@@ -1,4 +1,5 @@
 const { createHash, randomUUID } = require('node:crypto');
+const { appendFileSync, readFileSync, statSync, writeFileSync } = require('node:fs');
 const defaultPet = require('./default-pet.json');
 
 const GATEWAY = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session';
@@ -29,6 +30,75 @@ function signSession(credentials, method, data, timestamp = Math.floor(Date.now(
   const canonical = body.replace(/[^\u0000-\u007E]/g, character => '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0')).replace(/ /g, '');
   const token = createHash('md5').update(new URL(GATEWAY).pathname.toLowerCase() + method.toLowerCase() + canonical + credentials.appSecret + timestamp).digest('hex');
   return { body, headers: { 'content-type': 'application/json', 'X-APP-ID': credentials.appId, 'X-TOKEN': token, 'X-TIMESTAMP': String(timestamp) } };
+}
+
+// 失败取证与状态文案的统一脱敏：任何 token、密钥、租约、会话标识、URL 与长串都不能出本机日志或上屏。
+// 页面传入的原因只允许是短文本，主进程再次脱敏（纵深防御），密钥由调用方追加替换。
+function sanitizeReason(value, limit = 220) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/(e2e_token|token|secret|appSecret|authorization|lease|signature|session_id|request_id)\s*[=:]\s*[^\s,;"']+/gi, '$1=[已隐藏]')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[标识已隐藏]')
+    .replace(/[A-Za-z0-9+/_=-]{32,}/g, '[标识已隐藏]')
+    .replace(/https?:\/\/\S+/g, '[地址已隐藏]')
+    .replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function redactSecret(text, appSecret) {
+  if (typeof appSecret !== 'string' || appSecret.length < 8) return text;
+  return text.split(appSecret).join('[密钥已隐藏]');
+}
+
+// 现场取证日志：带时间戳、大小上限、脱敏，落在 userData/avatar-trace.log。
+// 只接受受限形状（kind/message/source/line），任何其他字段一律丢弃。
+const AVATAR_TRACE_LIMIT = 256 * 1024;
+const AVATAR_TRACE_KINDS = ['stage', 'error', 'unhandledrejection', 'console', 'renderer-gone', 'preload', 'load'];
+function createAvatarTraceLog({ filePath, limit = AVATAR_TRACE_LIMIT, now = () => new Date() }) {
+  let written = 0;
+  try { written = statSync(filePath).size; } catch { written = 0; }
+  function trim() {
+    if (written <= limit) return;
+    try {
+      const kept = readFileSync(filePath, 'utf8').slice(-Math.floor(limit / 2));
+      const firstBreak = kept.indexOf('\n');
+      const text = firstBreak >= 0 ? kept.slice(firstBreak + 1) : kept;
+      writeFileSync(filePath, text);
+      written = Buffer.byteLength(text);
+    } catch { try { writeFileSync(filePath, ''); written = 0; } catch {} }
+  }
+  return Object.freeze({
+    filePath,
+    record(entry) {
+      if (!entry || typeof entry !== 'object') return false;
+      const kind = typeof entry.kind === 'string' && AVATAR_TRACE_KINDS.includes(entry.kind) ? entry.kind : 'unknown';
+      const message = sanitizeReason(entry.message, 500);
+      const source = sanitizeReason(entry.source, 160);
+      const line = Number.isSafeInteger(entry.line) && entry.line >= 0 ? entry.line : undefined;
+      const record = { t: now().toISOString(), kind, message };
+      if (source) record.source = source;
+      if (line !== undefined) record.line = line;
+      const text = JSON.stringify(record) + '\n';
+      try {
+        appendFileSync(filePath, text);
+        written += Buffer.byteLength(text);
+        trim();
+        return true;
+      } catch { return false; }
+    },
+    size: () => written,
+  });
+}
+
+function registerAvatarTraceBridge({ ipcMain, trace, isTrusted }) {
+  // 取证是可选能力：宿主（或测试替身）没有 ipcMain.on 时静默跳过，绝不影响形象会话与停止语义。
+  if (typeof ipcMain?.on !== 'function' || typeof ipcMain?.removeListener !== 'function') return { dispose() {} };
+  const listener = (event, entry) => {
+    if (typeof isTrusted === 'function' && !isTrusted(event)) return;
+    trace.record(entry);
+  };
+  ipcMain.on('nuanban:avatar:trace', listener);
+  return { dispose() { ipcMain.removeListener('nuanban:avatar:trace', listener); } };
 }
 
 function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalThis.fetch, onState = () => {}, timeoutMs = 25000 }) {
@@ -126,9 +196,13 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
     attempt.requestId = requestId;
     // 白名单重建：页面传入的 features/ids/config 一律丢弃，只保留页面唯一有权决定的 raw_audio。
     // conversation 模式才启用星云 ASR→Brain 与语音前端；render 模式与今天完全一致。
+    // enable_aec 必须为 false：桌宠窗口是 file:// 页面（不透明源），Chromium 拒绝加载 blob: AudioWorklet
+    // （实测 CSP script-src 拦截 + "Failed to load worklet module script … (CORS or access check error)"），
+    // 因此本次不启用 AEC；麦克风上行仍走 MediaRecorder/MSE（raw_audio 由 MSE 支持决定，Electron 下为 false，
+    // 不需要 worklet）。要有 AEC 必须先把桌宠窗口换成自定义协议/本地 http 源，属于未完成的后续项。
     const sessionRequest = attempt.mode === 'conversation'
       ? { request_id: requestId, gateway_type: 'default', session_speak_req_id: 1,
-        features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: true } },
+        features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: false } },
         config: { framedata_proto_version: 2, walk_version: 3, raw_audio: rawAudio } }
       : { request_id: requestId, gateway_type: 'default',
         features: { auto_send_asr_to_llm: false, speech_frontend: { enabled: false } }, session_speak_req_id: 1,
@@ -159,10 +233,14 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
     return true;
   }
 
-  async function fail(lease, kind) {
+  async function fail(lease, kind, detail) {
     if (!active || lease !== active.lease) return status();
+    // 失败阶段与真实原因由渲染端给出，主进程只做受限脱敏后上屏，便于现场直接看到原因。
+    const reason = redactSecret(sanitizeReason(detail), credentials?.appSecret);
     const stopped = await stop(kind === 'timeout' ? 'timeout' : 'load_failed');
-    if (stopped.stopped) publish('error', kind === 'timeout' ? defaultPet.name + '加载超时，已停止会话并恢复本机桌宠；不会自动重连。' : defaultPet.name + '资源或连接加载失败，已恢复本机桌宠；请检查网络后手动重试。');
+    if (stopped.stopped) publish('error', (kind === 'timeout'
+      ? defaultPet.name + '加载超时，已停止会话并恢复本机桌宠；不会自动重连。'
+      : defaultPet.name + '资源或连接加载失败，已恢复本机桌宠；请检查网络后手动重试。') + (reason ? '失败阶段与原因：' + reason + '。' : ''));
     return status();
   }
 
@@ -171,7 +249,7 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
 
 function registerXingyunAvatarBridge({ ipcMain, service, isTrusted, confirmConversation }) {
   const actions = { status: () => service.status(), begin: (consent, mode) => service.begin(consent, mode), exchange: (lease, input) => service.exchange(lease, input),
-    ready: lease => service.ready(lease), fail: (lease, kind) => service.fail(lease, kind), stop: () => service.stop(),
+    ready: lease => service.ready(lease), fail: (lease, kind, detail) => service.fail(lease, kind, detail), stop: () => service.stop(),
     'confirm-conversation': async () => {
       if (typeof confirmConversation !== 'function') return false;
       return (await confirmConversation()) === true;
@@ -183,4 +261,4 @@ function registerXingyunAvatarBridge({ ipcMain, service, isTrusted, confirmConve
   return { dispose() { for (const name of Object.keys(actions)) ipcMain.removeHandler('nuanban:avatar:' + name); } };
 }
 
-module.exports = { GATEWAY, MARKER_GATEWAY, PET_AVATAR_CSP, defaultPet, signSession, createXingyunAvatarService, registerXingyunAvatarBridge };
+module.exports = { GATEWAY, MARKER_GATEWAY, PET_AVATAR_CSP, defaultPet, signSession, sanitizeReason, createAvatarTraceLog, registerAvatarTraceBridge, createXingyunAvatarService, registerXingyunAvatarBridge };

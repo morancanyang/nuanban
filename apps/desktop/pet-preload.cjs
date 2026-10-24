@@ -59,6 +59,18 @@ function subscribeLili(channel, listener) {
   ipcRenderer.on(channel, handler);
   return () => ipcRenderer.removeListener(channel, handler);
 }
+const AVATAR_TRACE_KINDS = ['stage', 'error', 'unhandledrejection', 'console', 'renderer-gone', 'preload', 'load'];
+function projectAvatarTrace(entry) {
+  if (!entry || typeof entry !== 'object' || !AVATAR_TRACE_KINDS.includes(entry.kind)) throw new TypeError('形象取证条目无效');
+  const projected = { kind: entry.kind, message: typeof entry.message === 'string' ? entry.message.slice(0, 500) : '' };
+  if (typeof entry.source === 'string' && entry.source) projected.source = entry.source.slice(0, 160);
+  if (Number.isSafeInteger(entry.line) && entry.line >= 0) projected.line = entry.line;
+  return projected;
+}
+// 取证只经受限 IPC 进入主进程写盘；这里不落地任何文件、不读取任何凭证。
+function reportAvatarTrace(entry) {
+  try { ipcRenderer.send('nuanban:avatar:trace', projectAvatarTrace(entry)); } catch {}
+}
 contextBridge.exposeInMainWorld('nuanbanAvatar', Object.freeze({
   status: () => ipcRenderer.invoke('nuanban:avatar:status'),
   begin: (consent, mode) => {
@@ -71,7 +83,9 @@ contextBridge.exposeInMainWorld('nuanbanAvatar', Object.freeze({
     return ipcRenderer.invoke('nuanban:avatar:exchange', lease, { method: input.method, body: input.body });
   },
   ready: lease => ipcRenderer.invoke('nuanban:avatar:ready', lease),
-  fail: (lease, kind) => ipcRenderer.invoke('nuanban:avatar:fail', lease, kind === 'timeout' ? 'timeout' : 'load_failed'),
+  fail: (lease, kind, detail) => ipcRenderer.invoke('nuanban:avatar:fail', lease, kind === 'timeout' ? 'timeout' : 'load_failed',
+    typeof detail === 'string' ? detail.slice(0, 300) : ''),
+  trace: entry => { try { reportAvatarTrace(entry); return true; } catch { return false; } },
   stop: () => ipcRenderer.invoke('nuanban:avatar:stop'),
   onState: listener => {
     if (typeof listener !== 'function') throw new TypeError('形象状态监听器必须是函数');
@@ -83,6 +97,14 @@ contextBridge.exposeInMainWorld('nuanbanAvatar', Object.freeze({
     return () => ipcRenderer.removeListener('nuanban:avatar:state', handler);
   },
 }));
+// 页面级未捕获错误与未处理拒绝：在 preload（隔离世界）监听 window 事件，经受限 IPC 交给主进程写 avatar-trace.log。
+// window 可能不存在（例如纯 Node 上下文复用本文件做静态检查），此时只跳过监听，不影响任何桥接。
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('error', event => reportAvatarTrace({ kind: 'error', message: String(event?.message ?? ''),
+    source: typeof event?.filename === 'string' ? event.filename : '', line: Number.isSafeInteger(event?.lineno) ? event.lineno : undefined }));
+  window.addEventListener('unhandledrejection', event => reportAvatarTrace({ kind: 'unhandledrejection',
+    message: String(event?.reason?.message ?? event?.reason ?? '') }));
+}
 contextBridge.exposeInMainWorld('nuanbanModel', Object.freeze({
   read: () => ipcRenderer.invoke('nuanban:model:read'),
   onChanged: listener => {

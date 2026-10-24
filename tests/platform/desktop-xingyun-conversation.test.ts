@@ -10,7 +10,7 @@ const credentials = { appId: '031ce3cd-synthetic-application-id', appSecret: 'sy
 const petPage = 'file:///C:/nuanban/apps/desktop/pet.html';
 const conversationBody = () => ({ error_code: 0, data: { session_id: 'synthetic-session', resource_pack: {},
   e2e_resp: { ws_url: 'wss://e2emp.xingyun3d.com/ws/session?synthetic', e2e_token: 'synthetic-e2e-token',
-    features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: true }, vad_merge_mode: true } } } });
+    features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: false }, vad_merge_mode: true } } } });
 const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 const conversationRequest = () => ({ method: 'POST', body: { request_id: 'synthetic-request', config: { raw_audio: false } } });
 
@@ -58,8 +58,12 @@ describe('星云实时对话：网关白名单与状态机', () => {
     expect(options?.redirect).toBe('error');
     const sent = JSON.parse(String(options?.body));
     expect(sent).toEqual({ request_id: 'synthetic-request', gateway_type: 'default', session_speak_req_id: 1,
-      features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: true } },
+      features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: false } },
       config: { framedata_proto_version: 2, walk_version: 3, raw_audio: false } });
+    // 桌宠窗口是 file:// 不透明源，无法加载 blob AudioWorklet，因此对话模式必须关掉 AEC；
+    // 平台尊重该值（实测回包 enable_aec:false），麦克风上行仍走 MediaRecorder/MSE，不需要 worklet。
+    expect(sent.features.speech_frontend).toEqual({ enabled: true, enable_aec: false });
+    expect(JSON.stringify(sent)).not.toContain('"enable_aec":true');
     expect(JSON.stringify(options)).not.toContain('private');
     expect(JSON.stringify(options)).not.toContain(credentials.appSecret);
     expect(reply.body.data.e2e_resp.ws_url).toBe('wss://e2emp.xingyun3d.com/ws/session?synthetic');
@@ -282,6 +286,33 @@ describe('实时对话的源码守卫', () => {
     expect(renderer).toContain("window.addEventListener('nuanban:avatar-conversation-command', conversationCommand)");
   });
 
+  it('按模式选类：仅形象用基类 XmovAvatar，实时对话才用 XingyunAvatarAgent', () => {
+    // 仅形象不需要 Agent 的 E2E/ASR/Brain 管线；实时通道抖动不能把仅形象会话拖垮。
+    expect(renderer).toContain("const { default: AvatarClass } = conversationMode ? await import('@xmov/avatar/agent') : await import('@xmov/avatar');");
+    expect(renderer).toContain('new AvatarClass({');
+    expect(renderer).not.toContain('new XingyunAvatarAgent(');
+    expect((renderer.match(/import\('@xmov\/avatar\/agent'\)/g) ?? [])).toHaveLength(1);
+    expect((renderer.match(/import\('@xmov\/avatar'\)/g) ?? [])).toHaveLength(1);
+    // agentCallbacks（含 socket/agent 失败兜底）只在对话模式存在；仅形象不再因实时通道状态被判失败。
+    expect(renderer).toContain('agentCallbacks: conversationMode ? {');
+    expect(renderer).toMatch(/} : undefined,\n    \}\);/);
+    expect(renderer).toContain("'init mode=' + mode + ' sdk=' + (conversationMode ? 'agent' : 'base')");
+  });
+
+  it('失败分级与真实原因上屏：阶段 + SDK 原始 code/message，且不含 token/密钥', () => {
+    expect(renderer).toContain("const FAILURE_STAGES = {");
+    for (const stage of ['session', 'resource', 'realtime', 'render', 'permission', 'timeout']) expect(renderer).toContain(stage + ':');
+    expect(renderer).toContain('function failureSummary(stage, detail)');
+    expect(renderer).toContain('function errorReason(error)');
+    expect(renderer).toContain('bridge.fail(currentLease, kind, summary)');
+    expect(renderer).toContain("fail('load_failed', 'realtime', errorReason(error))");
+    expect(renderer).toContain("fail('load_failed', 'realtime', 'socket=' + cleanReason(String(socketState)))");
+    expect(renderer).toContain("fail('load_failed', 'session', errorReason(error))");
+    expect(renderer).toContain("fail('timeout', 'timeout', '等待形象就绪超过 120 秒')");
+    expect(renderer).toContain('实时对话未能建立（');
+    expect(renderer).not.toMatch(/console\.log|console\.error/);
+  });
+
   it('销毁路径确保 stopASR 与 destroy，迟到回调按 generation 丢弃', () => {
     expect(renderer).toMatch(/async function destroyInstance\(previous, previousMode\) \{[\s\S]*?await previous\.stopASR\(\)[\s\S]*?await previous\.destroy\('user'\)/);
     expect(renderer).toContain("if (previousMode === 'conversation' && typeof previous.stopASR === 'function')");
@@ -312,6 +343,23 @@ describe('实时对话的源码守卫', () => {
     expect(preload).toContain("confirmConversation: () => ipcRenderer.invoke('nuanban:avatar:confirm-conversation')");
     expect(preload).toContain("conversation: { enabled: state.conversation?.enabled === true");
     expect(preload).not.toMatch(/appSecret|e2e_token|ws_url|credentials/);
+    // 取证只走受限 IPC 的一个通道，preload 不落地文件、不读密钥。
+    expect(preload).toContain("ipcRenderer.send('nuanban:avatar:trace', projectAvatarTrace(entry))");
+    expect(preload).toContain('const AVATAR_TRACE_KINDS =');
+    expect(preload).toContain("trace: entry =>");
+    expect(preload).toContain("fail: (lease, kind, detail) =>");
+    expect(preload).not.toMatch(/node:fs|writeFileSync|readFileSync|app\.getPath/);
+  });
+
+  it('对话模式必须关掉 AEC（file:// 不能加载 blob AudioWorklet），仅形象会话体不变', () => {
+    const avatarSource = read('xingyun-avatar.cjs');
+    expect(avatarSource).toContain('speech_frontend: { enabled: true, enable_aec: false }');
+    expect(avatarSource).not.toContain('enable_aec: true');
+    expect(avatarSource).toContain('不透明源');
+    expect(avatarSource).toContain("features: { auto_send_asr_to_llm: false, speech_frontend: { enabled: false } }");
+    expect(renderer).toContain('{ auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: false } }');
+    expect(renderer).toContain('{ auto_send_asr_to_llm: false, speech_frontend: { enabled: false } }');
+    expect(renderer).not.toContain('enable_aec: true');
   });
 
   it('页面入口默认关闭，并写明上传、提问、计费与停止边界', () => {

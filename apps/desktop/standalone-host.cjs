@@ -20,7 +20,7 @@ const { registerAppLauncherBridge } = require('./app-launcher-bridge.cjs');
 const { createRealtimeVoiceHost } = require('./realtime-voice-host.cjs');
 const { registerDictationBridge } = require('./wake/dictation-bridge.cjs');
 const { loadXingyunCredentials } = require('./xingyun-credentials.cjs');
-const { createXingyunAvatarService, registerXingyunAvatarBridge, defaultPet } = require('./xingyun-avatar.cjs');
+const { createXingyunAvatarService, registerXingyunAvatarBridge, createAvatarTraceLog, registerAvatarTraceBridge, defaultPet } = require('./xingyun-avatar.cjs');
 const { createLiliHost } = require('./lili-host.cjs');
 const { createSingleFrameGuidance } = require('./single-frame-guidance.cjs');
 const { PRODUCT_ICON_PATH } = require('./brand.cjs');
@@ -78,6 +78,8 @@ function createStandaloneHost(options) {
   let dictationBridge = null;
   let avatarService = null;
   let avatarBridge = null;
+  let avatarTraceBridge = null;
+  let avatarTrace = null;
   // 实时对话的麦克风放行令牌：只在对话会话运行期间存在，停止、销毁或窗口消失立即撤销。
   let avatarPermissionToken;
   const xingyunPermissions = options.xingyunPermissions;
@@ -1104,8 +1106,10 @@ function createStandaloneHost(options) {
 
   async function initialize() {
     const avatarCredentials = await (options.loadAvatarCredentials ?? loadXingyunCredentials)().catch(() => undefined);
+    avatarTrace = createAvatarTraceLog({ filePath: path.join(options.userDataPath, 'avatar-trace.log') });
     avatarService = createXingyunAvatarService({ credentials: avatarCredentials, onState: state => {
       syncConversationPermission(state);
+      avatarTrace?.record({ kind: 'stage', message: 'phase=' + String(state?.phase ?? '') + ' mode=' + String(state?.mode ?? '') + ' conversation=' + String(state?.conversation?.phase ?? '') + ' message=' + String(state?.message ?? '') });
       if (live(petWindow)) petWindow.webContents.send('nuanban:avatar:state', state);
     } });
     try {
@@ -1146,7 +1150,7 @@ function createStandaloneHost(options) {
       blurTimer.unref?.();
     });
     petWindow.on('show', () => resetIdleTimer());
-    petWindow.webContents.on('render-process-gone', () => { runAction(() => stop('renderer-gone')); });
+    petWindow.webContents.on('render-process-gone', (_event, details) => { avatarTrace?.record({ kind: 'renderer-gone', message: 'reason=' + String(details?.reason ?? '') }); runAction(() => stop('renderer-gone')); });
     petWindow.on('unresponsive', () => { runAction(() => stop('renderer-gone')); });
     guideWindow.webContents.on('render-process-gone', () => { clearGuide(); runAction(() => stop('renderer-gone')); });
     guideWindow.webContents.on('did-finish-load', () => { if (pendingGuide) guideWindow.webContents.send('nuanban:guide:state', pendingGuide); });
@@ -1194,6 +1198,16 @@ function createStandaloneHost(options) {
     handle('nuanban:pet:open-main', route => { if (typeof route !== 'string' || !managementRoutes.has(route)) throw new Error('管理页面不存在'); return options.showManagement(route); });
     handle('nuanban:pet:open-tool', openPetTool);
     handle('nuanban:pet:close', closePetWindow);
+    // 现场取证：renderer console（含 CSP 违规与未捕获异常）、preload 上报的错误与失败阶段，
+    // 统一写 userData/avatar-trace.log（带时间戳、大小上限、脱敏，不含 token/密钥）。
+    petWindow.webContents.on('console-message', (...args) => {
+      const details = args[1];
+      const entry = details && typeof details === 'object'
+        ? { kind: 'console', message: String(details.message ?? ''), source: String(details.sourceId ?? ''), line: Number(details.lineNumber) }
+        : { kind: 'console', message: String(args[1] ?? ''), source: String(args[2] ?? ''), line: Number(args[3]) };
+      avatarTrace?.record(entry);
+    });
+    avatarTraceBridge = registerAvatarTraceBridge({ ipcMain, trace: avatarTrace, isTrusted: event => trusted(event, petWindow, petPath) });
     avatarBridge = registerXingyunAvatarBridge({ ipcMain, service: avatarService, isTrusted: event => trusted(event, petWindow, petPath),
       confirmConversation: () => showDialog({
         type: 'warning',
@@ -1283,6 +1297,7 @@ function createStandaloneHost(options) {
       microphoneActive: localWake.microphoneActive || voiceResult.microphoneActive, captureActive: !singleFrameStopped || runtimeResult.captureActive || localWake.microphoneActive || voiceResult.microphoneActive };
     if (result.stopped) {
       avatarBridge?.dispose();
+    avatarTraceBridge?.dispose();
       for (const unsubscribe of listeners.splice(0)) unsubscribe();
       for (const channel of channels.splice(0)) ipcMain.removeHandler(channel);
       learningStore?.close();

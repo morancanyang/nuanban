@@ -32,13 +32,24 @@
 | --- | --- | --- |
 | 触发 | “启用花环水獭”+ 联网确认勾选 | “开启实时对话”+ 原生确认框 |
 | 网关 request_id | 沿用，一次授权一次 POST | 同左 |
-| `features` | `auto_send_asr_to_llm: false`、`speech_frontend: { enabled: false }` | `auto_send_asr_to_llm: true`、`speech_frontend: { enabled: true, enable_aec: true }` |
+| `features` | `auto_send_asr_to_llm: false`、`speech_frontend: { enabled: false }` | `auto_send_asr_to_llm: true`、`speech_frontend: { enabled: true, enable_aec: false }` |
+| SDK 入口 | `import('@xmov/avatar')` → 基类 `XmovAvatar` | `import('@xmov/avatar/agent')` → `XingyunAvatarAgent` |
+| 实时通道（E2E） | 不使用；不建立 `wss://e2emp.xingyun3d.com` 会话 | 建立并使用 E2E 会话（ASR/Brain/TTS） |
 | `session_speak_req_id` / `config` | `1` / 固定版本号 + 页面布尔 `raw_audio` | 同左 |
 | 麦克风 | 不开麦，`audio.inputEnabled: false` | 本人在场确认后开麦，`audio.inputEnabled: true` |
 | 输出音量 | `setVolume(0)` | `setVolume(1)` |
 | 音频与提问去向 | 不出本机 | 交给星云（ASR + Brain + TTS），按其平台规则计费 |
 
 页面传入的 `features`、`asr_id`/`llm_id`/`tts_config`/`brain_config`/`extras`、`gateway_type`、`session_speak_req_id`、任意 URL 与未知键都不透传；主进程仍按白名单重建，`config.raw_audio` 仍必须是布尔值，否则在联网前拒绝。响应中的 `data.e2e_resp`（含 `ws_url`/`e2e_token`）按原样经 `exchange` 回给页面，无需额外代理。
+
+**为什么对话模式必须 `enable_aec: false`（2026-10-24 实测，未修复项）**：桌宠窗口用 `file://` 加载，页面的 blob URL 源是不透明源（`blob:file:///…`）。Chromium 拒绝为这种源加载 AudioWorklet 模块，实测在真实桌宠页面上报：
+
+```text
+Loading the script 'blob:file:///<id>' violates the following Content Security Policy directive: "script-src 'self'"…
+Failed to load worklet module script: blob:file:///<id> (CORS or access check error)
+```
+
+即 AEC 所需的 worklet 在两个层面都不可用（CSP 未放行 `blob:` 脚本 + 不透明源自身的访问检查）。本次不改 CSP（放行 `blob:` 会扩大脚本白名单），而是按平台支持的 `enable_aec: false` 建会话；星云平台尊重该值（实测回包 `speech_frontend: { enabled: true, enable_aec: false }`，`error_code 0`），麦克风上行仍走 MediaRecorder/MSE（Electron 下 `raw_audio` 为 `false`，不需要 worklet）。**要有 AEC 的后续项（未做）**：把桌宠窗口从 `file://` 换成自定义协议或本地 http 源，使 blob URL 具备可用的源，再重新评估 `enable_aec: true`；在那之前不得声称支持回声消除。
 
 ### 用户操作与确认
 
@@ -53,10 +64,35 @@
 - 该标志与会话代次绑定：停止、失败、销毁、关闭窗口或退出时立即撤销；停止后迟到的权限请求一律拒绝（防“停止后仍被开麦”）。
 - 渲染端销毁路径先 `stopASR()` 再 `destroy()`，所有 SDK 回调按 generation 丢弃迟到结果。
 
+### 失败分级与取证方式
+
+现场只看到“花环水獭资源或连接加载失败，已恢复本机桌宠；请检查网络后手动重试。”时无法判断失败在哪一环，因此把失败拆成**阶段 + 真实原因**并落盘取证。设计目标：现场不必再猜，也不需要复现会话。
+
+**失败阶段**（`apps/desktop/xingyun-renderer.js` 的 `FAILURE_STAGES`）与上屏文案：
+
+| 阶段 | 含义 | 判定来源 | 状态文案 |
+| --- | --- | --- | --- |
+| `session` | 会话建立（`begin`/`exchange`/`bridge.ready` 被拒） | `bridge.begin` 抛错、`ready()` 的 Promise 被拒 | “会话建立：…”，接管为 `load_failed` |
+| `resource` | 形象资源下载/初始化（SDK `init()`） | `init()` 抛错、动态 `import`/实例化抛错 | “形象资源：…” |
+| `realtime` | 实时通道（socket/agent/E2E） | SDK `onMessage`/`onError`、`onSocketStateChange`、`onAgentStateChange`、网络离线 | “实时通道：code=… / socket=… / agent=…” |
+| `render` | 形象渲染未发生（`onRenderChange` 未到） | 120s 兜底计时器 | “等待超时：等待形象就绪超过 120 秒” |
+| `permission` | 麦克风开启失败（`startASR`） | `startASR()` 抛错 | “麦克风权限：…”（对话状态栏） |
+
+原因文本取自 SDK 原始错误的 `code`/`message`/`error_reason`（`errorReason()` 兼容多版本字段），经 `cleanReason()` 截断到 200 字并脱敏，再随 `bridge.fail(lease, kind, detail)` 交主进程；主进程用 `sanitizeReason()` + `redactSecret()` **二次脱敏**后并入状态文案。失败时仍沿用既有语义：销毁本机实例、`DELETE` 确认远端会话关闭、不自动重连。
+
+**取证日志**：`app.getPath('userData')/avatar-trace.log`（`createAvatarTraceLog`）。
+
+- 写入者：preload 捕获的页面 `error`/`unhandledrejection`（经受限 IPC `nuanban:avatar:trace`）、渲染端显式上报的阶段（`bridge.trace`）、主进程捕获的 `console-message`（含 CSP 违规原文）、`render-process-gone`、以及会话状态每次变化（`phase=… mode=… conversation=… message=…`）。
+- 形状受限：只接受 `kind`（白名单 `stage`/`error`/`unhandledrejection`/`console`/`renderer-gone`/`preload`/`load`）、`message`（≤500 字）、`source`（≤160 字）、`line`；其余字段一律丢弃。IPC 只注册 `nuanban:avatar:trace` 一个通道，且只接受真实桌宠窗口（`trusted(event, petWindow, petPath)`）。
+- 大小上限 256 KiB；超限时保留最新的一半（按行截断），不会无限增长。
+- 脱敏：`token`/`secret`/`appSecret`/`authorization`/`lease`/`signature`/`session_id`/`request_id` 赋值、UUID、≥32 位长标识、URL 一律替换为 `[已隐藏]`/`[标识已隐藏]`/`[地址已隐藏]`；App Secret 另做整串替换。**永不写入 token、密钥、租约与会话标识**，由 `tests/platform/desktop-xingyun-diagnostics.test.ts` 断言。
+- 日志只在本机，不上传；排查时读取该文件即可看到失败阶段、SDK 原始错误与 CSP/网络原文。
+
 ### 未验证
 
-- **没有发起任何真实星云会话**（额度/计费），也没有真机开麦验收；`wss://e2emp.xingyun3d.com` 的实际音频链路、口型同步与计费口径均未在本机验证。
-- 没有验证打包后的 Electron 在 `file://` 页面开麦所需的全部运行时条件，也没有验证系统/驱动层面拒绝麦克风时的表现。
+- 真实会话只在本机隐藏窗口装置里跑过：render 1 次、conversation 1 次（外加修复前各 1 次诊断），均有 `session_id` 与 `DELETE` 结果记录；**没有真机开麦验收**，`wss://e2emp.xingyun3d.com` 的实际音频链路、口型同步与计费口径未验证。
+- 对话模式在 `enable_aec: false` 下的音质/回声表现未验证（见上文，AEC 是未做项）。
+- 桌面窗口可见、系统/驱动拒绝麦克风、代理或杀软拦截长连接等现场条件未覆盖；这些失败会按上表分级并落入 `avatar-trace.log`，但尚未在真实故障机上验证过分级准确性。
 
 ## 使用与配置
 
@@ -79,7 +115,7 @@ pnpm desktop:avatar:build
 - 使用 `/user/v1/ttsa_v2/session`，不额外添加 `tag`；只接收 SDK 检测得到的布尔型 `config.raw_audio`，不覆盖为固定格式。该字段只用于输出音频格式协商，不代表麦克风授权；缺失或非布尔值在联网前拒绝，其他配置仍由主进程白名单重建。
 - 签名遵循官方 SDK 的 Unicode 码点递归排序、非 ASCII JSON 转义和 MD5 算法。
 - 每次显式授权最多一次 POST。Agent 重连关闭，旧授权及重复 POST 被主进程拒绝；失败只能重新确认后手动重试。
-- 不调用 `startASR` 或 `ask`；输入音频、自动 ASR→LLM、Sentry 上报关闭，输出音量为零。原有问答与语音使用原来的独立权限和服务。这是默认的 **render 模式**；显式的 **conversation（实时对话）模式**见下文，两种模式互斥，默认仍是 render。
+- **按模式选 SDK 类（2026-10-24 修复回归）**：render 模式只 `import('@xmov/avatar')` 用基类 `XmovAvatar`，不实例化 `XingyunAvatarAgent`，因而不建立 Agent 的 E2E/ASR/Brain 管线，实时通道抖动或 E2E 握手失败不会把仅形象会话判为失败；conversation 模式才用 `XingyunAvatarAgent`（`agentCallbacks` 只在对话模式存在）。render 模式不调用 `startASR` 或 `ask`；输入音频、自动 ASR→LLM、Sentry 上报关闭，`setVolume(0)`。原有问答与语音使用原来的独立权限和服务。两种模式互斥，默认仍是 render。
 - 会话会收发 SDK 必需的设备/性能信息、资源及控制数据；不是完全离线服务。
 - 仅桌宠 CSP 允许星云资源及实际会话返回的固定资源域名 `https://public-xmov.oss-cn-hangzhou.aliyuncs.com`；该 OSS 域名只加入图片、连接和媒体白名单，不允许任意 OSS 域名、远程脚本或 `unsafe-eval`。HTML 元策略与主进程响应头策略一致，客户端 CSP 不放宽，客户端 preload 不暴露会话桥接。
 - 关闭、退出、Renderer 故障及全局停止均清理远端会话。在途创建先等待返回，再以 request/session ID 关闭，防止孤儿会话。停止失败如实提示并阻止新会话。
@@ -128,6 +164,19 @@ node scripts/test-xingyun-avatar.mjs --simulate
 - 权限闸门单测覆盖：未开启对话全拒、只放行 `media` 音频、必须同一桌宠窗口与同一页面、`isMainFrame`/`requestingUrl`/视频/子框架被拒、停止后立即失效、迟到撤销不会注销新会话、屏幕采集始终拒绝。
 - `pnpm exec tsc --noEmit` 退出码 0；`pnpm desktop:avatar:build` 成功。
 - **未执行**：任何真实星云会话（额度/计费）、真实麦克风开麦、打包后的 Electron 桌面运行。上述结果全部是合成/本地验证，不构成实时对话的真机验收。
+
+## 真实 Electron 复现与修复（2026-10-24，含真实会话）
+
+现场（r27，用户机）在“启用花环水獭”与“实时对话”都看到 `load_failed` 兜底文案。用隐藏窗口装置（复用真实 `pet.html` + `pet-preload.cjs` + `avatar-runtime` 构建产物，真实 `createXingyunAvatarService` 与 DPAPI 凭证，真实 CSP）复现，结论如下。
+
+- **未能复现现场 `load_failed`**：本机装置里 render 与 conversation **都**能走到 `phase: ready`（含资源下载、WebSocket、`bridge.ready` 被接受），因此现场原因仍未确认，不能声称已定位。已改用“失败可诊断”保证下次现场可取证（见“失败分级与取证方式”）。
+- **确证的独立缺陷 1（worklet/AEC）**：对话模式在真实 `file://` 页面加载 blob AudioWorklet 被拦（CSP `script-src 'self'` + 不透明源访问检查），已改为 `enable_aec: false`；平台回包确认 `enable_aec: false`，会话 `error_code 0` 并就绪。
+- **确证的独立缺陷 2（仅形象的实时通道耦合）**：修复前 render 也实例化 `XingyunAvatarAgent`，会连带建立 `wss://e2emp.xingyun3d.com` E2E 会话，任一实时通道异常都会走 `fail('load_failed')`；修复后 render 只用基类 `XmovAvatar`，装置里 render 会话只建立 `ttsa-gateway-lite` 一条 WebSocket，不再依赖 E2E 通道。
+- **副作用修复**：修复前 render 的 `DELETE` 被平台以 `error_code: 1`（`ttsa request error: 无效的session`）拒绝，界面误报“星云未确认会话关闭（cleanup_failed）”；修复后同流程 `DELETE` 返回 `error_code: 0`，`stopped: true`。
+- 真实会话共 4 次，全部发出 `DELETE`：修复前 conversation `6061-ba2e…`（`error_code 0`）、修复前 render `13081-499e…`（`error_code 1`，复验 `DELETE` 返回“无效的session”，确认已关闭）、修复后 render `22272-8586…`（`error_code 0`）、修复后 conversation `22872-c187…`（`error_code 0`）。
+- 装置证据（脱敏 JSON）保存在 `.cache/avatar-load-repro/out-*/report.json` 与 `run.log`；装置脚本在 `.cache/avatar-load-repro/`（`electron.exe .cache/avatar-load-repro --conversation-only --attempts=1` 可重跑，注意先清除 `ELECTRON_RUN_AS_NODE`）。
+- 测试：`tests/platform/desktop-xingyun-*` 60 项通过；`pnpm typecheck` 0；`desktop-pet-avatar.spec.ts`（合成 SDK，msedge）28 项通过。
+- **未验证**：现场故障机本身；可见窗口/真机开麦；代理、杀软或显卡驱动差异导致的失败仍未归因。
 
 ## 旧猴子应用历史记录
 
