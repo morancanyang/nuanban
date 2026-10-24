@@ -1,0 +1,215 @@
+{
+  "revision": "reference-20261024-v3",
+  "status": "static look-development review; animation requirements only",
+  "workflow": "existing original Blender models refined through the installed loopback MCP addon bridge",
+  "nativeMcpConnectorUsed": false,
+  "aiRefinementUsed": false,
+  "comfyUIUsed": false,
+  "productAssetsReplaced": false,
+  "masterFilesCommitted": false,
+  "localMasterDirectory": "work/character-reference-v3 (default; see --source for custom locations)",
+  "characters": [
+    {
+      "character": "lili",
+      "sourceBlendSha256": "8ec7e5fe48b3c759d0e408d035573d51b131a004aa016be1a4c46d5db829a24e",
+      "candidateBlend": "lili-reference-v3.blend",
+      "candidateBlendSha256": "a9ea547d3458decee7aff83691806388aaca2177bd8101fce4bfe21ba59502c8",
+      "groomStrands": 194719,
+      "rigged": false,
+      "animationClips": [],
+      "motionSpecifications": 7,
+      "renders": [
+        {
+          "file": "lili-hero.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            192,
+            178,
+            2158,
+            2626
+          ],
+          "bytes": 15701794,
+          "sha256": "4b5fca459b61f827a0c0558c9c99006046dc62a677d50e42ca37da607108b91e"
+        },
+        {
+          "file": "lili-front.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            196,
+            181,
+            2175,
+            2619
+          ],
+          "bytes": 15805837,
+          "sha256": "01040b5ce945e49f226b44b8c5951d30873549a6d147e8ff56f46f6c6de3ac7d"
+        },
+        {
+          "file": "lili-side.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            646,
+            181,
+            1701,
+            2619
+          ],
+          "bytes": 9045240,
+          "sha256": "dfc68f8d49ee0c2234539260def8ca7bfab78cb724bdea671fa7be43dbde896f"
+        },
+        {
+          "file": "lili-back.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            224,
+            181,
+            2205,
+            2619
+          ],
+          "bytes": 15914887,
+          "sha256": "83f6bbb15d9f404e93b318df65ccc0935dcdb21b12338923a8868e68f26e123d"
+        },
+        {
+          "file": "lili-detail.png",
+          "width": 2400,
+          "height": 2400,
+          "bitDepth": 16,
+          "alphaBounds": [
+            0,
+            0,
+            2400,
+            2400
+          ],
+          "bytes": 25430409,
+          "sha256": "dd20ea8127b99bd880ff2744989cae0fec509cf378941ccb521f52d3a2c19286"
+        }
+      ],
+      "previews": [
+        {
+          "file": "lili-hero-preview.png",
+          "width": 1200,
+          "height": 1400,
+          "bitDepth": 8,
+          "sha256": "995ab581eaaea0e2289abc4175be4102da6224b8e3435c3637c18224035b14b6"
+        },
+        {
+          "file": "lili-detail-preview.png",
+          "width": 1200,
+          "height": 1200,
+          "bitDepth": 8,
+          "sha256": "1af184d35cba67aa7954ce23e8f84bc243bff6baa20f07db44c7abfbc8bfda13"
+        }
+      ],
+      "localOnlyArchive": "lili-reference-v3-delivery.zip",
+      "archiveBytes": 101389943,
+      "archiveSha256": "42f105c21f5698e0341668d6c08cb85ec7cf1a15814d82d4a4ed1e5a7046b53b"
+    },
+    {
+      "character": "lumi",
+      "sourceBlendSha256": "ffe061fc3b5a4e72e18373823063d71bc239b8440b6a888f69af53a0743a9ada",
+      "candidateBlend": "lumi-reference-v3.blend",
+      "candidateBlendSha256": "59ea7fae2332050404cf297a1192b816a005c478a3a286a1bbf18bb9c5800b0b",
+      "groomStrands": 173800,
+      "rigged": false,
+      "animationClips": [],
+      "motionSpecifications": 7,
+      "renders": [
+        {
+          "file": "lumi-hero.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            292,
+            165,
+            2059,
+            2634
+          ],
+          "bytes": 14550297,
+          "sha256": "919661aa7570de7a67c765481f94e41563be5c006491cbec8b9ae9734dee791d"
+        },
+        {
+          "file": "lumi-front.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            233,
+            171,
+            2157,
+            2626
+          ],
+          "bytes": 15015709,
+          "sha256": "eda24e904f2bf6b63ee60a8bc3fabc7b943cf040764329aaa7d2dd3855b4c985"
+        },
+        {
+          "file": "lumi-side.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            716,
+            171,
+            1734,
+            2626
+          ],
+          "bytes": 9447963,
+          "sha256": "f33f02d6c344e35d41614ae82f4889c0fc230252708f6413b5cac8d9b12b12bc"
+        },
+        {
+          "file": "lumi-back.png",
+          "width": 2400,
+          "height": 2800,
+          "bitDepth": 16,
+          "alphaBounds": [
+            243,
+            171,
+            2168,
+            2626
+          ],
+          "bytes": 14496445,
+          "sha256": "2ffb8eaa75a4dbb0b4a7f1423b0b215e7074cb88397dee7f0eb4ce3dabeb4784"
+        },
+        {
+          "file": "lumi-detail.png",
+          "width": 2400,
+          "height": 2400,
+          "bitDepth": 16,
+          "alphaBounds": [
+            139,
+            0,
+            2400,
+            2400
+          ],
+          "bytes": 24207812,
+          "sha256": "7503751e36ce8dd97281a7bae211538b5d3f35d645bf1f84d521dbfacb02edfa"
+        }
+      ],
+      "previews": [
+        {
+          "file": "lumi-hero-preview.png",
+          "width": 1200,
+          "height": 1400,
+          "bitDepth": 8,
+          "sha256": "10abc39b61031727d454f30e6f6fb93bde564dadd1a5e5599c02db4bc3c6f774"
+        },
+        {
+          "file": "lumi-detail-preview.png",
+          "width": 1200,
+          "height": 1200,
+          "bitDepth": 8,
+          "sha256": "ad4e8967f62c45fe1cbd72428022fc3f20f767215fbec9605140ec9a6229e8b3"
+        }
+      ],
+      "localOnlyArchive": "lumi-reference-v3-delivery.zip",
+      "archiveBytes": 92410992,
+      "archiveSha256": "7f6b4c8c6431db4381fa7f640851fd07af7071ea2757407780b8ea86cdecf3a7"
+    }
+  ]
+}
