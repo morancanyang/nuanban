@@ -36,12 +36,59 @@ describe('本地听写结果边界（低置信度不执行）', () => {
     expect(() => checkedDictationResult({ status: 'cancelled', localOnly: false })).toThrow();
   });
 
+  it('云端 complete 只在 recognition=cloud 且麦克风已关闭时接受，文本仍限 1～500 字', () => {
+    const cloud = { status: 'complete', text: '把手机字体调大', localOnly: false, recognition: 'cloud', microphoneActive: false } as const;
+    expect(checkedDictationResult(cloud)).toEqual(cloud);
+    expect(checkedDictationResult({ ...cloud, text: '  把手机字体调大  ', audio: 'discard' })).toEqual(cloud);
+    expect(() => checkedDictationResult({ ...cloud, text: ' ' })).toThrow();
+    expect(() => checkedDictationResult({ ...cloud, text: 'x'.repeat(501) })).toThrow();
+    expect(() => checkedDictationResult({ ...cloud, microphoneActive: true })).toThrow();
+  });
+
+  it('任何其它 localOnly:false 一律拒绝（fail-closed）', () => {
+    const cloud = { status: 'complete', text: '文字', localOnly: false, recognition: 'cloud', microphoneActive: false } as const;
+    for (const invalid of [
+      { ...cloud, recognition: undefined },
+      { ...cloud, recognition: 'local' },
+      { ...cloud, status: 'uncertain' },
+      { ...cloud, status: 'cancelled' },
+      { status: 'uncertain', localOnly: false, microphoneActive: false },
+      { status: 'cancelled', localOnly: false },
+      { ...cloud, localOnly: true },
+    ]) expect(() => checkedDictationResult(invalid)).toThrow();
+  });
+
+  it('本机变体可携带 recognition=local，但不得谎报云端', () => {
+    expect(checkedDictationResult({ status: 'complete', text: '文字', localOnly: true, microphoneActive: false, recognition: 'local' }))
+      .toEqual({ status: 'complete', text: '文字', localOnly: true, microphoneActive: false, recognition: 'local' });
+    expect(checkedDictationResult({ status: 'uncertain', localOnly: true, microphoneActive: false, recognition: 'local' }))
+      .toEqual({ status: 'uncertain', localOnly: true, microphoneActive: false, recognition: 'local' });
+    expect(checkedDictationResult({ status: 'cancelled', localOnly: true, recognition: 'local' }))
+      .toEqual({ status: 'cancelled', localOnly: true });
+    expect(() => checkedDictationResult({ status: 'complete', text: '文字', localOnly: true, microphoneActive: false, recognition: 'cloud' })).toThrow();
+    expect(() => checkedDictationResult({ status: 'cancelled', localOnly: true, recognition: 'cloud' })).toThrow();
+  });
+
   it('状态契约要求 localOnly=true，disabled 时不得声称麦克风开启', () => {
     const status = { phase: 'disabled', enabled: false, microphoneActive: false, dictationAvailable: true, localOnly: true, message: '未开启' };
     expect(checkedVoiceStatus(status)).toEqual(status);
     expect(() => checkedVoiceStatus({ ...status, localOnly: false })).toThrow();
     expect(() => checkedVoiceStatus({ ...status, enabled: true })).toThrow();
     expect(() => checkedVoiceStatus({ ...status, phase: 'unavailable', message: '本机没有可用的离线中文语音识别，未开启麦克风。' })).not.toThrow();
+  });
+
+  it('cloudDictation 缺省合法，出现时 enabled/available 必须是布尔', () => {
+    const status = { phase: 'disabled', enabled: false, microphoneActive: false, dictationAvailable: true, localOnly: true, message: '未开启' };
+    expect(checkedVoiceStatus(status)).toEqual(status);
+    expect(checkedVoiceStatus({ ...status, cloudDictation: undefined })).toEqual(status);
+    expect(checkedVoiceStatus({ ...status, cloudDictation: { enabled: false, available: false } }))
+      .toEqual({ ...status, cloudDictation: { enabled: false, available: false } });
+    expect(checkedVoiceStatus({ ...status, cloudDictation: { enabled: true, available: true }, transcript: 'do not project' }))
+      .toMatchObject({ cloudDictation: { enabled: true, available: true } });
+    for (const cloudDictation of [null, {}, { enabled: false }, { available: true }, { enabled: 'false', available: true },
+      { enabled: true, available: 'yes' }, 'cloud', 1, []]) {
+      expect(() => checkedVoiceStatus({ ...status, cloudDictation })).toThrow('未确认');
+    }
   });
 });
 

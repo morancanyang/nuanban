@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, RefreshCw, Settings, Square } from 'lucide-react';
-import { checkedDictationResult, checkedVoiceStatus, localVoiceBridge, micSignalHint, type LocalVoiceStatus } from './local-voice';
+import { checkedCloudDictationToggle, checkedDictationResult, checkedVoiceStatus, cloudDictationHint, cloudDictationState,
+  dictationPathNotice, localVoiceBridge, micSignalHint, type LocalVoiceStatus } from './local-voice';
+import { announce } from './store';
 
 export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string) => void }) {
   const [bridge] = useState(localVoiceBridge);
@@ -44,7 +46,7 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
     };
   }, [bridge]);
 
-  async function act(action: 'dictate' | 'cancelDictation' | 'enable' | 'disable' | 'openSettings') {
+  async function act(action: 'dictate' | 'cancelDictation' | 'enable' | 'disable' | 'openSettings' | 'setCloudDictation', cloudEnabled?: boolean) {
     if (!bridge || (operation.current && !((action === 'disable' && ['enable', 'dictate'].includes(operation.current)) || (action === 'cancelDictation' && operation.current === 'dictate')))) return;
     const request = ++sequence.current;
     operation.current = action;
@@ -59,10 +61,13 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
         if (active.current && request === sequence.current) {
           if (result.status === 'complete') {
             setTranscript(result.text);
+            setNotice(dictationPathNotice(result));
+            // 文字会立即交给聊天草稿，父页面通常会同时关闭本面板；因此在应用级提示里再说明一次音频去向。
+            announce(dictationPathNotice(result));
             try { transcriptHandler.current?.(result.text); } catch {
               setError('语音已识别，但聊天草稿已接近字数上限。请先整理草稿，再使用下方识别文字；没有覆盖原文字。');
             }
-          } else if (result.status === 'uncertain') setNotice('这次没有听清，未写入聊天草稿。请靠近麦克风、说慢一点后重试。');
+          } else if (result.status === 'uncertain') setNotice(`这次没有听清，未写入聊天草稿。请靠近麦克风、说慢一点后重试。${dictationPathNotice(result)}`);
           else setNotice('本次语音输入已取消，没有填入或发送文字。');
         }
       } else if (action === 'cancelDictation') {
@@ -70,6 +75,15 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
         if (active.current && request === sequence.current) setNotice('本次语音输入已取消，没有填入或发送文字。');
       } else if (action === 'openSettings') {
         if (await bridge.openSettings() !== true) throw new Error('settings_not_opened');
+      } else if (action === 'setCloudDictation') {
+        const setCloudDictation = bridge.setCloudDictation;
+        if (typeof setCloudDictation !== 'function') throw new Error('cloud_dictation_bridge_unavailable');
+        const result = checkedCloudDictationToggle(await setCloudDictation.call(bridge, cloudEnabled === true));
+        if (active.current && request === sequence.current) {
+          // 只按原生返回值刷新，不假定开启成功；available 仍以原生上报的状态为准（下方 readStatus 会再同步）。
+          setStatus(current => current ? { ...current, cloudDictation: { enabled: result.enabled, available: cloudDictationState(current).available } } : current);
+          setNotice(result.enabled ? '已开启云端听写：每次听写仍需本人在原生窗口确认录音会上传。' : '云端听写未开启：录音不会上传。');
+        }
       } else {
         const result = checkedVoiceStatus(await bridge[action]());
         if (active.current && request === sequence.current) setStatus(result);
@@ -78,6 +92,7 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
       if (active.current && request === sequence.current) setError(action === 'openSettings'
         ? '系统设置未能打开，请手动进入 Windows 设置 → 隐私和安全性 → 麦克风。'
         : action === 'disable' || action === 'cancelDictation' ? '停止尚未确认，请在独立桌宠中再次停止；不会把失败显示为已关闭。'
+          : action === 'setCloudDictation' ? '云端听写设置未确认，仍按当前状态处理；请在桌宠确认窗口查看是否需要本人同意。'
           : action === 'dictate' ? '本次语音输入未完成。请查看本地语音状态，并检查默认麦克风和离线中文语音引擎。'
           : '本地语音未能开启。请查看桌宠状态，并检查离线中文语音引擎、默认输入设备和 Windows 麦克风权限。');
     } finally {
@@ -95,6 +110,12 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
     <p className="small-note">Windows 设置 → 隐私和安全性 → 麦克风：检查麦克风访问及桌面应用访问。此处未开启录音，文字输入仍可用。</p>
   </div>;
 
+  const cloudHostSupported = typeof bridge.setCloudDictation === 'function';
+  const cloud = cloudDictationState(status);
+  const cloudUsable = cloudHostSupported && cloud.available;
+  const cloudHint = pending === 'setCloudDictation'
+    ? '请查看桌宠弹出的确认窗口，选择是否开启云端听写。'
+    : cloudDictationHint(cloud, cloudHostSupported);
   const microphoneMayBeActive = status?.microphoneActive || status?.enabled;
   const showEnableHint = ['enable', 'dictate'].includes(pending) || (status !== null && !microphoneMayBeActive);
   return <div className="stack">
@@ -119,7 +140,16 @@ export function LocalVoicePanel({ onTranscript }: { onTranscript?: (text: string
         ? '请查看桌宠弹出的确认窗口，选择“本人同意开启”。如果不想开启，选择“暂不开启”，或点击下方“停止本地语音”。'
         : '点击“开始语音输入”，再在原生窗口选择“本人同意本次输入”。麦克风不会自动开启。'}</p>
     </section>}
-    <p className="small-note">本次听写最多 20 秒，识别后关闭麦克风。置信度不足时不会把猜测文字写入草稿，会提示你重新说。已有唤醒监听会先关闭，不会自动恢复；音频仅本机处理，不上传、不保存。屏幕和云分析仍需另外同意。</p>
+    <section className="confirmation-box" aria-label="云端听写设置" aria-live="polite">
+      <strong>云端听写（可选，默认关闭）</strong>
+      <label className="toggle-row">
+        <span>云端听写（本次录音会上传到已配置的模型网关）</span>
+        <input type="checkbox" checked={cloud.enabled} disabled={!cloudUsable || Boolean(pending)}
+          aria-describedby="local-voice-cloud-hint" onChange={event => void act('setCloudDictation', event.target.checked)} />
+      </label>
+      <p id="local-voice-cloud-hint" className="small-note">{cloudHint}</p>
+    </section>
+    <p className="small-note">本次听写最多 20 秒，识别后关闭麦克风。置信度不足时不会把猜测文字写入草稿，会提示你重新说。已有唤醒监听会先关闭，不会自动恢复；{cloud.enabled ? '云端听写已开启：录音会上传到已配置的模型网关，识别后不在本机保存。' : '音频仅本机处理，不上传、不保存。'}屏幕和云分析仍需另外同意。</p>
     {!canDictate && <p role="alert">当前宿主尚无直接听写入口，请保存工作后重新打开客户端。开启唤醒不等于语音输入。</p>}
     {notice && <p role="status">{notice}</p>}
     {transcript && <section className="confirmation-box" aria-label="本次识别文字"><strong>本次识别文字</strong><p>{transcript}</p></section>}
