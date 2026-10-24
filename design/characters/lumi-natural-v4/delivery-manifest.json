@@ -1,0 +1,192 @@
+{
+  "revision": "lumi-natural-20261024-v4",
+  "status": "static natural look-development review; not rigged or animated",
+  "workflow": "installed loopback Blender MCP addon bridge",
+  "nativeMcpConnectorUsed": false,
+  "aiRefinementUsed": false,
+  "comfyUIUsed": false,
+  "productAssetsReplaced": false,
+  "masterFilesCommitted": false,
+  "localMasterDirectory": "work/lumi-natural-v4 (default; see --source)",
+  "sourceBlend": "lumi-reference-v3.blend",
+  "sourceBlendSha256": "59ea7fae2332050404cf297a1192b816a005c478a3a286a1bbf18bb9c5800b0b",
+  "candidateBlend": "lumi-natural-v4.blend",
+  "candidateBlendSha256": "479e90d419ce51621b0354121cb5255a297e5d114a93f58a32d222a67e04a5b3",
+  "groomStrands": 215319,
+  "rigged": false,
+  "animationClips": [],
+  "topology": {
+    "CAT_HEAD_sculpted_cheeks": {
+      "vertices": 204404,
+      "faces": 204402,
+      "components": 1,
+      "nonManifoldEdges": 0,
+      "positiveVolume": true
+    },
+    "CAT_PAW_R_grip": {
+      "vertices": 22276,
+      "faces": 21792,
+      "components": 1,
+      "nonManifoldEdges": 0,
+      "positiveVolume": true
+    }
+  },
+  "changes": [
+    "smaller eyes, wider teal iris, softly open pupils and fur-integrated eyelids",
+    "tapered brows, recessed muzzle, rounded triangular nose and fine whiskers",
+    "continuous sculpted gripping paw with fitted shaft channel and new groom",
+    "matte cross-woven cloak, thinner folded collars and separate stitch geometry",
+    "cupped softly translucent inner ears and controlled studio eye reflections"
+  ],
+  "renders": [
+    {
+      "view": "hero",
+      "file": "lumi-hero.png",
+      "width": 2400,
+      "height": 2800,
+      "bitDepth": 16,
+      "samples": 192,
+      "alphaBounds": [
+        292,
+        165,
+        2059,
+        2634
+      ],
+      "bytes": 14401721,
+      "sha256": "506c28c6a4118da05d4d4fc603539bb51bc09200f4a5391a8538a294fecf276e"
+    },
+    {
+      "view": "front",
+      "file": "lumi-front.png",
+      "width": 2400,
+      "height": 2800,
+      "bitDepth": 16,
+      "samples": 192,
+      "alphaBounds": [
+        232,
+        171,
+        2157,
+        2626
+      ],
+      "bytes": 14882022,
+      "sha256": "c7ddd476a42c44ee593b831812753bb7cca86b891ef5f5585af676898ec1f6b6"
+    },
+    {
+      "view": "side",
+      "file": "lumi-side.png",
+      "width": 2400,
+      "height": 2800,
+      "bitDepth": 16,
+      "samples": 192,
+      "alphaBounds": [
+        767,
+        171,
+        1739,
+        2626
+      ],
+      "bytes": 9125872,
+      "sha256": "db69d573c9617b13345cfadf1c509585d7c2688f27ffeb7ed68bd3d294818222"
+    },
+    {
+      "view": "back",
+      "file": "lumi-back.png",
+      "width": 2400,
+      "height": 2800,
+      "bitDepth": 16,
+      "samples": 192,
+      "alphaBounds": [
+        243,
+        171,
+        2167,
+        2626
+      ],
+      "bytes": 13683836,
+      "sha256": "9c436ca6a8b5e3d488a86f040f5dea730cea3623157bf274771576592ee904c8"
+    },
+    {
+      "view": "detail",
+      "file": "lumi-detail.png",
+      "width": 2400,
+      "height": 2400,
+      "bitDepth": 16,
+      "samples": 192,
+      "alphaBounds": [
+        150,
+        0,
+        2400,
+        2400
+      ],
+      "bytes": 24175467,
+      "sha256": "fb456e62ef1d5f790150a92b298358598ecf57c3a5e72b1be32dca28687a6cb6"
+    },
+    {
+      "view": "grip",
+      "file": "lumi-grip.png",
+      "width": 2400,
+      "height": 2400,
+      "bitDepth": 16,
+      "samples": 192,
+      "alphaBounds": [
+        0,
+        0,
+        1709,
+        2400
+      ],
+      "bytes": 13666475,
+      "sha256": "b4730aacf03546b1d6cc82e567dd037a6e0e48005963174a2236397899075b91"
+    }
+  ],
+  "previews": [
+    {
+      "view": "hero",
+      "file": "lumi-hero-preview.png",
+      "width": 1200,
+      "height": 1400,
+      "bitDepth": 8,
+      "sha256": "c62fd3a1df50e9cafed560f4a79fbef7f67efaca625da14f7dcc1d98b65a28b1"
+    },
+    {
+      "view": "front",
+      "file": "lumi-front-preview.png",
+      "width": 1200,
+      "height": 1400,
+      "bitDepth": 8,
+      "sha256": "3e223663e3d1a7db09c9f0345f8a8f5c0da4e43b190bea4969993d45b7350eb4"
+    },
+    {
+      "view": "side",
+      "file": "lumi-side-preview.png",
+      "width": 1200,
+      "height": 1400,
+      "bitDepth": 8,
+      "sha256": "1420d032564d749cd12411b9a01164a96e12b8a0eb6dd10f1f115e2b0c7175c3"
+    },
+    {
+      "view": "back",
+      "file": "lumi-back-preview.png",
+      "width": 1200,
+      "height": 1400,
+      "bitDepth": 8,
+      "sha256": "f8eba56dc99662c77cdf46fa8b8524a195adfc240fc46c686e7e6d337d26ca34"
+    },
+    {
+      "view": "detail",
+      "file": "lumi-detail-preview.png",
+      "width": 1200,
+      "height": 1200,
+      "bitDepth": 8,
+      "sha256": "d7967b521015dde311c11605c8a55b3919a31c49a92ccdf34032198082a05d45"
+    },
+    {
+      "view": "grip",
+      "file": "lumi-grip-preview.png",
+      "width": 1200,
+      "height": 1200,
+      "bitDepth": 8,
+      "sha256": "460e2b861848d0bd022240f7e60fefa53739f20382ecb426f1dc2c77f18152b8"
+    }
+  ],
+  "localOnlyArchive": "lumi-natural-v4-delivery.zip",
+  "archiveBytes": 115409487,
+  "archiveSha256": "c3c7ad529255f4ac0a10e90a74858aa2b015142a0224ca8e8a09dc734918592b"
+}
