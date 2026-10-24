@@ -39,7 +39,7 @@ export interface ObservationFrame {
 
 export interface DetectionWord { text: string; rect: Rect; globalRect?: Rect; ocrPass?: number; textAngle?: number | null }
 export interface DetectionFace { rect: Rect; globalRect?: Rect }
-export interface ShellControl { label: '微信' | '开始' | '搜索' | '此电脑' | '回收站' | '控制面板'; surface: 'taskbar' | 'desktop'; rect: Rect }
+export interface ShellControl { label: string; surface: 'taskbar' | 'desktop'; rect: Rect }
 
 export type DetectionResult = {
   status: 'complete';

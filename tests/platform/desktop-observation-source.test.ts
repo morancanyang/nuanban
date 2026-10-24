@@ -910,10 +910,42 @@ describe('Windows 本地 OCR/人脸检测与内存脱敏', () => {
     expect(JSON.stringify(result)).not.toContain('never-return-this');
   });
 
-  it.each(['unrequested', 'label', 'surface', 'bounds', 'nonfinite', 'overflow', 'array'] as const)('拒绝伪造或越过授权范围的图标：%s', async condition => {
+  it.each(['WeGame', '原神', 'Google Chrome', '这一条软件名称仍在六十四字以内'.repeat(2)] as const)('任意 UIA 名称都作为候选上报，不再要求白名单：%s', async rawLabel => {
+    const input = frame({ geometry: geometry({ width: 64, height: 48, scaleFactor: 1 }) });
+    const bounds = { x: input.geometry!.pixelX + 12, y: input.geometry!.pixelY + 20, width: 24, height: 24 };
+    const setup = helperSetup((request, child) => child.reply({ ...completeReply(request), shellControls: [{ label: rawLabel, surface: 'desktop', rect: bounds }] }));
+    const result = await setup.detector({ canReadShellControls: () => true }).detect(input);
+    expect(result).toMatchObject({ status: 'complete', shellControls: [{ label: rawLabel, surface: 'desktop', rect: { x: 12, y: 20, width: 24, height: 24 } }] });
+  });
+
+  it('名称清洗后再上报：去控制字符、折叠空白并按 NFKC 归一，同名同位置只上报一次', async () => {
     const input = frame();
-    const control = { label: '微信', surface: 'taskbar', rect: { x: input.geometry!.pixelX + 12, y: input.geometry!.pixelY + 12, width: 24, height: 24 } };
-    if (condition === 'label') control.label = '私人窗口';
+    const bounds = { x: input.geometry!.pixelX + 12, y: input.geometry!.pixelY + 20, width: 24, height: 24 };
+    const setup = helperSetup((request, child) => child.reply({ ...completeReply(request), shellControls: [
+      { label: '  WeGame\u0007  ', surface: 'desktop', rect: bounds },
+      { label: '  WeGame\u0007  ', surface: 'desktop', rect: bounds },
+      { label: 'ＷｅＧａｍｅ', surface: 'desktop', rect: bounds },
+      { label: 'ＡＢＣ', surface: 'desktop', rect: { ...bounds, x: bounds.x + 28 } },
+      { label: 'C'.repeat(80), surface: 'taskbar', rect: { x: bounds.x, y: input.geometry!.pixelY + 4, width: 24, height: 24 } },
+    ] }));
+    const result = await setup.detector({ canReadShellControls: () => true }).detect(input);
+    expect(result.status).toBe('complete');
+    if (result.status !== 'complete') throw new Error('expected complete detection');
+    expect(result.shellControls).toEqual([
+      { label: 'WeGame', surface: 'desktop', rect: { x: 12, y: 20, width: 24, height: 24 } },
+      { label: 'ABC', surface: 'desktop', rect: { x: 40, y: 20, width: 24, height: 24 } },
+      { label: 'C'.repeat(64), surface: 'taskbar', rect: { x: 12, y: 4, width: 24, height: 24 } },
+    ]);
+  });
+
+  it.each(['unrequested', 'blank', 'symbols', 'control', 'overlong', 'nonstring', 'surface', 'bounds', 'nonfinite', 'overflow', 'array'] as const)('拒绝伪造或越过授权范围的图标：%s', async condition => {
+    const input = frame();
+    const control: { label: unknown; surface: unknown; rect: { x: number; y: number; width: number; height: number } } = { label: '微信', surface: 'taskbar', rect: { x: input.geometry!.pixelX + 12, y: input.geometry!.pixelY + 12, width: 24, height: 24 } };
+    if (condition === 'blank') control.label = '   ';
+    if (condition === 'symbols') control.label = '...';
+    if (condition === 'control') control.label = '\u0000\u0007\u001f';
+    if (condition === 'overlong') control.label = 'WeGame'.repeat(50);
+    if (condition === 'nonstring') control.label = 42;
     if (condition === 'surface') control.surface = 'private-window';
     if (condition === 'bounds') control.rect.x = input.geometry!.pixelX - 1;
     if (condition === 'nonfinite') control.rect.width = Number.NaN;

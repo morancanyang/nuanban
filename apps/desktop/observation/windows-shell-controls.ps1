@@ -23,6 +23,11 @@ function Get-PublicShellControls {
             $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $controlType)
             $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
             if ($elements.Count -gt 1024) { continue }
+            # Candidates are no longer a fixed whitelist. Every qualified shell element found inside an
+            # explorer-owned shell window is reported with its own local UI Automation Name; names are
+            # cleaned below and only friendly aliases for well-known entries are still mapped. One name
+            # at one position inside one window is reported once.
+            $seen = @{}
             foreach ($element in $elements) {
                 if ($element.Current.ProcessId -ne $window.Current.ProcessId -or $element.Current.IsOffscreen -or -not $element.Current.IsEnabled) { continue }
                 $bounds = $element.Current.BoundingRectangle
@@ -30,18 +35,28 @@ function Get-PublicShellControls {
                 if (@($values | Where-Object { [double]::IsNaN($_) -or [double]::IsInfinity($_) }).Count -gt 0 -or $bounds.Width -le 0 -or $bounds.Height -le 0) { continue }
                 if ($bounds.X -lt $Geometry.pixelX -or $bounds.Y -lt $Geometry.pixelY -or $bounds.Right -gt ($Geometry.pixelX + $Geometry.pixelWidth) -or $bounds.Bottom -gt ($Geometry.pixelY + $Geometry.pixelHeight)) { continue }
                 $name = $element.Current.Name
-                $label = $null
+                $label = ''
+                if ($null -ne $name) { $label = ([string]$name) -replace '[\x00-\x1f\x7f-\x9f]', ' ' }
+                $label = ($label -replace '\s+', ' ').Trim()
+                if ($label.Length -gt 64) { $label = $label.Substring(0, 64).Trim() }
+                if ($surface -eq 'desktop') { $label = ($label -replace '(?i)\.lnk$', '').Trim() }
+                # Entries whose name is empty, blank or made only of symbols cannot identify an entry.
+                if ($label -eq '' -or $label -notmatch '[\p{L}\p{N}]') { continue }
+                $friendly = ''
                 if ($surface -eq 'taskbar') {
-                    if ($name -match "^($($labels.wechat)|WeChat|Weixin)(?:\s*-\s*\d+\s*(?:$($labels.running)|running windows?))?`$") { $label = $labels.wechat }
-                    elseif ($name -match "^($($labels.start)|Start)`$") { $label = $labels.start }
-                    elseif ($name -match "^($($labels.search)|Search)`$") { $label = $labels.search }
+                    if ($label -match "^($($labels.wechat)|WeChat|Weixin)(?:\s*-\s*\d+\s*(?:$($labels.running)|running windows?))?`$") { $friendly = $labels.wechat }
+                    elseif ($label -match "^($($labels.start)|Start)`$") { $friendly = $labels.start }
+                    elseif ($label -match "^($($labels.search)|Search)`$") { $friendly = $labels.search }
                 } else {
-                    if ($name -match "^($($labels.wechat)|WeChat|Weixin)(?:\.lnk)?`$") { $label = $labels.wechat }
-                    elseif ($name -match "^($($labels.computer)|$($labels.thisComputer)|$($labels.myComputer)|This PC|My Computer)`$") { $label = $labels.computer }
-                    elseif ($name -match "^($($labels.recycle)|Recycle Bin)`$") { $label = $labels.recycle }
-                    elseif ($name -match "^($($labels.panel)|Control Panel)`$") { $label = $labels.panel }
+                    if ($label -match "^($($labels.wechat)|WeChat|Weixin)`$") { $friendly = $labels.wechat }
+                    elseif ($label -match "^($($labels.computer)|$($labels.thisComputer)|$($labels.myComputer)|This PC|My Computer)`$") { $friendly = $labels.computer }
+                    elseif ($label -match "^($($labels.recycle)|Recycle Bin)`$") { $friendly = $labels.recycle }
+                    elseif ($label -match "^($($labels.panel)|Control Panel)`$") { $friendly = $labels.panel }
                 }
-                if ($null -eq $label) { continue }
+                if ($friendly -ne '') { $label = $friendly }
+                $key = '{0}|{1},{2},{3},{4}' -f $label, [int][Math]::Round($bounds.X), [int][Math]::Round($bounds.Y), [int][Math]::Round($bounds.Width), [int][Math]::Round($bounds.Height)
+                if ($seen.ContainsKey($key)) { continue }
+                $seen[$key] = $true
                 $point = New-Object System.Windows.Point(($bounds.X + $bounds.Width / 2), ($bounds.Y + $bounds.Height / 2))
                 $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
                 $verifiedHit = $false

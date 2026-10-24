@@ -1,8 +1,9 @@
 const { createHash } = require('node:crypto');
 const { createControlLayout } = require('./observation/control-layout.cjs');
 const { LIMITS } = require('./observation/observation-common.cjs');
+const { isBoundedShellControlLabel } = require('./observation/windows-shell-controls.cjs');
 
-const policyVersion = 'windows-local-ocr-v10';
+const policyVersion = 'windows-local-ocr-v11';
 const admittedFrames = new WeakSet();
 const privatePattern = /密码|口令|验证码|动态码|私聊|聊天记录|私人聊天|发送给|身份证|银行卡|支付|付款|收款|转账|交易确认|安全密钥|访问令牌|password|passcode|one[ -]?time|verification code|private (?:chat|message)|credit card|bank account|payment|transfer money|bearer\s|api[ _-]?key|secret key/i;
 const personalPattern = /(?:\b1[3-9]\d{9}\b)|(?:\b\d{17}[\dXx]\b)|(?:[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})|(?:\b(?:sk|pk)[-_][A-Za-z0-9]{16,})/;
@@ -149,11 +150,16 @@ function evaluateFrame(frame, detection, options, selected) {
     || (!unredactedUpload && (detection.redaction?.text !== true || detection.redaction?.faces !== true))) return deny('incomplete_local_detection');
   if (detection.words.length > 8192 || detection.faces.length > 512) return deny('local_detection_limit');
   if (!validPng(detection.sanitizedPng, frame.width, frame.height) || detection.sanitizedPng.length > LIMITS.maxPngBytes) return deny('local_redaction_invalid');
-  const shellControls = detection.shellControls ?? [];
-  if (!Array.isArray(shellControls) || shellControls.length > 128 || shellControls.some(control =>
-    !['微信', '开始', '搜索', '此电脑', '回收站', '控制面板'].includes(control?.label)
+  // 桌面/任务栏候选不再限于写死白名单：任何 UIA 可读、清洗后仍是名称的 shell 元素都在这里校验。
+  // 仍然要求来源是本人授权采集的 screen 帧、surface 合法、矩形在本帧范围内且不超过数量上限。
+  const rawShellControls = detection.shellControls ?? [];
+  if (!Array.isArray(rawShellControls) || rawShellControls.length > 128 || rawShellControls.some(control =>
+    !isBoundedShellControlLabel(control?.label)
     || !['taskbar', 'desktop'].includes(control?.surface) || !validRect(control.rect, frame.width, frame.height))
-    || (shellControls.length && (!frame.sourceId.startsWith('screen:') || !frame.geometry || detection.sourceId !== frame.sourceId))) return deny('invalid_local_regions');
+    || (rawShellControls.length && (!frame.sourceId.startsWith('screen:') || !frame.geometry || detection.sourceId !== frame.sourceId))) return deny('invalid_local_regions');
+  // 名称同样过既有敏感文本门控：命中的 shell 候选不上报、不会成为箭头目标，也不会进入模型上下文；
+  // 与已授权连续共享对正文的处理一致（不因某个快捷方式名称而停止本次共享）。
+  const shellControls = rawShellControls.filter(control => !isRestrictedText(control.label));
   if (!selected && !authorizedSharing && detection.words.length === 0 && !shellControls.length) return deny('no_readable_text');
   if (detection.words.some(word => typeof word?.text !== 'string' || !word.text.length || word.text.length > 512 || !validRect(word.rect, frame.width, frame.height))
     || detection.faces.some(face => !validRect(face?.rect, frame.width, frame.height))) return deny('invalid_local_regions');

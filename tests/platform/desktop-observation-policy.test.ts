@@ -109,18 +109,72 @@ describe('独立桌宠本地帧门控（合成单测，不是真实外部软件�
     expect(evaluateLocalFrame(frame, detection)).toMatchObject({ decision: 'pause', reason: 'sensitive_screen' });
   });
 
-  it.each(['source', 'window', 'geometry', 'label', 'bounds', 'surface', 'overflow'] as const)('原生图标不能越过来源、范围或白名单门控：%s', condition => {
+  it.each(['source', 'window', 'geometry', 'blank', 'symbols', 'control', 'overlong', 'untrimmed', 'bounds', 'surface', 'overflow'] as const)('原生图标不能越过来源、范围或名称门控：%s', condition => {
     const frame = syntheticFrame();
     const detection = { ...syntheticDetection(frame), sourceId: frame.sourceId,
       shellControls: [{ label: '微信', surface: 'taskbar' as 'taskbar' | 'desktop', rect: { x: 220, y: 540, width: 44, height: 44 } }] };
     if (condition === 'source') detection.sourceId = 'screen:other:0';
     if (condition === 'window') frame.sourceId = 'window:42:0';
     if (condition === 'geometry') frame.geometry = null;
-    if (condition === 'label') detection.shellControls[0].label = '私人聊天';
+    if (condition === 'blank') detection.shellControls[0].label = '   ';
+    if (condition === 'symbols') detection.shellControls[0].label = '...';
+    if (condition === 'control') detection.shellControls[0].label = '\u0000\u0007';
+    if (condition === 'overlong') detection.shellControls[0].label = 'WeGame'.repeat(50);
+    if (condition === 'untrimmed') detection.shellControls[0].label = ' WeGame ';
     if (condition === 'bounds') detection.shellControls[0].rect.x = -1;
     if (condition === 'surface') Object.assign(detection.shellControls[0], { surface: 'private-window' });
     if (condition === 'overflow') detection.shellControls = Array.from({ length: 129 }, () => detection.shellControls[0]);
     expect(evaluateLocalFrame(frame, detection)).toMatchObject({ decision: 'pause', reason: 'invalid_local_regions' });
+  });
+
+  it('候选不再限于白名单：WeGame 等任意 UIA 名称同样进入本机控件布局或已授权画面', () => {
+    const frame = syntheticFrame();
+    const shellControls = [
+      { label: 'WeGame', surface: 'desktop' as const, rect: { x: 40, y: 40, width: 48, height: 48 } },
+      { label: '原神', surface: 'desktop' as const, rect: { x: 120, y: 40, width: 48, height: 48 } },
+      { label: 'Google Chrome', surface: 'taskbar' as const, rect: { x: 600, y: 540, width: 44, height: 44 } },
+    ];
+    const layoutDetection = { ...syntheticDetection(frame, []), sourceId: frame.sourceId, sanitizedPng: Buffer.from(frame.png), shellControls };
+    const layout = evaluateLocalFrame(frame, layoutDetection);
+    expect(layout).toMatchObject({ decision: 'allow', scene: 'controls_only' });
+    if (layout.decision !== 'allow') throw new Error('expected safe public layout');
+    expect(layout.elements.map(element => element.label)).toEqual(['WeGame', '原神', 'Google Chrome']);
+    expect(layout.elements.map(element => element.surface)).toEqual(['desktop', 'desktop', 'taskbar']);
+
+    const shared = evaluateLocalFrame(frame, { ...syntheticDetection(frame, []), sourceId: frame.sourceId, shellControls }, { authorizedSharing: true });
+    expect(shared).toMatchObject({ decision: 'allow', scene: 'authorized_sharing' });
+    if (shared.decision !== 'allow') throw new Error('expected authorized sharing');
+    expect(shared.elements.map(element => element.label)).toEqual(['WeGame', '原神', 'Google Chrome']);
+  });
+
+  it('白名单内的已知项仍保留友好名，不因泛化改变既有映射', () => {
+    const frame = syntheticFrame();
+    const shellControls = [
+      { label: '微信', surface: 'desktop' as const, rect: { x: 40, y: 40, width: 48, height: 48 } },
+      { label: '回收站', surface: 'desktop' as const, rect: { x: 120, y: 40, width: 48, height: 48 } },
+      { label: '开始', surface: 'taskbar' as const, rect: { x: 8, y: 540, width: 44, height: 44 } },
+    ];
+    const result = evaluateLocalFrame(frame, { ...syntheticDetection(frame, []), sourceId: frame.sourceId, sanitizedPng: Buffer.from(frame.png), shellControls });
+    expect(result).toMatchObject({ decision: 'allow' });
+    if (result.decision !== 'allow') throw new Error('expected safe public layout');
+    expect(result.elements.map(element => element.label)).toEqual(['微信', '回收站', '开始']);
+  });
+
+  it('shell 名称同样过敏感文本门控：命中的候选不上报，也不停止已授权共享', () => {
+    const frame = syntheticFrame();
+    const shellControls = [
+      { label: '1Password', surface: 'desktop' as const, rect: { x: 40, y: 40, width: 48, height: 48 } },
+      { label: 'WeGame', surface: 'desktop' as const, rect: { x: 120, y: 40, width: 48, height: 48 } },
+    ];
+    const detection = { ...syntheticDetection(frame, []), sourceId: frame.sourceId, shellControls };
+    const shared = evaluateLocalFrame(frame, detection, { authorizedSharing: true });
+    expect(shared).toMatchObject({ decision: 'allow', scene: 'authorized_sharing' });
+    if (shared.decision !== 'allow') throw new Error('expected authorized sharing');
+    expect(shared.elements.map(element => element.label)).toEqual(['WeGame']);
+    expect(JSON.stringify(shared.elements)).not.toContain('1Password');
+
+    const privateOnly = evaluateLocalFrame(frame, { ...detection, shellControls: [shellControls[0]!] });
+    expect(privateOnly).toMatchObject({ decision: 'pause', reason: 'no_readable_text' });
   });
 
   it('遮盖模式下图形候选与文字区域重叠仍然停止观察，不放宽默认门控', () => {
