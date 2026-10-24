@@ -1,5 +1,22 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-24 r21：** 合并上游前端仓库 [101274017/mobiwusi](https://github.com/101274017/mobiwusi) 的界面更新并重出 Windows 客户端。
+>
+> **并入的提交**：`af987fd`（为 Web 管理端补齐全站动效层：CSS + 轻量 WAAPI）、`bd17a5d`（修复 Web 端必修无障碍缺陷：对比度、抽屉焦点、渲染兜底、页面标题）。合并基点是我们自己的 `48c3121`，即对方分支只比我们多这 2 个提交；合并提交为 `2753a0c`（`git merge mobiwusi/main`，35 个本地提交保留）。
+>
+> **冲突与解决**（仅 2 处，均为"双方各自新增"）：`apps/web/src/responsive.css`（我们新增的输入框窄窗规则 + 对方新增的抽屉关闭入口规则 → 两块**都保留**）；`apps/web/src/pages/pet-settings.tsx`（我方 `localModelBridge/liliModel` 与对方 `stagger/localCompanionBridge/showLiliCompanion` 的 import → **两组都保留**，故两边的宠物设置能力都不丢）。
+>
+> **合并前后严格对照（都在干净工作树上，排除他人在途改动）**：
+> - 非 acceptance 全量：合并前 `14 failed / 2929`，合并后 `14 failed / 2945`（**+16 个用例全部通过**，失败文件集合完全相同：desktop-lab、android-3d-assets、android-3d-render-policy、desktop-shell-target-stability，均为既有在途问题）。
+> - acceptance 门禁：合并前后均为 `28 failed / 135`（证据指纹类，既有红灯）。
+> - `pnpm typecheck` → 0。
+> - **新增前端 e2e 全部通过**：`motion.spec.ts` + `a11y-basics.spec.ts` 在 desktop-chromium **12/12 passed（18.2s）**，涵盖按卡片错峰入场、减少动画即时生效、系统级 reduce 偏好、路由转场、弹窗开合与失焦暂停、对比度 4.5:1、标题跟随 H1、抽屉键盘可达与 Esc 回焦、渲染异常兜底、触达尺寸。
+>
+> **产物核验**：打包脚本 exit 0；包内已确认含动效模块、`prefers-reduced-motion`、标题跟随、错误兜底、抽屉关闭入口，且**我们原有的输入框窄窗规则仍在**；r20→r21 仅 `resources/app.asar` 变化（+14,469 字节）。
+>
+> **边界**：仍为未签名内部试用包，未做安装验收；Android 两个 APK 本次**未重编、未上传**（仍是 21:24 那一版），Android 合并后的 UI 需另行出包。
+
+
 > **2026-10-23 r20：** 修复 r19 **自身引入的听写回归**（如实记录，r19 已从下载目录撤下）。r19 用 `add_AudioLevelUpdated` / `add_AudioSignalProblemOccurred` 直接挂 .NET 事件委托；在 PowerShell 5.1 非交互脚本里这类脚本块会在识别引擎线程上执行并抛错，结果是听写助手**约 10 秒后异常退出（exit 2）且连错误事件都没发出**，宿主只能落到兜底文案"本次语音输入失败，请检查 Windows 默认输入设备、麦克风权限和离线中文语音引擎。"。
 >
 > **定位方式**：用与宿主相同的协议直接驱动助手做 A/B——r18 助手：`ready` → 20 秒内如实返回 `uncertain`/`wake_dictation_timeout` → exit 0；r19 助手：exit 2、无错误事件。差异即结论。
@@ -102,7 +119,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip` | 197,124,604 字节（183.395 MiB） | `82b9f2282c8f23adf2baf3b391e89ab3efaedcff2e51046c2361d8e6c8d46272` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip` | 197,126,522 字节（183.395 MiB） | `4ca6e1a0c15fe585cf89e3d558058a6697e387cff745584d968403fbf7266d52` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -147,7 +164,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -211,11 +228,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r20.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
