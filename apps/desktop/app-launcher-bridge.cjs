@@ -36,7 +36,7 @@ function payloadOnly(payload, fields) {
     && Object.keys(payload).length === fields.length && fields.every(field => Object.hasOwn(payload, field));
 }
 
-function createAppLauncherController({ registry, launcher, intent, history, pickFolder, now = Date.now,
+function createAppLauncherController({ registry, launcher, intent, history, inventory, pickFolder, now = Date.now,
   planTtlMs = 60_000, maxPlans = 8 } = {}) {
   if (!registry || !launcher || !intent || !history) throw new TypeError('打开软件控制器缺少依赖');
   const plans = new Map();
@@ -93,7 +93,8 @@ function createAppLauncherController({ registry, launcher, intent, history, pick
     controller = requestController;
     let result;
     try {
-      result = await intent.parse(goal.trim(), { signal: requestController.signal });
+      const candidates = typeof inventory?.match === 'function' ? inventory.match(goal.trim()) : [];
+      result = await intent.parse(goal.trim(), { signal: requestController.signal, candidates });
     } catch {
       result = { ok: false, errorCode: 'LAUNCH_FAILED', message: messageFor('LAUNCH_FAILED') };
     } finally {
@@ -138,11 +139,21 @@ function createAppLauncherController({ registry, launcher, intent, history, pick
       return { ok: true, result: { success: false, appId: resolved.appId, target: resolved.target,
         message: parameters.message ?? messageFor(parameters.errorCode), errorCode: parameters.errorCode } };
     }
-    const kind = resolved.requiresUrl ? 'url' : resolved.requiresFolder ? 'folder' : 'exe';
+    const kind = resolved.dynamic === true ? 'shortcut' : resolved.requiresUrl ? 'url' : resolved.requiresFolder ? 'folder' : 'exe';
     const spec = { appId: resolved.appId, target: resolved.target, displayName: resolved.displayName, kind,
       ...(kind === 'url' ? { url: parameters.parameters.url } : {}),
       ...(kind === 'folder' ? { folder: parameters.parameters.folder } : {}) };
-    if (kind === 'exe') {
+    if (kind === 'shortcut') {
+      // 动态清单项：真实路径只在本机主进程内部使用，绝不返回给页面或模型。
+      const dynamic = typeof registry.dynamicLaunch === 'function' ? registry.dynamicLaunch(resolved.appId) : { ok: false, errorCode: 'EXECUTABLE_MISSING' };
+      if (!dynamic?.ok) {
+        const result = { success: false, appId: resolved.appId, target: resolved.target,
+          message: `未找到可用启动方式，本机可能尚未安装${resolved.displayName}。`, errorCode: dynamic?.errorCode ?? 'EXECUTABLE_MISSING' };
+        history.record({ appId: resolved.appId, target: resolved.target, success: false, errorCode: result.errorCode });
+        return { ok: true, result };
+      }
+      spec.shortcut = dynamic.target;
+    } else if (kind === 'exe') {
       const executable = launcher.resolveExecutable(resolved.appId, registry.executableCandidates(resolved.appId));
       if (!executable) {
         const result = { success: false, appId: resolved.appId, target: resolved.target,
@@ -198,7 +209,38 @@ function createAppLauncherController({ registry, launcher, intent, history, pick
   function status() {
     let modelReady = false;
     try { modelReady = intent.available() === true; } catch { modelReady = false; }
-    return { ok: true, modelReady, autoExecute, catalog: registry.catalog() };
+    let inventoryTotal = 0;
+    try { inventoryTotal = typeof inventory?.total === 'function' ? Math.max(0, Number(inventory.total()) || 0) : 0; } catch { inventoryTotal = 0; }
+    return { ok: true, modelReady, autoExecute, inventoryTotal, catalog: registry.catalog() };
+  }
+
+  // 本机已发现的可打开项：只回 id 与显示名，不回真实路径。
+  function inventoryList() {
+    let entries = [];
+    let total = 0;
+    try {
+      const catalog = typeof inventory?.catalog === 'function' ? inventory.catalog() : [];
+      total = typeof inventory?.total === 'function' ? Math.max(0, Number(inventory.total()) || 0) : catalog.length;
+      entries = (Array.isArray(catalog) ? catalog : []).slice(0, 400)
+        .filter(entry => entry && typeof entry.id === 'string' && typeof entry.displayName === 'string')
+        .map(entry => ({ id: entry.id, displayName: entry.displayName }));
+    } catch { entries = []; total = 0; }
+    return { ok: true, total, entries };
+  }
+
+  // 本人从列表里直接选一个：不调用模型，直接生成计划，仍然要确认。
+  function pickFromInventory({ id } = {}) {
+    if (typeof id !== 'string' || !id || id.length > 64) return failure('APP_UNKNOWN', '请从本机列表里选择要打开的软件。');
+    const resolved = registry.resolve(id, 'default');
+    if (!resolved.ok) return failure(resolved.errorCode, resolved.message);
+    prune();
+    const plan = { appId: resolved.appId, appName: resolved.displayName, target: 'default',
+      targetDescription: resolved.targetDescription, risk: resolved.risk, dynamic: resolved.dynamic === true,
+      parameters: {}, requiresFolder: resolved.requiresFolder === true,
+      reason: `本人从本机列表选择了${resolved.displayName}` };
+    const planId = randomUUID();
+    plans.set(planId, { plan, createdAt: now(), used: false });
+    return { ok: true, kind: 'plan', plan: planView(plan, planId) };
   }
 
   function setAutoExecute(enabled) {
@@ -213,14 +255,14 @@ function createAppLauncherController({ registry, launcher, intent, history, pick
     return { ok: true, entries: history.list() };
   }
 
-  return Object.freeze({ cancel, parse, execute, chooseFolder, status, setAutoExecute, listHistory,
+  return Object.freeze({ cancel, parse, execute, chooseFolder, status, setAutoExecute, listHistory, inventoryList, pickFromInventory,
     confirmationRequired, planKey, snapshot: () => ({ autoExecute, plans: plans.size, confirmed: [...confirmed], folders: [...folderAllowlist] }) });
 }
 
-function registerAppLauncherBridge({ ipcMain, isTrusted, showPage, registry, launcher, intent, history, pickFolder,
+function registerAppLauncherBridge({ ipcMain, isTrusted, showPage, registry, launcher, intent, history, inventory, pickFolder,
   now = Date.now, planTtlMs = 60_000, maxPlans = 8 } = {}) {
   if (typeof ipcMain?.handle !== 'function' || typeof isTrusted !== 'function') throw new TypeError('打开软件桥接缺少可信来源校验');
-  const controller = createAppLauncherController({ registry, launcher, intent, history, pickFolder, now, planTtlMs, maxPlans });
+  const controller = createAppLauncherController({ registry, launcher, intent, history, inventory, pickFolder, now, planTtlMs, maxPlans });
   const channels = [];
   let disposed = false;
 
@@ -241,6 +283,8 @@ function registerAppLauncherBridge({ ipcMain, isTrusted, showPage, registry, lau
   handle('cancel', () => controller.cancel());
   handle('history', () => controller.listHistory());
   handle('auto', payload => controller.setAutoExecute(payload.enabled), ['enabled']);
+  handle('inventory', () => controller.inventoryList());
+  handle('pick', payload => controller.pickFromInventory(payload), ['id']);
   handle('show', () => { if (typeof showPage === 'function') showPage(); return { ok: true }; });
 
   return Object.freeze({

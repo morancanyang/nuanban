@@ -357,3 +357,8 @@ textarea::placeholder { color: #8b7362; }
 .open-app-history li { padding: 10px 12px; border: 1px solid #dfceb5; border-radius: 13px; background: #fffdf6; overflow-wrap: anywhere; }
 .open-app-history li p { font-size: 13px; }
 .open-app-history li small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.open-app-inventory-count { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.open-app-list-actions { display: flex; justify-content: flex-end; margin: 8px 0 0; }
+.open-app-list { display: grid; gap: 6px; max-height: 232px; margin: 9px 0 0; padding: 9px; overflow: auto; overscroll-behavior: contain; scrollbar-color: #ccb495 transparent; scrollbar-width: thin; border: 1px solid #cbbca3; border-radius: 14px; background: #fffdf6; }
+.open-app-list .muted { margin: 4px 2px; font-size: 12px; }
+.open-app-item { width: 100%; min-width: 0; padding: 8px 10px; border-color: #dfceb5; border-radius: 11px; background: #fffdf8; text-align: left; font-size: 13px; overflow-wrap: anywhere; }

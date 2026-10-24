@@ -6,7 +6,25 @@ const { registerAppLauncherBridge, createAppLauncherController } = require('../.
 
 type Handler = (event: unknown, payload?: unknown) => any;
 
-function fakeRegistry() {
+function fakeInventory(entries: Array<{ id: string; displayName: string }> = [{ id: 'sm:0123456789ab', displayName: 'Apifox' }]) {
+  return {
+    catalog: () => entries.map(entry => ({ ...entry })),
+    total: () => entries.length,
+    resolve: (id: string) => {
+      const found = entries.find(entry => entry.id === id);
+      return found ? { ok: true, id, displayName: found.displayName, kind: 'lnk', target: `C:/Fake/${found.displayName}.lnk` }
+        : { ok: false, errorCode: 'APP_UNKNOWN' };
+    },
+    match: (text: string) => {
+      const normalized = String(text).replace(/打开|帮我|请|一下|软件|应用|程序/gu, '').replace(/\s+/gu, '').toLowerCase();
+      return entries.filter(entry => normalized && entry.displayName.toLowerCase().includes(normalized))
+        .map(entry => ({ ...entry, score: 90 }));
+    },
+    refresh: () => ({ ok: true, total: entries.length }),
+  };
+}
+
+function fakeRegistry(inventory?: ReturnType<typeof fakeInventory>) {
   const catalog = [
     { appId: 'calculator', displayName: '计算器', targets: [{ target: 'default', description: '计算器主界面', risk: 'low', requiresFolder: false, requiresUrl: false }] },
     { appId: 'explorer', displayName: '文件资源管理器', targets: [
@@ -21,11 +39,26 @@ function fakeRegistry() {
     catalog: () => catalog.map(app => ({ ...app, targets: app.targets.map(target => ({ ...target })) })),
     resolve(appId: string, target: string) {
       const app = catalog.find(entry => entry.appId === appId);
-      if (!app) return { ok: false, errorCode: 'APP_UNKNOWN' };
+      if (!app) {
+        if (String(appId).startsWith('sm:') && inventory) {
+          const dynamic = inventory.resolve(appId);
+          if (!dynamic.ok) return { ok: false, errorCode: 'APP_UNKNOWN' };
+          if (target !== 'default') return { ok: false, errorCode: 'TARGET_UNKNOWN' };
+          return { ok: true, appId, target: 'default', displayName: dynamic.displayName,
+            targetDescription: '主界面（本机开始菜单）', risk: 'low', dynamic: true, requiresFolder: false, requiresUrl: false };
+        }
+        return { ok: false, errorCode: 'APP_UNKNOWN' };
+      }
       const found = app.targets.find(entry => entry.target === target);
       if (!found) return { ok: false, errorCode: 'TARGET_UNKNOWN' };
       return { ok: true, appId, target, displayName: app.displayName, targetDescription: found.description, risk: found.risk,
         requiresFolder: found.requiresFolder, requiresUrl: found.requiresUrl };
+    },
+    dynamicLaunch(appId: string) {
+      if (!inventory) return { ok: false, errorCode: 'APP_UNKNOWN' };
+      const dynamic = inventory.resolve(appId);
+      return dynamic.ok ? { ok: true, kind: dynamic.kind, target: dynamic.target, displayName: dynamic.displayName }
+        : { ok: false, errorCode: dynamic.errorCode };
     },
     validateParameters(appId: string, target: string, parameters: Record<string, unknown>, { folderAllowlist = [] as string[] } = {}) {
       const resolved = this.resolve(appId, target) as { ok: boolean; requiresUrl?: boolean; requiresFolder?: boolean; errorCode?: string };
@@ -69,10 +102,11 @@ function plan(overrides: Record<string, unknown> = {}) {
     targetDescription: '计算器主界面', risk: 'low', parameters: {}, requiresFolder: false, requiresConfirmation: true, reason: '打开计算器', ...overrides } };
 }
 
-function bridgeFixture(options: { results?: unknown[]; launcher?: ReturnType<typeof fakeLauncher>; pickFolder?: () => Promise<string | undefined>; now?: () => number; history?: ReturnType<typeof fakeHistory> } = {}) {
+function bridgeFixture(options: { results?: unknown[]; launcher?: ReturnType<typeof fakeLauncher>; pickFolder?: () => Promise<string | undefined>; now?: () => number; history?: ReturnType<typeof fakeHistory>; inventory?: ReturnType<typeof fakeInventory> } = {}) {
   const handlers = new Map<string, Handler>();
   const channels: string[] = [];
-  const registry = fakeRegistry();
+  const inventory = options.inventory ?? fakeInventory();
+  const registry = fakeRegistry(inventory);
   const launcher = options.launcher ?? fakeLauncher();
   const intent = fakeIntent(options.results ?? [plan()]);
   const history = options.history ?? fakeHistory();
@@ -80,7 +114,7 @@ function bridgeFixture(options: { results?: unknown[]; launcher?: ReturnType<typ
   const bridge = registerAppLauncherBridge({
     ipcMain: { handle: (channel: string, handler: Handler) => { channels.push(channel); handlers.set(channel, handler); }, removeHandler: (channel: string) => handlers.delete(channel) },
     isTrusted: (event: unknown) => Boolean((event as { trusted?: boolean } | undefined)?.trusted),
-    registry, launcher, intent, history,
+    registry, launcher, intent, history, inventory,
     pickFolder: options.pickFolder ?? (async () => 'C:/Users/33864/Documents/demo'),
     showPage, now: options.now,
   });
@@ -94,8 +128,8 @@ describe('智能打开软件的受信 IPC 与执行策略（假启动器，不�
   it('只注册固定通道，非受信任来源一律拒绝', () => {
     const current = bridgeFixture();
     expect(current.channels.sort()).toEqual(['nuanban:pet-open-app:auto', 'nuanban:pet-open-app:cancel', 'nuanban:pet-open-app:execute',
-      'nuanban:pet-open-app:history', 'nuanban:pet-open-app:parse', 'nuanban:pet-open-app:pick-folder', 'nuanban:pet-open-app:show',
-      'nuanban:pet-open-app:status']);
+      'nuanban:pet-open-app:history', 'nuanban:pet-open-app:inventory', 'nuanban:pet-open-app:parse', 'nuanban:pet-open-app:pick',
+      'nuanban:pet-open-app:pick-folder', 'nuanban:pet-open-app:show', 'nuanban:pet-open-app:status']);
     expect(() => current.invoke('status', {}, current.untrusted)).toThrow('不可信打开来源');
   });
 
@@ -244,6 +278,53 @@ describe('智能打开软件的受信 IPC 与执行策略（假启动器，不�
     const status = await current.invoke('status', {});
     expect(status).toMatchObject({ ok: true, modelReady: true, autoExecute: false });
     expect(status.catalog.map((app: { appId: string }) => app.appId)).toEqual(['calculator', 'explorer', 'browser', 'wechat']);
+  });
+
+  it('本机清单只回 id 与名称，真实路径不进入渲染进程', async () => {
+    const current = bridgeFixture({ inventory: fakeInventory([{ id: 'sm:0123456789ab', displayName: 'Apifox' }, { id: 'sm:abcdef012345', displayName: 'Blender' }]) });
+    expect((await current.invoke('status', {})).inventoryTotal).toBe(2);
+    const listed = await current.invoke('inventory', {});
+    expect(listed).toMatchObject({ ok: true, total: 2 });
+    expect(listed.entries).toEqual([{ id: 'sm:0123456789ab', displayName: 'Apifox' }, { id: 'sm:abcdef012345', displayName: 'Blender' }]);
+    expect(JSON.stringify(listed)).not.toContain('.lnk');
+    expect(JSON.stringify(listed)).not.toContain('C:/');
+  });
+
+  it('本人从列表选择后先确认、再以快捷方式打开，结果不回传路径', async () => {
+    const current = bridgeFixture();
+    const picked = await current.invoke('pick', { id: 'sm:0123456789ab' });
+    expect(picked).toMatchObject({ ok: true, kind: 'plan', plan: { appId: 'sm:0123456789ab', appName: 'Apifox',
+      target: 'default', targetDescription: '主界面（本机开始菜单）', requiresConfirmation: true } });
+    await expect(current.invoke('execute', { planId: picked.plan.planId, approved: false }))
+      .resolves.toMatchObject({ ok: true, result: { success: false, errorCode: 'AUTO_EXECUTE_DENIED' } });
+    expect(current.launcher.launch).not.toHaveBeenCalled();
+    const executed = await current.invoke('execute', { planId: picked.plan.planId, approved: true });
+    expect(executed).toMatchObject({ ok: true, result: { success: true, errorCode: null } });
+    expect(current.launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ kind: 'shortcut', shortcut: 'C:/Fake/Apifox.lnk' }));
+    expect(JSON.stringify(executed)).not.toContain('.lnk');
+  });
+
+  it('清单里的软件确认过一次并开启自动执行后即可免确认打开', async () => {
+    const current = bridgeFixture();
+    await current.invoke('auto', { enabled: true });
+    const first = await current.invoke('pick', { id: 'sm:0123456789ab' });
+    expect(first.plan.requiresConfirmation).toBe(true);
+    await current.invoke('execute', { planId: first.plan.planId, approved: true });
+    expect(current.launcher.launch).toHaveBeenCalledTimes(1);
+    const second = await current.invoke('pick', { id: 'sm:0123456789ab' });
+    expect(second.plan).toMatchObject({ requiresConfirmation: false, autoExecutable: true });
+    await expect(current.invoke('execute', { planId: second.plan.planId, approved: false }))
+      .resolves.toMatchObject({ ok: true, result: { success: true } });
+    expect(current.launcher.launch).toHaveBeenCalledTimes(2);
+  });
+
+  it('未在清单里的 id 被拒绝，解析时会把本地匹配候选交给模型', async () => {
+    const current = bridgeFixture();
+    expect(current.invoke('pick', { id: 'sm:ffffffffffff' })).toMatchObject({ ok: false, code: 'APP_UNKNOWN' });
+    expect(current.invoke('pick', { id: 'C:/Windows/System32/calc.exe' })).toMatchObject({ ok: false });
+    await current.invoke('parse', { goal: '打开 Apifox', consent: true });
+    const [, options] = current.intent.parse.mock.calls.at(-1) as unknown as [string, { candidates?: unknown[] }];
+    expect(options.candidates).toEqual([{ id: 'sm:0123456789ab', displayName: 'Apifox', score: 90 }]);
   });
 
   it('询问与不支持都不会产生计划，取消不留痕', async () => {

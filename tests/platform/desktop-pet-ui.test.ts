@@ -2751,7 +2751,8 @@ describe('桌宠自动收起为悬浮球的界面状态', () => {
 describe('功能小屋的智能打开软件入口', () => {
   const openAppIds = ['open-app-view', 'open-app-query', 'open-app-submit', 'open-app-voice', 'open-app-auto', 'open-app-auto-status',
     'open-app-consent', 'open-app-history', 'open-app-cancel', 'open-app-progress', 'open-app-error', 'open-app-confirm',
-    'open-app-confirm-text', 'open-app-confirm-ok', 'open-app-confirm-cancel', 'open-app-clarify', 'open-app-result'];
+    'open-app-confirm-text', 'open-app-confirm-ok', 'open-app-confirm-cancel', 'open-app-clarify', 'open-app-result',
+    'open-app-inventory-count', 'open-app-list-toggle', 'open-app-list'];
 
   const planReply = (overrides: Record<string, unknown> = {}) => ({
     ok: true,
@@ -2764,6 +2765,8 @@ describe('功能小屋的智能打开软件入口', () => {
   function openAppHarness(status: Record<string, unknown> = {}, initial: unknown = snapshot()) {
     const api = {
       status: vi.fn(async (): Promise<unknown> => ({ ok: true, modelReady: true, autoExecute: false, catalog: [], ...status })),
+      inventory: vi.fn(async (): Promise<unknown> => ({ ok: true, total: 0, entries: [] })),
+      pick: vi.fn(async (_id: string): Promise<unknown> => ({ ok: true, kind: 'clarify', question: '想打开哪个软件？' })),
       parse: vi.fn(async (_input: unknown): Promise<unknown> => ({ ok: true, kind: 'clarify', question: '想打开哪个软件？' })),
       execute: vi.fn(async (_input: unknown): Promise<unknown> => ({ ok: true, result: { success: false, errorCode: 'CANCELLED' } })),
       pickFolder: vi.fn(async (): Promise<unknown> => ({ ok: false, code: 'CANCELLED' })),
@@ -2793,6 +2796,7 @@ describe('功能小屋的智能打开软件入口', () => {
     expect(html).toContain('语音输入尚未接入本页面');
     for (const identifier of openAppIds) expect(harness.element(identifier)).toBeTruthy();
     expect(harness.element('open-app-view').hidden).toBe(true);
+    expect(harness.element('open-app-list').hidden).toBe(true);
     expect(harness.element('open-app-auto').checked).toBe(false);
     expect(harness.api.status).not.toHaveBeenCalled();
     expect(source('pet.js')).not.toMatch(/getUserMedia|getDisplayMedia|desktopCapturer|mediaDevices|SpeechRecognition/);
@@ -2999,11 +3003,153 @@ describe('功能小屋的智能打开软件入口', () => {
     expect(text).not.toContain('打开计算器后退出登录');
   });
 
-  it('preload 只暴露 7 个冻结方法，严格校验入参并投影状态、计划与结果', async () => {
+  it('状态行显示本机可打开项数量，缺少该字段时如实说明而不是显示 0', async () => {
+    const harness = openAppHarness({ inventoryTotal: 12 });
+    await settle();
+    await harness.open();
+    expect(harness.element('open-app-inventory-count').textContent).toBe('已发现本机 12 个可打开项');
+    const legacy = openAppHarness();
+    await settle();
+    await legacy.open();
+    expect(legacy.element('open-app-inventory-count').textContent).toBe('本机可打开项待运行核心报告');
+    expect(source('pet.html')).toMatch(/<p id="open-app-inventory-count"[^>]*>/);
+  });
+
+  it('从本机列表选择：展开读取清单并渲染可点条目，点击条目走确认卡片而不跳过确认', async () => {
+    const harness = openAppHarness({ inventoryTotal: 2 });
+    await settle();
+    await harness.open();
+    expect(harness.element('open-app-list').hidden).toBe(true);
+    expect(harness.element('open-app-list-toggle').disabled).toBe(false);
+    expect(source('pet.html')).toMatch(/<button id="open-app-list-toggle"[^>]*>从本机列表选择<\/button>/);
+    harness.api.inventory.mockResolvedValueOnce({ ok: true, total: 2, entries: [
+      { id: 'sm:0123456789ab', displayName: '计算器' },
+      { id: 'notepad', displayName: '记事本' },
+    ] });
+    harness.api.pick.mockResolvedValueOnce(planReply({ appId: 'sm:0123456789ab', appName: '画图', targetDescription: '主界面（本机开始菜单）' }));
+    harness.click('open-app-list-toggle');
+    await settle();
+    expect(harness.api.inventory).toHaveBeenCalledTimes(1);
+    expect(harness.element('open-app-list').hidden).toBe(false);
+    expect(harness.element('open-app-list-toggle').attributes.get('aria-expanded')).toBe('true');
+    const items = harness.element('open-app-list').children;
+    expect(items).toHaveLength(2);
+    expect(items[0].className).toBe('open-app-item');
+    expect(items[0].dataset.appId).toBe('sm:0123456789ab');
+    expect(items[0].textContent).toBe('计算器');
+    expect(items[1].dataset.appId).toBe('notepad');
+    dispatch(items[0], 'click');
+    await settle();
+    expect(harness.api.pick).toHaveBeenCalledExactlyOnceWith('sm:0123456789ab');
+    expect(harness.element('open-app-confirm').hidden).toBe(false);
+    expect(harness.element('open-app-confirm-text').textContent).toBe('即将打开：画图\n目标界面：主界面（本机开始菜单）\n是否继续？');
+    expect(harness.api.execute).not.toHaveBeenCalled();
+    harness.api.execute.mockResolvedValueOnce(started);
+    harness.click('open-app-confirm-ok');
+    await settle();
+    expect(harness.api.execute).toHaveBeenCalledExactlyOnceWith({ planId: 'plan-1', approved: true });
+    harness.click('open-app-list-toggle');
+    await settle();
+    expect(harness.element('open-app-list').hidden).toBe(true);
+    expect(harness.element('open-app-list-toggle').attributes.get('aria-expanded')).toBe('false');
+  });
+
+  it('本机条目最多渲染 400 个并放在可滚动容器里', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.inventory.mockResolvedValueOnce({ ok: true, total: 450, entries: Array.from({ length: 450 }, (_, index) => ({ id: `sm:${String(index).padStart(12, '0')}`, displayName: `软件 ${index}` })) });
+    harness.click('open-app-list-toggle');
+    await settle();
+    expect(harness.element('open-app-list').children).toHaveLength(400);
+    const css = source('pet.css');
+    expect(css).toMatch(/\.open-app-list\s*\{[^}]*max-height/);
+    expect(css).toMatch(/\.open-app-list\s*\{[^}]*overflow:\s*auto/);
+  });
+
+  it('清单读取失败如实提示且不生成假条目，条目不足时给出空状态', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.inventory.mockRejectedValueOnce(new Error('IPC 不可用'));
+    harness.click('open-app-list-toggle');
+    await settle();
+    expect(harness.element('open-app-error').hidden).toBe(false);
+    expect(harness.element('open-app-error').textContent).toContain('读取本机软件清单失败');
+    expect(harness.element('open-app-list').children).toHaveLength(0);
+    harness.click('open-app-list-toggle');
+    await settle();
+    harness.api.inventory.mockResolvedValueOnce({ ok: true, total: 0, entries: [] });
+    harness.click('open-app-list-toggle');
+    await settle();
+    expect(harness.element('open-app-list-toggle').disabled).toBe(false);
+    expect(harness.element('open-app-list').children).toHaveLength(1);
+    expect(harness.element('open-app-list').children[0].textContent).toContain('没有发现可打开的软件');
+  });
+
+  it('pick 失败在错误区显示中文原因与错误码，非法标识被 preload 拒绝', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.inventory.mockResolvedValueOnce({ ok: true, total: 1, entries: [{ id: 'sm:abcdef012345', displayName: '画图' }] });
+    harness.api.pick.mockResolvedValueOnce({ ok: false, code: 'APP_UNKNOWN', message: '这个条目不在本机清单里，请刷新后重试。' });
+    harness.click('open-app-list-toggle');
+    await settle();
+    dispatch(harness.element('open-app-list').children[0], 'click');
+    await settle();
+    expect(harness.element('open-app-error').hidden).toBe(false);
+    expect(harness.element('open-app-error').textContent).toContain('不在本机清单');
+    expect(harness.element('open-app-error').textContent).toContain('APP_UNKNOWN');
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.api.execute).not.toHaveBeenCalled();
+    const preload = preloadHarness('pet-preload.cjs');
+    const api = preload.exposed.nuanbanOpenApp;
+    for (const id of ['', 'sm:XYZ', 'sm:0123456789a', 'sm:0123456789abc', 'Calculator', 'a'.repeat(41), 'sm:0123456789ab ',
+      42, null, undefined, { id: 'sm:0123456789ab' }, ['notepad']]) {
+      expect(() => api.pick(id)).toThrow('标识无效');
+    }
+    expect(preload.ipcRenderer.invoke).not.toHaveBeenCalled();
+    preload.ipcRenderer.invoke.mockResolvedValue({ ok: true, kind: 'cancel', message: '已取消，不会打开任何软件。' });
+    await api.pick('sm:0123456789ab');
+    expect(preload.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:pick', { id: 'sm:0123456789ab' });
+    await api.pick('notepad');
+    expect(preload.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:pick', { id: 'notepad' });
+    await api.pick(`sm:${'a'.repeat(12)}`);
+    expect(preload.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:pick', { id: `sm:${'a'.repeat(12)}` });
+  });
+
+  it('preload 的 inventory 与 pick 只投影声明字段并限制条目数量', async () => {
+    const harness = preloadHarness('pet-preload.cjs');
+    const api = harness.exposed.nuanbanOpenApp;
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, total: 2, secret: 'discard', entries: [
+      { id: 'sm:0123456789ab', displayName: '计算器', target: 'C:\\secret.lnk', secret: 'discard' },
+      { id: 'notepad', displayName: '记事本' },
+    ] });
+    const inventory = await api.inventory();
+    expect(harness.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:inventory');
+    expect(inventory).toEqual({ ok: true, total: 2, entries: [{ id: 'sm:0123456789ab', displayName: '计算器' }, { id: 'notepad', displayName: '记事本' }] });
+    expect(JSON.stringify(inventory)).not.toContain('secret');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, total: 500, entries: Array.from({ length: 401 }, () => ({ id: 'notepad', displayName: '记事本' })) });
+    await expect(api.inventory()).rejects.toThrow('清单无效');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, total: 1, entries: [{ id: 'C:\\Windows\\System32\\cmd.exe', displayName: '命令提示符' }] });
+    await expect(api.inventory()).rejects.toThrow('条目无效');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, total: 1, entries: [{ id: 'sm:0123456789ab', displayName: ' ' }] });
+    await expect(api.inventory()).rejects.toThrow('条目无效');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce(planReply({ appId: 'notepad', appName: '记事本' }));
+    expect(await api.pick('notepad')).toEqual(planReply({ appId: 'notepad', appName: '记事本' }));
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'APP_UNKNOWN', message: '该条目不在本机清单中，请刷新后重试。' });
+    expect(await api.pick('notepad')).toEqual({ ok: false, code: 'APP_UNKNOWN', message: '该条目不在本机清单中，请刷新后重试。' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, modelReady: true, autoExecute: false, inventoryTotal: 42, catalog: [] });
+    expect(await api.status()).toEqual({ ok: true, modelReady: true, autoExecute: false, inventoryTotal: 42, catalog: [] });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, modelReady: true, autoExecute: false, inventoryTotal: '很多', catalog: [] });
+    expect((await api.status()) as { inventoryTotal?: number }).not.toHaveProperty('inventoryTotal');
+  });
+
+  it('preload 只暴露 9 个冻结方法，严格校验入参并投影状态、计划与结果', async () => {
     const harness = preloadHarness('pet-preload.cjs');
     const api = harness.exposed.nuanbanOpenApp;
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api).sort()).toEqual(['cancel', 'execute', 'history', 'parse', 'pickFolder', 'setAutoExecute', 'status']);
+    expect(Object.keys(api).sort()).toEqual(['cancel', 'execute', 'history', 'inventory', 'parse', 'pick', 'pickFolder', 'setAutoExecute', 'status']);
     expect(Object.keys(api).join(' ')).not.toMatch(/ipcRenderer|process|channel/i);
     expect(source('pet-preload.cjs')).not.toMatch(/exposeInMainWorld\(\s*['"](?:ipcRenderer|process|require)/);
     harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, modelReady: true, autoExecute: false, secret: 'discard',

@@ -201,6 +201,9 @@
           <label class="open-app-auto"><input id="open-app-auto" type="checkbox" disabled><span>自动打开本会话已确认过的低风险目标</span></label>
           <p id="open-app-auto-status" class="fine-print" role="status">自动执行已关闭：每次打开都需要你确认</p>
           <p id="open-app-progress" class="open-app-progress" role="status" aria-live="polite">进入本页后读取本机可打开的软件清单，不会显示模拟结果。</p>
+          <p id="open-app-inventory-count" class="open-app-inventory-count" role="status">本机可打开项待运行核心报告</p>
+          <div class="open-app-list-actions"><button id="open-app-list-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="open-app-list" disabled>从本机列表选择</button></div>
+          <div id="open-app-list" class="open-app-list" role="group" aria-label="本机开始菜单里发现的软件" hidden></div>
           <p id="open-app-error" class="library-error" role="alert" hidden></p>
           <section id="open-app-confirm" class="open-app-confirm" aria-labelledby="open-app-confirm-title" hidden>
             <h3 id="open-app-confirm-title">请核对后确认</h3>

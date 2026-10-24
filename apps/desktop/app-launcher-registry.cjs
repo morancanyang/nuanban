@@ -7,6 +7,10 @@ const path = require('node:path');
 // 只把“软件 + 界面”映射为固定候选与固定校验规则，任何未登记输入一律拒绝。
 
 const TARGET_UNSUPPORTED_MESSAGE = '该软件暂不支持直接打开这个界面，只能打开主界面。';
+const DYNAMIC_TARGET_DESCRIPTION = '主界面（本机开始菜单）';
+// 动态清单项：id 由 app-inventory.cjs 生成（sm: + 相对路径哈希），只有开始菜单主界面一种目标。
+const DYNAMIC_PREFIX = 'sm:';
+const DYNAMIC_KINDS = Object.freeze(['lnk', 'url', 'exe']);
 const REGISTRY_ERROR_CODES = Object.freeze(['APP_UNKNOWN', 'TARGET_UNKNOWN', 'TARGET_UNSUPPORTED', 'PARAMETERS_INVALID',
   'PARAMETERS_FORBIDDEN', 'URL_PROTOCOL_BLOCKED', 'URL_INVALID', 'FOLDER_NOT_ALLOWED', 'FOLDER_MISSING']);
 const MAX_TEXT_LENGTH = 64;
@@ -169,12 +173,16 @@ function sensitiveFolderIndex({ platform, pathApi, env }) {
   return { exact, nested };
 }
 
-function createAppLauncherRegistry({ platform = process.platform, exists, stat, env = process.env, appPaths } = {}) {
+function createAppLauncherRegistry({ platform = process.platform, exists, stat, env = process.env, appPaths, inventory } = {}) {
   if (typeof platform !== 'string' || !platform) throw new TypeError('运行平台无效');
   if (env === null || typeof env !== 'object') throw new TypeError('运行环境无效');
   if (exists !== undefined && typeof exists !== 'function') throw new TypeError('文件存在性检查无效');
   if (stat !== undefined && typeof stat !== 'function') throw new TypeError('文件类型检查无效');
   if (appPaths !== undefined && typeof appPaths !== 'function') throw new TypeError('App Paths 读取器无效');
+  // 动态清单（app-inventory.cjs）是可选注入：只读取它，不写入、不启动任何东西。
+  if (inventory !== undefined && (inventory === null || typeof inventory !== 'object' || typeof inventory.resolve !== 'function')) {
+    throw new TypeError('本机软件清单无效');
+  }
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const fileExists = exists ?? fs.existsSync;
   const fileStat = stat ?? fs.statSync;
@@ -209,10 +217,29 @@ function createAppLauncherRegistry({ platform = process.platform, exists, stat, 
     }));
   }
 
+  // 动态清单项：只认 sm: 前缀，且清单必须回显同一个 id；任何异常/形状不符一律当作未命中（fail closed）。
+  function inventoryDescriptor(appId) {
+    if (!inventory || typeof appId !== 'string' || !appId.startsWith(DYNAMIC_PREFIX) || appId.length > MAX_TEXT_LENGTH) return undefined;
+    let result;
+    try { result = inventory.resolve(appId); } catch { return undefined; }
+    if (!plainObject(result) || result.ok !== true || result.id !== appId) return undefined;
+    if (typeof result.displayName !== 'string' || !result.displayName || result.displayName.length > MAX_TEXT_LENGTH) return undefined;
+    if (!DYNAMIC_KINDS.includes(result.kind)) return undefined;
+    if (typeof result.target !== 'string' || !result.target || result.target.length > MAX_PATH_LENGTH) return undefined;
+    return { displayName: result.displayName, kind: result.kind, target: result.target };
+  }
+
   function resolve(appId, target) {
     if (typeof appId !== 'string' || !appId || appId.length > MAX_TEXT_LENGTH) return { ok: false, errorCode: 'APP_UNKNOWN' };
     const application = APPLICATION_INDEX.get(appId);
-    if (!application) return { ok: false, errorCode: 'APP_UNKNOWN' };
+    if (!application) {
+      const dynamic = inventoryDescriptor(appId);
+      if (!dynamic) return { ok: false, errorCode: 'APP_UNKNOWN' };
+      // 动态项只登记“主界面（本机开始菜单）”一种目标，其余界面一律拒绝。
+      if (target !== 'default') return { ok: false, errorCode: 'TARGET_UNKNOWN' };
+      return { ok: true, appId, target: 'default', displayName: dynamic.displayName, targetDescription: DYNAMIC_TARGET_DESCRIPTION,
+        risk: 'low', dynamic: true, requiresFolder: false, requiresUrl: false };
+    }
     if (typeof target !== 'string' || !target || target.length > MAX_TEXT_LENGTH) return { ok: false, errorCode: 'TARGET_UNKNOWN' };
     const declared = application.targets.find(item => item.target === target);
     if (declared) {
@@ -259,6 +286,11 @@ function createAppLauncherRegistry({ platform = process.platform, exists, stat, 
     const keys = Object.keys(supplied);
     // 只接受白名单键：任何 shell、路径、exe、额外参数都会在这里被拒绝。
     if (keys.some(key => key !== 'url' && key !== 'folder')) return { ok: false, errorCode: 'PARAMETERS_FORBIDDEN' };
+    // 动态清单项没有任何参数：有键即拒绝（路径只能来自清单本身）。
+    if (resolved.dynamic) {
+      if (keys.length) return { ok: false, errorCode: 'PARAMETERS_FORBIDDEN' };
+      return { ok: true, parameters: {} };
+    }
     if (resolved.requiresUrl) {
       if (Object.hasOwn(supplied, 'folder')) return { ok: false, errorCode: 'PARAMETERS_FORBIDDEN' };
       if (!Object.hasOwn(supplied, 'url')) return { ok: false, errorCode: 'PARAMETERS_INVALID' };
@@ -286,6 +318,7 @@ function createAppLauncherRegistry({ platform = process.platform, exists, stat, 
   }
 
   // 固定候选：只由注册表模板（系统固定位置）与受信任的 App Paths 读取器组成，绝不包含调用方传入的路径。
+  // 动态清单项没有固定候选（路径在执行时由清单给出并再次校验），一律返回 []。
   function executableCandidates(appId) {
     if (typeof appId !== 'string' || !appId || appId.length > MAX_TEXT_LENGTH) return [];
     const application = APPLICATION_INDEX.get(appId);
@@ -308,7 +341,15 @@ function createAppLauncherRegistry({ platform = process.platform, exists, stat, 
     return candidates;
   }
 
-  return Object.freeze({ catalog, resolve, validateParameters, executableCandidates });
+  // 动态清单项的启动描述：路径只来自清单，页面与模型都无法提供。
+  function dynamicLaunch(appId) {
+    const dynamic = inventoryDescriptor(appId);
+    if (!dynamic) return { ok: false, errorCode: 'APP_UNKNOWN' };
+    return { ok: true, kind: dynamic.kind, target: dynamic.target, displayName: dynamic.displayName };
+  }
+
+  return Object.freeze({ catalog, resolve, validateParameters, executableCandidates, dynamicLaunch });
 }
 
-module.exports = { createAppLauncherRegistry, validateLaunchUrl, forbiddenSpawnText, pathIdentity, REGISTRY_ERROR_CODES };
+module.exports = { createAppLauncherRegistry, validateLaunchUrl, forbiddenSpawnText, pathIdentity,
+  REGISTRY_ERROR_CODES, DYNAMIC_TARGET_DESCRIPTION };
