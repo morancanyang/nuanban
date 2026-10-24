@@ -155,8 +155,8 @@
       canResume: ready && privacyPaused && !cleanupFailed && !captureConflict && !privacyConflict && observation.captureActive === false && generationKnown && !observationPending,
       canVerify: safeObserving && !blocked && !taskOutdated && ['awaiting_action', 'awaiting_verify', 'needs_help'].includes(task.state)
         && (Boolean(text(task.instruction)) || task.state === 'awaiting_verify') && !guidancePending && !observationPending && !pending.has('ask'),
-      canAutoStep: ready && safeObserving && observation.cloudConsent === true && !blocked && !taskBusy && !observationPending && !guidancePending
-        && !pending.has('ask') && !pending.has('dictate') && bridgeAvailable,
+      canAutoStepRequest: ready && safeObserving && !blocked && !taskBusy && !observationPending && !guidancePending
+        && !pending.has('ask') && !pending.has('dictate') && bridgeAvailable && task.autoStep !== true,
       canRepeat: ready && !privacyPaused && !blocked && !taskOutdated && ['awaiting_action', 'needs_help', 'completed'].includes(task.state) && Boolean(text(task.instruction)) && !guidancePending && !observationPending && !pending.has('ask'),
       canFinish: ready && activeTask && !pending.has('guidance.finish'),
     };
@@ -507,13 +507,29 @@
     element('step-result').textContent = result;
     element('step-result').hidden = !result;
     element('verify-step').disabled = !state.canVerify;
+    element('verify-step').title = state.canVerify ? '' : !state.safeObserving ? '需要保持屏幕共享，且本机已确认采集在运行。'
+      : state.blocked ? '当前安全状态不允许核验，请先按提示处理。'
+        : state.taskOutdated ? '画面授权已变化，本轮步骤已失效；请重新提问或点“再讲一遍”。'
+          : '当前没有可核验的步骤，或上一项请求还在处理中。';
     element('repeat-step').disabled = !state.canRepeat;
     element('finish-lesson').disabled = !state.canFinish;
     element('verify-step').textContent = pending.has('guidance.verify') || task.state === 'verifying' ? '等待新画面核验…' : '我点好了，请核验';
     element('finish-lesson').textContent = pending.has('guidance.finish') ? '正在请求结束…' : '结束教学';
-    element('auto-step-start').disabled = !state.canAutoStep || task.autoStep === true;
+    element('auto-step-start').disabled = !state.canAutoStepRequest;
     element('auto-step-start').textContent = pending.has('guidance.auto-start') ? '正在开启自动步进…'
       : task.autoStep === true ? `自动步进进行中 · 第 ${Number.isSafeInteger(task.stepIndex) && task.stepIndex > 0 ? task.stepIndex : 1} 步` : '③ 自动步进指引（共享后自动截帧）';
+    const autoStepHint = element('auto-step-hint');
+    const autoStepReason = task.autoStep === true ? ''
+      : !state.canAutoStepRequest ? !ready ? '正在确认运行核心，稍后再试。'
+        : !state.safeObserving ? '需要先点“① 选择屏幕与授权”开启并保持屏幕共享。'
+          : state.blocked ? '当前安全状态不允许自动步进，请先按提示处理。'
+            : state.taskBusy ? '正在分析或核验，请稍候。'
+              : '正在处理上一项请求，请稍候。'
+        : state.observation.cloudConsent !== true ? '点击后会先请你确认“按需分析脱敏画面”；同意后立即开始，不同意则保持仅本地观察。'
+          : '';
+    autoStepHint.hidden = !autoStepReason;
+    autoStepHint.textContent = autoStepReason;
+    element('auto-step-start').title = autoStepReason;
     const autoStepProgress = element('auto-step-progress');
     autoStepProgress.hidden = task.autoStep !== true;
     if (task.autoStep === true) autoStepProgress.textContent = task.state === 'awaiting_action'
@@ -921,9 +937,21 @@
   }
 
   function startAutoStep() {
-    if (!flags().canAutoStep) return;
+    const current = flags();
+    if (!current.canAutoStepRequest) return;
     const goal = element('question').value.trim();
-    void perform('guidance.auto-start', '自动步进未确认', () => bridge.command({ type: 'guidance.auto-start', ...(goal ? { goal } : {}) }), startAutoStep, true);
+    // 自动步进必须上传脱敏帧；没有画面分析授权时先由本人确认这一次授权，再立即开始。
+    const operation = async () => {
+      if (flags().observation.cloudConsent !== true) {
+        const generation = flags().observation.generation;
+        if (!Number.isSafeInteger(generation) || generation < 1) throw new Error('请先开启屏幕观察，再开始自动步进');
+        await bridge.command({ type: 'observation.authorize-cloud', observationGeneration: generation });
+        await refreshSnapshot();
+        if (flags().observation.cloudConsent !== true) throw new Error('本次画面分析授权未完成；没有开始自动步进，也不会发送画面');
+      }
+      return bridge.command({ type: 'guidance.auto-start', ...(goal ? { goal } : {}) });
+    };
+    void perform('guidance.auto-start', '自动步进未确认', operation, startAutoStep, true);
   }
 
   function sendQuestion() {

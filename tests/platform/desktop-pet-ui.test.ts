@@ -12,6 +12,7 @@ class UiElement extends EventTarget {
   value = '';
   textContent = '';
   className = '';
+  title = '';
   dataset: Record<string, string> = {};
   style: Record<string, string> = {};
   attributes = new Map<string, string>();
@@ -1764,6 +1765,38 @@ describe('合成 snapshot 的桌宠 DOM 隔离测试，不代表真实跨应用�
     harness.click('confirm-exit');
     await settle();
     expect(harness.bridge.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('自动步进缺少共享时说明原因，核验按钮带禁用说明', async () => {
+    const harness = petHarness(snapshot());
+    await settle();
+    harness.emitPanel({ expanded: true, section: 'guidance' });
+    await settle();
+    expect(harness.element('auto-step-hint').hidden).toBe(false);
+    expect(harness.element('auto-step-hint').textContent).toContain('选择屏幕与授权');
+    expect(harness.element('auto-step-start').disabled).toBe(true);
+    expect(String(harness.element('verify-step').title)).toContain('屏幕共享');
+  });
+
+  it('缺少画面分析授权时自动步进仍可点击，先引导授权再启动', async () => {
+    const shared = petHarness(snapshot({ state: 'observing', captureActive: true, generation: 3, cloudConsent: false }));
+    await settle();
+    shared.emitPanel({ expanded: true, section: 'guidance' });
+    await settle();
+    expect(shared.element('auto-step-start').disabled).toBe(false);
+    expect(shared.element('auto-step-hint').textContent).toContain('按需分析脱敏画面');
+    const calls: Array<Record<string, unknown>> = [];
+    shared.bridge.command.mockImplementation(async (payload: unknown) => {
+      calls.push(payload as Record<string, unknown>);
+      if ((payload as { type?: string } | undefined)?.type === 'observation.authorize-cloud') {
+        shared.bridge.snapshot.mockResolvedValue(snapshot({ state: 'observing', captureActive: true, generation: 3, cloudConsent: true }));
+      }
+      return { ok: true };
+    });
+    shared.click('auto-step-start');
+    await settle();
+    expect(calls[0]).toMatchObject({ type: 'observation.authorize-cloud', observationGeneration: 3 });
+    expect(calls[1]).toMatchObject({ type: 'guidance.auto-start' });
   });
 
   it('停止状态仍有捕获信号时不宣称安全；观察代际不一致时不展示旧指引', async () => {

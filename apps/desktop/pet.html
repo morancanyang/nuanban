@@ -248,7 +248,8 @@
           <ol class="guidance-workflow" aria-label="屏幕查找流程"><li>选择屏幕<br><small>本人开启观察与授权</small></li><li>说出目标<br><small>例如“帮我找到设置”</small></li><li>看箭头操作<br><small>由你亲手点击</small></li></ol>
           <p id="guidance-analysis" class="fine-print" role="status" hidden></p>
           <div class="button-row"><button id="guidance-start-observation" type="button" disabled>① 选择屏幕与授权</button><button id="screen-voice-find" class="primary-button" type="button" disabled>② 语音查找并指引</button></div>
-          <div class="button-row"><button id="auto-step-start" class="primary-button" type="button" disabled>③ 自动步进指引（共享后自动截帧）</button></div>
+          <div class="button-row"><button id="auto-step-start" class="primary-button" type="button" aria-describedby="auto-step-hint" disabled>③ 自动步进指引（共享后自动截帧）</button></div>
+          <p id="auto-step-hint" class="fine-print" role="status" aria-live="polite" hidden></p>
           <p id="auto-step-progress" class="fine-print" role="status" aria-live="polite" hidden></p>
           <p class="fine-print">自动步进由本人确认后，每一步都会在本机遮盖文字与人脸后自动上传一帧给模型；箭头出现后请亲手点击目标，箭头消失后点“我点好了，请核验”继续下一步，直到目标打开或找到。敏感或未分类画面不会再暂停共享，只在本机遮盖后继续；检测失败的那一帧不会上传。</p>
           <p class="fine-print">“语音查找”由你点击并确认后，只听写这一句话，停麦后自动结合当前画面查找。下方也可打字查找；“智能查询”不读取屏幕，不会生成箭头。暖暖只绘制高亮和箭头，不移动系统鼠标、不代点或代输。</p>

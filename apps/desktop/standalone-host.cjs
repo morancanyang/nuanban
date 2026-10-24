@@ -271,6 +271,7 @@ function createStandaloneHost(options) {
     const bounds = display.bounds;
     if (target.rect.x < bounds.x || target.rect.y < bounds.y || target.rect.x + target.rect.width > bounds.x + bounds.width || target.rect.y + target.rect.height > bounds.y + bounds.height) { clearGuide(); return false; }
     clearTimeout(guideTimer);
+    if (collapsed) expandFromBall({ focus: false });
     movePetAwayFrom(target.rect, display.workArea);
     guideWindow.setBounds(bounds);
     pendingGuide = { ...target, rect: { ...target.rect, x: target.rect.x - bounds.x, y: target.rect.y - bounds.y } };

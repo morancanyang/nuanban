@@ -728,6 +728,28 @@ describe('桌宠指引窗口的反馈与续期', () => {
     expect(current.host.snapshot()).toMatchObject({ task: { targetState: 'unavailable', explanation: expect.stringContaining('指引窗口') },
       analysis: { state: 'ready', message: expect.stringContaining('未显示箭头') } });
   });
+
+  it('桌宠已收起为悬浮球时，出现新指引会自动取回桌宠以便点击核验', async () => {
+    const current = fixture();
+    let capturedAt = Date.now();
+    current.source.capture.mockImplementation(async () => syntheticFrame(undefined, capturedAt = Math.max(Date.now(), capturedAt + 1)));
+    current.analyzer.analyze.mockImplementation(async input => ({ observation_id: input.observationId, guide_id: input.guideId,
+      observation_generation: input.observationGeneration, task_generation: input.taskGeneration, trigger_id: input.triggerId,
+      frame_id: input.frame.frameId, kind: 'step', instruction: '请核对后亲手点击设置。', target_id: input.frame.elements[0].id,
+      presentation: 'confirmed', expected_labels: [] }));
+    await current.host.initialize();
+    current.choose();
+    current.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: true });
+    await current.invoke('nuanban:pet:command', { type: 'observation.start' });
+    await vi.waitFor(() => expect(current.source.capture).toHaveBeenCalled());
+    await current.invoke('nuanban:pet:collapse');
+    expect(current.host.snapshot().pet?.collapsed).toBe(true);
+    expect(current.windows[0].bounds.width).toBe(64);
+    await current.invoke('nuanban:pet:ask', { text: '请帮我找到设置', observationGeneration: current.host.snapshot().observation.generation });
+    await vi.waitFor(() => expect(current.host.snapshot().task.state).toBe('awaiting_action'));
+    expect(current.host.snapshot().pet?.collapsed).toBe(false);
+    expect(current.windows[0].bounds.width).toBeGreaterThan(64);
+  });
 });
 
 describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系统权限验收）', () => {
