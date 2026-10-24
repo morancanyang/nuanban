@@ -124,6 +124,10 @@ function evaluateSelectedFrame(frame, detection, options = {}) {
 function evaluateFrame(frame, detection, options, selected) {
   const now = options.now ?? Date.now();
   const authorizedSharing = !selected && options.authorizedSharing === true;
+  // Owner-approved raw upload: the owner explicitly turned off local masking, so text/face redaction
+  // flags are not required and the uploaded frame is the captured frame itself. Every other check
+  // (frame integrity, detector completeness, limits, freshness) still applies.
+  const unredactedUpload = options.unredactedUpload === true;
   if (!frame || !Buffer.isBuffer(frame.png) || !Number.isInteger(frame.width) || !Number.isInteger(frame.height)
     || frame.width < 1 || frame.height < 1 || frame.width > 16384 || frame.height > 16384
     || !Number.isFinite(frame.capturedAt) || frame.capturedAt > now
@@ -132,7 +136,7 @@ function evaluateFrame(frame, detection, options, selected) {
   if (!detection || detection.status !== 'complete') return deny(detection?.reason ?? 'local_detector_unavailable');
   if (detection.frameHash !== frame.frameHash || detection.width !== frame.width || detection.height !== frame.height) return deny('detector_frame_mismatch');
   if (!Array.isArray(detection.words) || !Array.isArray(detection.faces)
-    || detection.redaction?.text !== true || detection.redaction?.faces !== true) return deny('incomplete_local_detection');
+    || (!unredactedUpload && (detection.redaction?.text !== true || detection.redaction?.faces !== true))) return deny('incomplete_local_detection');
   if (detection.words.length > 8192 || detection.faces.length > 512) return deny('local_detection_limit');
   if (!validPng(detection.sanitizedPng, frame.width, frame.height) || detection.sanitizedPng.length > LIMITS.maxPngBytes) return deny('local_redaction_invalid');
   const shellControls = detection.shellControls ?? [];
@@ -173,10 +177,13 @@ function evaluateFrame(frame, detection, options, selected) {
   else if (positiveMarkers.length >= 2 && allowedWords.length >= 3 && unknownCount <= allowedWords.length * 2) scene = 'settings';
   else if (allowedWords.length >= 3 && unknownCount <= 1 && [...labels].filter(label => browserLabels.has(label)).length >= 2) scene = 'browser_controls';
   else if (allowedWords.length >= 4 && unknownCount <= 1 && [...labels].filter(label => editorLabels.has(label)).length >= 3) scene = 'editor_controls';
-  const requiresRedaction = (!selected && !authorizedSharing) || detection.words.length > 0 || detection.faces.length > 0;
+  const requiresRedaction = !unredactedUpload && ((!selected && !authorizedSharing) || detection.words.length > 0 || detection.faces.length > 0);
   if (requiresRedaction && !shellControls.length && digest(detection.sanitizedPng) === frame.frameHash) return deny('unredacted_frame');
   let sanitizedPng;
-  if (selected || authorizedSharing) {
+  if (unredactedUpload) {
+    sanitizedPng = Buffer.from(detection.sanitizedPng);
+    scene = 'owner_approved_unredacted';
+  } else if (selected || authorizedSharing) {
     sanitizedPng = Buffer.from(detection.sanitizedPng);
     scene = selected ? 'selected_frame' : 'authorized_sharing';
   } else if (shellControls.length || !scene || detection.sanitizedPng.length > 2_000_000) {
@@ -185,12 +192,13 @@ function evaluateFrame(frame, detection, options, selected) {
     catch { return deny('control_layout_unavailable'); }
     scene = 'controls_only';
   } else sanitizedPng = Buffer.from(detection.sanitizedPng);
-  if (!authorizedSharing && sanitizedPng.length > 2_000_000) { sanitizedPng.fill(0); return deny('control_layout_limit'); }
+  if (!authorizedSharing && !unredactedUpload && sanitizedPng.length > 2_000_000) { sanitizedPng.fill(0); return deny('control_layout_limit'); }
+  if (unredactedUpload && sanitizedPng.length > 12 * 1024 * 1024) { sanitizedPng.fill(0); return deny('control_layout_limit'); }
   const sanitizedHash = digest(sanitizedPng);
   if (requiresRedaction && sanitizedHash === frame.frameHash) { sanitizedPng.fill(0); return deny('unredacted_frame'); }
   if (now - frame.capturedAt > (options.maxAgeMs ?? 5000)) { sanitizedPng.fill(0); return deny('stale_frame'); }
   const elements = allowedWords.map((word, index) => ({ id: `element_${frame.frameHash.slice(0, 12)}_${index}`, label: word.text.trim(), rect: { ...word.rect }, ...(word.surface ? { surface: word.surface } : {}) }));
-  if (selected || authorizedSharing) {
+  if (selected || authorizedSharing || unredactedUpload) {
     for (const control of visualControls) {
       if (shellControls.some(shell => control.rect.x >= shell.rect.x && control.rect.y >= shell.rect.y
         && control.rect.x + control.rect.width <= shell.rect.x + shell.rect.width
@@ -212,7 +220,7 @@ function evaluateFrame(frame, detection, options, selected) {
     frameHash: frame.frameHash, sanitizedHash, capturedAt: frame.capturedAt, sourceId: frame.sourceId,
     sourceName: frame.sourceName ?? '', displayId: frame.displayId, width: frame.width, height: frame.height,
     geometry: frame.geometry ? { ...frame.geometry } : null, signature, elements, sanitizedPng,
-    redactionProfile: 'all_text_and_faces_v1', scene,
+    redactionProfile: unredactedUpload ? 'owner_approved_none' : 'all_text_and_faces_v1', unredacted: unredactedUpload, scene,
   };
   admittedFrames.add(admitted);
   return admitted;

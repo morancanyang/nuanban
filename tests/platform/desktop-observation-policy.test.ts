@@ -542,3 +542,34 @@ describe('多尺度 OCR 控件合并与隐私门控（合成结果）', () => {
     expect(evaluateLocalFrame(frame, detection)).toMatchObject({ decision: 'pause', reason: 'sensitive_screen', risk: 'private' });
   });
 });
+
+describe('本人确认关闭本机遮盖后的原始帧放行（合成单测，不代表真实验收）', () => {
+  function rawDetection(frame: ReturnType<typeof syntheticFrame>) {
+    return { ...syntheticDetection(frame, ['设置', '显示', '文本大小']), redaction: { text: false, faces: false }, sanitizedPng: Buffer.from(frame.png) };
+  }
+
+  it('原始模式接受未遮盖的帧，并标记上传内容为原始画面', () => {
+    const frame = syntheticFrame();
+    const detection = rawDetection(frame);
+    const result = evaluateLocalFrame(frame, detection, { authorizedSharing: true, unredactedUpload: true });
+    expect(result).toMatchObject({ decision: 'allow', scene: 'owner_approved_unredacted', redactionProfile: 'owner_approved_none', unredacted: true });
+    if (result.decision !== 'allow') throw new Error('expected raw allow');
+    expect(result.sanitizedPng).toEqual(frame.png);
+    expect(result.elements.map(element => element.label)).toContain('显示');
+    expect(isAdmittedFrame(result)).toBe(true);
+  });
+
+  it('默认仍然拒绝未遮盖的帧，不会因为新开关放松默认值', () => {
+    const frame = syntheticFrame();
+    const detection = rawDetection(frame);
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'pause', reason: 'incomplete_local_detection' });
+  });
+
+  it('原始模式仍执行检测完整性、年龄检查', () => {
+    const frame = syntheticFrame();
+    const stale = { ...rawDetection(frame), status: 'unavailable' as const, reason: 'local_detector_unavailable' };
+    expect(evaluateLocalFrame(frame, stale, { authorizedSharing: true, unredactedUpload: true })).toMatchObject({ decision: 'pause', reason: 'local_detector_unavailable' });
+    const aged = { ...frame, capturedAt: frame.capturedAt - 6000 };
+    expect(evaluateLocalFrame(aged, rawDetection(aged), { authorizedSharing: true, unredactedUpload: true, now: frame.capturedAt })).toMatchObject({ decision: 'pause', reason: 'stale_frame' });
+  });
+});

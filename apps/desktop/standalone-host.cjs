@@ -83,6 +83,9 @@ function createStandaloneHost(options) {
   // 实时对话的麦克风放行令牌：只在对话会话运行期间存在，停止、销毁或窗口消失立即撤销。
   let avatarPermissionToken;
   const xingyunPermissions = options.xingyunPermissions;
+  // A locally detected runtime always reports `vision`; cloud configurations leave it undefined.
+  const localModelProvider = options.questioner?.vision !== undefined;
+  const localModelVision = options.questioner?.vision === true;
   let expanded = false;
   let collapsed = false;
   let restoreBounds = null;
@@ -105,7 +108,10 @@ function createStandaloneHost(options) {
   const channels = [];
   const analyzer = options.analyzer ?? createDesktopAnalysisClient();
   const regionSelector = (options.createRegionSelector ?? createObservationRegionSelector)({ BrowserWindow, ipcMain });
+  const privacySettings = options.privacySettings;
+  const unredactedUpload = () => privacySettings?.read?.().unredactedUpload === true;
   const source = options.source ?? createWindowsObservationSource({ desktopCapturer, screen, nativeImage, BrowserWindow, ipcMain, session,
+    detectorOptions: { unredactedUpload },
     canCapture: ({ sourceId }) => consentedSourceId === sourceId && runtime?.snapshot().observation.state === 'observing',
     onCaptureInvalidated: event => { consentedSourceId = null; clearGuide(); if (runtime) runAction(() => stop(captureFailureReason(event?.reason))); } });
   const singleFrameSource = options.singleFrameSource ?? createWindowsObservationSource({ desktopCapturer, screen, nativeImage, BrowserWindow, ipcMain, session,
@@ -159,7 +165,8 @@ function createStandaloneHost(options) {
           : ['error', 'unavailable'].includes(localWake.state) ? '本机中文离线语音引擎或麦克风不可用；未改用云端常听。请使用点击和文字提问。'
             : '本地语音唤醒未开启，麦克风需本人单独确认；不随桌宠启动自动恢复。') };
     state.capabilities = { selectedScreenCapture: process.platform === 'win32' ? 'implemented_unverified' : 'unsupported', realCaptureAccepted: false,
-      localDetector: 'requires_local_verification', cloudAnalysis: analyzer.capabilities().configured, encryptedLearning: Boolean(learningStore), managementIndependent: true };
+      localDetector: 'requires_local_verification', cloudAnalysis: analyzer.capabilities().configured, encryptedLearning: Boolean(learningStore), managementIndependent: true,
+      localModel: localModelProvider, localModelVision, analysisTimeoutMs: localModelProvider ? 170000 : 50000 };
     if (learningStore) {
       try {
         const latest = learningStore.getLatest();
@@ -869,6 +876,21 @@ function createStandaloneHost(options) {
     return petClosePromise;
   }
 
+  async function setUnredactedUpload(enabled) {
+    if (typeof enabled !== 'boolean') throw new Error('本机遮盖设置参数无效');
+    if (typeof privacySettings?.write !== 'function') throw new Error('当前客户端不支持修改本机遮盖设置');
+    if (enabled) {
+      const confirmation = await showDialog({ type: 'warning', title: '关闭本机文字与人脸遮盖',
+        message: '开启后屏幕画面不再在本机遮盖文字与人脸，原始画面会直接上传给已配置的模型网关。是否确认？',
+        detail: '这会跳过本机文字遮盖与人脸检测，读取屏幕更快；但屏幕上的全部内容——包括聊天、文件、账号信息——都会离开本机，并受模型网关的数据政策约束。随时可以在菜单里改回“本机遮盖：已开启”。',
+        buttons: ['确认关闭本机遮盖', '取消'], defaultId: 1, cancelId: 1, noLink: true });
+      if (confirmation.response !== 0) return Object.freeze({ unredactedUpload: unredactedUpload() });
+    }
+    privacySettings.write({ unredactedUpload: enabled });
+    publish();
+    return Object.freeze({ unredactedUpload: enabled });
+  }
+
   function menu() {
     const current = runtime.snapshot();
     return Menu.buildFromTemplate([
@@ -906,6 +928,9 @@ function createStandaloneHost(options) {
       { label: typeof options.questioner?.answer === 'function' ? '配置云端智能服务（当前已连接模型）…' : '配置云端智能服务（一键填 key）…',
         enabled: typeof options.configureAiProvider === 'function',
         click: () => runAction(() => options.configureAiProvider()) },
+      { label: unredactedUpload() ? '本机遮盖：已关闭（原始画面上传）' : '本机遮盖：已开启（推荐）', type: 'checkbox', checked: unredactedUpload(),
+        enabled: typeof privacySettings?.write === 'function',
+        click: () => runAction(() => setUnredactedUpload(!unredactedUpload())) },
       { type: 'separator' }, { label: '停止观察、语音和发送', click: () => runAction(() => stop('user')) },
       { label: '关闭桌宠（停止所有采集）', click: () => runAction(closePetWindow) },
     ]);
@@ -1113,7 +1138,11 @@ function createStandaloneHost(options) {
     try {
       learningStore = (options.createLearningStore ?? createRuntimeLearningStore)({ databasePath: path.join(options.userDataPath, 'nuanban-runtime-learning.sqlite'), payloadCodec: createSafeStoragePayloadCodec(safeStorage) });
     } catch { learningUnavailable = true; }
+    // 本机模型（本地检测出的运行时一定带 vision 字段）在 CPU 上分析整屏可能要一两分钟，
+    // 因此放宽分析等待；云端模型保持原来的 50 秒预算。
     runtime = createDesktopRuntime({ source, analyzer, questioner: options.questioner, onState: publish, onTarget: showGuide,
+      isUnredactedUpload: unredactedUpload,
+      ...(localModelProvider ? { analysisTimeoutMs: 170000, analysisTimeoutLimitMs: 180000 } : {}),
       recordTeaching: note => { if (!learningStore) throw new Error('加密教学仓储不可用'); return learningStore.recordTeaching(note); },
       suggestReview: proposal => { if (!learningStore) throw new Error('加密教学仓储不可用'); const result = learningStore.suggestReview(proposal); publish(); return result; } });
     const area = screen.getPrimaryDisplay().workArea;
@@ -1320,7 +1349,7 @@ function createStandaloneHost(options) {
   }
 
   return { initialize, dispose, stop, snapshot, showPetPanel, showLocalModel, setPetDisplayCompatibility, selectLili, lili, requestObservation: resume => chooseObservation(resume === true),
-    cloudDictationStatus, setCloudDictation,
+    cloudDictationStatus, setCloudDictation, setUnredactedUpload, unredactedUpload,
     requestLocalVoice: enableWake, stopLocalVoice: disableWake, requestVoiceDictation,
     hasPetWindow: () => live(petWindow), getPetWindow: () => live(petWindow) ? petWindow : null };
 }

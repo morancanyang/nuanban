@@ -61,14 +61,17 @@ try {
     $languages = @([Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages | ForEach-Object { $_.LanguageTag })
     $faceSupported = [Windows.Media.FaceAnalysis.FaceDetector]::IsSupported
     $formats = @([Windows.Media.FaceAnalysis.FaceDetector]::GetSupportedBitmapPixelFormats() | ForEach-Object { $_.ToString() })
+    $redact = $request.redact -ne $false
     if ($null -eq $engine) {
         $reply = @{ protocol = 1; status = 'unavailable'; reason = 'ocr_language_unavailable'; ocrStatus = 'unavailable'; faceStatus = 'unavailable'; languages = $languages }
-    } elseif (-not $faceSupported -or -not [Windows.Media.FaceAnalysis.FaceDetector]::IsBitmapPixelFormatSupported([Windows.Graphics.Imaging.BitmapPixelFormat]::Gray8)) {
+    } elseif ($redact -and (-not $faceSupported -or -not [Windows.Media.FaceAnalysis.FaceDetector]::IsBitmapPixelFormatSupported([Windows.Graphics.Imaging.BitmapPixelFormat]::Gray8))) {
         $reply = @{ protocol = 1; status = 'unavailable'; reason = 'face_detection_unavailable'; ocrStatus = 'available'; faceStatus = 'unavailable'; languages = $languages; faceFormats = $formats }
     } else {
-        $phase = 'face_create'
-        $faceDetector = Wait-WinRt ([Windows.Media.FaceAnalysis.FaceDetector]::CreateAsync()) ([Windows.Media.FaceAnalysis.FaceDetector])
-        if ($null -eq $faceDetector) { throw [System.NotSupportedException]::new('face_detector_missing') }
+        if ($redact) {
+            $phase = 'face_create'
+            $faceDetector = Wait-WinRt ([Windows.Media.FaceAnalysis.FaceDetector]::CreateAsync()) ([Windows.Media.FaceAnalysis.FaceDetector])
+            if ($null -eq $faceDetector) { throw [System.NotSupportedException]::new('face_detector_missing') }
+        }
         if ($request.operation -eq 'probe') {
             $reply = @{ protocol = 1; status = 'complete'; ocrStatus = 'available'; faceStatus = 'available'; languages = $languages; recognizerLanguage = $engine.RecognizerLanguage.LanguageTag; maxImageDimension = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension; faceFormats = $formats; powershellVersion = $PSVersionTable.PSVersion.ToString() }
         } else {
@@ -95,8 +98,10 @@ try {
                 $reply = @{ protocol = 1; status = 'unavailable'; reason = 'ocr_dimensions_unsupported'; ocrStatus = 'unavailable'; faceStatus = 'unavailable' }
             } else {
                 $bitmap = Wait-WinRt ($decoder.GetSoftwareBitmapAsync([Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied)) ([Windows.Graphics.Imaging.SoftwareBitmap])
-                $faceBitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::Convert($bitmap, [Windows.Graphics.Imaging.BitmapPixelFormat]::Gray8)
-                $faceOperation = $faceDetector.DetectFacesAsync($faceBitmap)
+                if ($redact) {
+                    $faceBitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::Convert($bitmap, [Windows.Graphics.Imaging.BitmapPixelFormat]::Gray8)
+                    $faceOperation = $faceDetector.DetectFacesAsync($faceBitmap)
+                }
                 $phase = 'ocr_detect'
                 $ocrMaxDimension = 0
                 if ($null -ne $request.ocrMaxDimension) {
@@ -162,15 +167,17 @@ try {
                 }
                 }
                 $phase = 'face_detect'
-                $detectedFaces = Wait-WinRt $faceOperation ([System.Collections.Generic.IList[Windows.Media.FaceAnalysis.DetectedFace]])
-                if ($null -eq $detectedFaces) { throw [System.IO.InvalidDataException]::new('face_result_missing') }
                 $faces = New-Object System.Collections.ArrayList
-                foreach ($face in $detectedFaces) {
-                    if ($faces.Count -ge 512) { throw [System.IO.InvalidDataException]::new('face_output_limit') }
-                    $bounds = $face.FaceBox
-                    $null = $faces.Add(@{ rect = @{ x = $bounds.X; y = $bounds.Y; width = $bounds.Width; height = $bounds.Height } })
+                if ($redact) {
+                    $detectedFaces = Wait-WinRt $faceOperation ([System.Collections.Generic.IList[Windows.Media.FaceAnalysis.DetectedFace]])
+                    if ($null -eq $detectedFaces) { throw [System.IO.InvalidDataException]::new('face_result_missing') }
+                    foreach ($face in $detectedFaces) {
+                        if ($faces.Count -ge 512) { throw [System.IO.InvalidDataException]::new('face_output_limit') }
+                        $bounds = $face.FaceBox
+                        $null = $faces.Add(@{ rect = @{ x = $bounds.X; y = $bounds.Y; width = $bounds.Width; height = $bounds.Height } })
+                    }
                 }
-                $reply = @{ protocol = 1; status = 'complete'; ocrStatus = 'complete'; faceStatus = 'complete'; words = @($words.ToArray()); ocrPasses = $ocrPasses; faces = @($faces.ToArray()); textAngle = $ocrResult.TextAngle; shellControls = $shellControls }
+                $reply = @{ protocol = 1; status = 'complete'; ocrStatus = 'complete'; faceStatus = $(if ($redact) { 'complete' } else { 'skipped' }); masked = $redact; words = @($words.ToArray()); ocrPasses = $ocrPasses; faces = @($faces.ToArray()); textAngle = $ocrResult.TextAngle; shellControls = $shellControls }
             }
         }
     }
