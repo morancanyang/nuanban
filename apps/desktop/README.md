@@ -39,6 +39,8 @@ Windows 可双击仓库根目录的 `启动暖伴客户端.bat`，不必先启�
 
 需要直接打开完整客户端时，双击根目录 `启动暖伴客户端.bat` 或运行 `pnpm desktop:client`。该入口使用已有本机运行时和构建产物，不安装、不联网、不重建；缺少产物会明确提示先执行的命令。重复运行会恢复、显示并前置已有管理窗口，不另外启动一套桌宠；窗口显示不再等待页面路由执行或桌宠加载完成。原 `启动暖伴.bat` 仍是网页开发服务器入口，不是桌面客户端。
 
+只想启动桌宠本身时，双击根目录 `启动暖伴桌宠.cmd`，等价于 `pnpm --filter @nuanban/desktop start`：默认花环水獭桌宠，不打开管理窗口，也不会把角色切成栗栗。该启动器会清除可能让 Electron 误以 Node 方式运行的 `ELECTRON_RUN_AS_NODE`，并在缺少 Electron 运行时时给出安装提示；重复运行同样交给已有实例。
+
 **2026-10-23 起默认允许截图与录屏**：Windows 上 `setContentProtection(true)` 会通过 `SetWindowDisplayAffinity` 把窗口从截图 / 录屏（Snipping Tool、Xbox Game Bar、OBS 等）中排除，导致用户拍不到桌宠与管理界面。新的默认策略由 `apps/desktop/capture-visibility.cjs` 决定：**桌宠、桌宠工具小屋、语音气泡和管理界面默认可见**（可被截图与录屏捕获），屏幕观察 / 单帧采集处于活动状态时仍自动恢复保护（`management-window-visibility.cjs` 与 `standalone-host.cjs` 的 `captureActive` 逻辑），避免自身窗口污染共享画面。需要旧行为时显式传参：`--protect-pet`（桌宠侧）、`--protect-client`（管理界面）、`--protect-display`（全部）；旧的 `--pet-display-compatible` / `--client-display-compatible` 继续作为"允许捕获"别名接受。`scripts/start-desktop-client.ps1` 的 `-ProtectPet` 现在传递 `--protect-pet`，`-CompatibleDisplay` 保留为兼容别名。字幕与教学指引箭头仍始终保护，不会出现在截图或录屏里。该设置只影响本次进程，不替用户授权任何采集权限。
 
 运行 `node scripts/test-desktop-client-visibility.mjs` 可在独立缓存资料中验证真实客户端窗口、第二进程唤起、最小化恢复与捕获保护隔离，并保存客户端自身截图；检查禁止用户桌面采集，不启用麦克风，也不会重启正在使用的产品实例。
