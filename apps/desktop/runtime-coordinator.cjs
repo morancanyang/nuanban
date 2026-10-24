@@ -117,7 +117,7 @@ function createDesktopRuntime(options) {
   const recordingTasks = new Map();
   const state = {
     observation: { state: 'off', generation: 0, sourceName: '', reason: null, captureActive: false, cloudConsent: false },
-    task: { state: 'idle', id: null, observationGeneration: 0, question: '', instruction: '', explanation: '', presentation: null, targetState: 'hidden', result: null },
+    task: { state: 'idle', id: null, observationGeneration: 0, question: '', instruction: '', explanation: '', presentation: null, targetState: 'hidden', result: null, autoStep: false, stepIndex: 0 },
     analysis: { state: 'idle', message: '默认不采集。请本人选择观察范围并开启。' },
     captions: { enabled: false, text: '' },
     wake: { state: 'unsupported', reason: '尚未配置经本机验证的本地唤醒引擎；点击和文字提问仍可用。' },
@@ -608,6 +608,17 @@ function createDesktopRuntime(options) {
         && expected.every(label => job.previous.expectedLabels.some(item => normalizeLabel(item) === normalizeLabel(label)));
       if (!repeated || repeated.id !== element.id || !sameExpectation) throw new Error('previous_step_not_verified');
     }
+    const nextStepIndex = (state.task.stepIndex ?? 0) + 1;
+    if (state.task.autoStep && nextStepIndex > 12) {
+      clearTarget();
+      state.task.explanation = '自动步进已达到 12 步上限，已停止继续上传；你可以点“再讲一遍”，或结束教学后重新开始。';
+      state.analysis = { state: 'ready', message: state.task.explanation };
+      state.captions.text = state.task.explanation;
+      message(state.task.explanation, 'assistant');
+      await finishTeaching('interrupted');
+      return true;
+    }
+    state.task.stepIndex = nextStepIndex;
     state.task.state = 'awaiting_action';
     state.task.awaitingReply = false;
     state.task.instruction = result.instruction;
@@ -750,6 +761,7 @@ function createDesktopRuntime(options) {
     const generation = observationGeneration;
     const task = taskGeneration;
     let staleFrameRetries = 0;
+    let gateRetries = 0;
     let analysisBeforeRetry = null;
     while (sameGeneration(generation)) {
       const controller = new AbortController();
@@ -779,6 +791,29 @@ function createDesktopRuntime(options) {
             failStaleFrameRefresh();
             return;
           }
+          // Owner request for the auto-step feature: a sensitive or unclassified screen must not stop
+          // sharing with an error. Only auto-step softens this; the manual guidance flow keeps the
+          // original fail-closed policy. Classification problems are retried locally, then the frame
+          // is skipped without uploading anything and without pausing; hard integrity failures still
+          // stop the session, because no sanitized frame exists to send.
+          const autoStep = state.task.autoStep === true;
+          const classification = ['unclassified_screen', 'no_readable_text', 'sensitive_screen'].includes(admitted.reason);
+          const recoverable = autoStep && (classification || ['local_detector_unavailable', 'incomplete_local_detection', 'detector_frame_mismatch',
+            'invalid_local_regions', 'unredacted_frame'].includes(admitted.reason));
+          if (recoverable && gateRetries < staleFrameRetryLimit) {
+            gateRetries += 1;
+            state.analysis = { state: 'capture_retry', message: classification
+              ? '本机遮盖后暂未得到可用控件，正在本机重试；这一帧没有上传，共享也没有暂停。'
+              : '本机检测或遮盖暂未通过，正在本机重试；没有上传任何画面。' };
+            publish();
+            continue;
+          }
+          if (autoStep && classification) {
+            clearTarget('gate_skipped_frame');
+            state.analysis = { state: 'ready', message: '本机在本机遮盖后仍未得到可用控件，已跳过这一帧且未上传；请保持目标可见，或点“再讲一遍”。' };
+            publish();
+            return;
+          }
           await closeObservation(admitted.reason, true);
           return;
         }
@@ -805,6 +840,7 @@ function createDesktopRuntime(options) {
           : null;
         latestFrame = admitted;
         gateOpen = true;
+        gateRetries = 0;
         const sharingUpdated = state.observation.reason !== 'authorized_sharing';
         state.observation.reason = 'authorized_sharing';
         // A frame that changed its capture scope, contains restricted text, or no longer offers any
@@ -818,6 +854,14 @@ function createDesktopRuntime(options) {
         if (state.analysis.state === 'capture_retry' && analysisBeforeRetry) state.analysis = analysisBeforeRetry;
         if (sharingUpdated) publish();
         if (retainedTarget) {
+          if (reason === 'verification' && state.task.autoStep) {
+            // Auto-step: the owner pressed “我点好了，请核验”, so always analyse the fresh masked
+            // frame instead of assuming nothing changed.
+            targetMisses = 0;
+            state.task.state = 'verifying';
+            queueAnalysis(admitted, 'verification');
+            return;
+          }
           const targetState = state.task.targetState;
           state.task.state = 'awaiting_action';
           targetMisses = 0;
@@ -832,12 +876,30 @@ function createDesktopRuntime(options) {
         }
         if (reason === 'verification' && previousStep
           && (previousStep.signature === admitted.signature || admitted.capturedAt <= previousStep.issuedAt)) {
+          if (state.task.autoStep) {
+            state.task.state = 'verifying';
+            queueAnalysis(admitted, 'verification');
+            return;
+          }
           state.task.state = 'awaiting_action';
           state.analysis = { state: 'ready', message: '已检查新画面，尚未观察到预期变化；不会因为点击“我点好了”就进入下一步。' };
           const element = currentElement(previousStep.element, previousStep.frame, admitted);
           if (element) showStepTarget(admitted, element);
           publish();
         } else if (reason === 'page_changed' && previousStep && state.task.state === 'awaiting_action') {
+          if (state.task.autoStep) {
+            // The arrow hides as soon as the target is gone or the expected post-action controls
+            // appeared; the next analysis only starts after the owner presses the verify button.
+            targetMisses = 0;
+            clearTarget(progressed ? 'auto_step_progressed' : 'auto_step_target_gone');
+            state.task.state = 'awaiting_verify';
+            state.task.targetState = 'hidden';
+            state.analysis = { state: 'ready', message: progressed
+              ? '看起来这一步已经完成，箭头已隐藏。请点“我点好了，请核验”继续下一步。'
+              : '目标已不在原位，箭头已隐藏。若这一步已完成，请点“我点好了，请核验”；也可以点“再讲一遍”。' };
+            publish();
+            return;
+          }
           if (progressed) {
             // The expected post-action controls appeared: ask the model to confirm and continue.
             targetMisses = 0;
@@ -936,10 +998,11 @@ function createDesktopRuntime(options) {
     }
   }
 
-  async function ask(text, requiredObservation) {
+  async function ask(text, requiredObservation, askOptions = {}) {
     if (disposed || typeof text !== 'string' || !text.trim() || text.length > 500) throw new Error('请输入不超过500字的问题');
     if (cleanupJob || !['off', 'stopped', 'observing'].includes(state.observation.state)) throw new Error('请先处理本地观察的安全或停止状态，再重新提问');
     if (requiredObservation !== undefined) requireGuidanceObservation(requiredObservation);
+    const autoStep = askOptions?.autoStep === true;
     invalidateQuestion();
     const question = questionSequence;
     if (state.task.id && !['completed', 'ended'].includes(state.task.state)) await finishTeaching('interrupted');
@@ -947,8 +1010,8 @@ function createDesktopRuntime(options) {
     if (requiredObservation !== undefined) requireGuidanceObservation(requiredObservation);
     taskGeneration += 1;
     clarificationReplies = [];
-    const textOnly = typeof options.questioner?.answer === 'function' && (state.observation.state !== 'observing' || !cloudConsent);
-    state.task = { id: randomUUID(), kind: textOnly ? 'text' : 'guidance', state: 'needs_help', observationGeneration, question: safeSummary(text.trim()), instruction: '', explanation: '', presentation: null, targetState: 'hidden', result: null, startedAt: now() };
+    const textOnly = !autoStep && typeof options.questioner?.answer === 'function' && (state.observation.state !== 'observing' || !cloudConsent);
+    state.task = { id: randomUUID(), kind: textOnly ? 'text' : 'guidance', state: 'needs_help', observationGeneration, question: safeSummary(text.trim()), instruction: '', explanation: '', presentation: null, targetState: 'hidden', result: null, autoStep, stepIndex: 0, startedAt: now() };
     message(safeSummary(text.trim()), 'user');
     if (isRestrictedText(text)) {
       clearTarget();
@@ -967,6 +1030,13 @@ function createDesktopRuntime(options) {
     }
     publish();
     return snapshot();
+  }
+
+  // Auto-step: start the guidance loop without a typed question. The owner already shared the
+  // screen and granted cloud analysis, so the first masked frame goes out immediately.
+  async function startAutoStep(goalText) {
+    const goal = typeof goalText === 'string' && goalText.trim() ? goalText.trim().slice(0, 500) : '帮助我完成当前屏幕上要做的下一步';
+    return ask(goal, observationGeneration, { autoStep: true });
   }
 
   async function replyToClarification(input) {
@@ -1039,7 +1109,7 @@ function createDesktopRuntime(options) {
   }
 
   return { snapshot, startObservation, stopObservation: reason => closeObservation(reason ?? 'user'),
-    resumeObservation: input => startObservation({ ...input, resume: true }), authorizeCloudAnalysis, ask, replyToClarification,
+    resumeObservation: input => startObservation({ ...input, resume: true }), authorizeCloudAnalysis, ask, startAutoStep, replyToClarification,
     rescanClarification: input => continueClarification(input), verify, finishTeaching: result => { invalidateQuestion(); return finishTeaching(result); }, repeat,
     toggleCaptions, dispose, whenIdle };
 }

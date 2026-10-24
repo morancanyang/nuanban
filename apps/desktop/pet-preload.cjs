@@ -138,7 +138,7 @@ function projectSnapshot(value) {
   const result = projectRecord(value, { message: 'string', learningUnavailable: 'boolean', learningError: 'string' });
   const sections = {
     observation: { state: 'string', sourceName: 'string', reason: 'string', generation: 'number', captureActive: 'boolean', cloudConsent: 'boolean' },
-    task: { id: 'string', kind: 'string', generation: 'number', observationGeneration: 'number', state: 'string', question: 'string', instruction: 'string', explanation: 'string', presentation: 'string', targetState: 'string', awaitingReply: 'boolean', result: 'string' },
+    task: { id: 'string', kind: 'string', generation: 'number', observationGeneration: 'number', state: 'string', question: 'string', instruction: 'string', explanation: 'string', presentation: 'string', targetState: 'string', awaitingReply: 'boolean', result: 'string', autoStep: 'boolean', stepIndex: 'number' },
     analysis: { state: 'string', message: 'string' },
     captions: { enabled: 'boolean', text: 'string' },
     wake: { state: 'string', reason: 'string', phase: 'string', microphoneActive: 'boolean', dictationAvailable: 'boolean' },
@@ -186,7 +186,7 @@ function projectReply(value) {
   return result;
 }
 
-const commands = new Set(['observation.start', 'observation.stop', 'observation.resume', 'observation.reselect', 'observation.authorize-cloud', 'guidance.verify', 'guidance.finish', 'guidance.repeat', 'guidance.reply', 'guidance.rescan', 'captions.toggle', 'wake.enable', 'wake.disable', 'voice.open', 'voice.stop', 'voice.mute', 'voice.unmute', 'voice.interrupt', 'panel.set-expanded', 'learning.set-mastery', 'learning.review.confirm', 'learning.review.decline']);
+const commands = new Set(['observation.start', 'observation.stop', 'observation.resume', 'observation.reselect', 'observation.authorize-cloud', 'guidance.auto-start', 'guidance.verify', 'guidance.finish', 'guidance.repeat', 'guidance.reply', 'guidance.rescan', 'captions.toggle', 'wake.enable', 'wake.disable', 'voice.open', 'voice.stop', 'voice.mute', 'voice.unmute', 'voice.interrupt', 'panel.set-expanded', 'learning.set-mastery', 'learning.review.confirm', 'learning.review.decline']);
 
 function validIdentifier(value) {
   return typeof value === 'string' && Boolean(value.trim()) && value === value.trim() && value.length <= 128 && !/[\u0000-\u001f\u007f]/.test(value);
@@ -260,6 +260,10 @@ contextBridge.exposeInMainWorld('nuanbanPet', Object.freeze({
     if (payload.type === 'observation.authorize-cloud') {
       if (!Number.isSafeInteger(payload.observationGeneration) || payload.observationGeneration < 1) throw new TypeError('屏幕观察代次无效');
       command.observationGeneration = payload.observationGeneration;
+    }
+    if (payload.type === 'guidance.auto-start') {
+      if (payload.goal !== undefined && (typeof payload.goal !== 'string' || payload.goal.length > 500)) throw new TypeError('自动步进目标不能超过 500 字');
+      if (typeof payload.goal === 'string' && payload.goal.trim()) command.goal = payload.goal;
     }
     if (payload.type === 'learning.set-mastery') {
       command.noteId = requireIdentifier(payload.noteId);
