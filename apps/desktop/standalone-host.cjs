@@ -91,7 +91,9 @@ function createStandaloneHost(options) {
   let menuOpen = false;
   let dialogOpen = 0;
   let lastActivityAt = 0;
-  const idleHideMs = Number.isFinite(options.autoHideMs) ? Math.max(0, options.autoHideMs) : 5_000;
+  // Owner decision: the pet never collapses on its own. The floating ball appears only when the owner
+  // clicks the collapse button (or the menu entry), or when a dragged ball snaps to a screen edge.
+  const idleHideMs = 0;
   const ballSize = 64;
   let petClosePromise = null;
   let petDrag = null;
@@ -364,14 +366,9 @@ function createStandaloneHost(options) {
   }
 
   function resetIdleTimer() {
+    // Auto-hide was removed by owner request: no timer ever collapses the pet on its own.
     clearTimeout(idleTimer);
     idleTimer = null;
-    if (closing || collapsed || dialogOpen > 0 || menuOpen || !live(petWindow) || !petWindow.isVisible()) return;
-    idleTimer = setTimeout(() => {
-      idleTimer = null;
-      collapseToBall('idle');
-    }, idleHideMs);
-    idleTimer.unref?.();
   }
 
   function noteActivity() {
@@ -1137,13 +1134,11 @@ function createStandaloneHost(options) {
       noteActivity();
     });
     petWindow.on('blur', () => {
+      // Losing focus no longer collapses the pet; only the owner's button, menu entry or an
+      // edge-snapped drag produces the floating ball.
       clearPetDrag();
       clearTimeout(blurTimer);
-      blurTimer = setTimeout(() => {
-        blurTimer = null;
-        collapseToBall('blur');
-      }, 300);
-      blurTimer.unref?.();
+      blurTimer = null;
     });
     petWindow.on('show', () => resetIdleTimer());
     petWindow.webContents.on('render-process-gone', () => { runAction(() => stop('renderer-gone')); });

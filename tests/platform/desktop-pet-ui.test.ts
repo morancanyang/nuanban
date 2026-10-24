@@ -2683,10 +2683,18 @@ describe('桌宠自动收起为悬浮球的界面状态', () => {
   });
 
   it('展开状态隐藏悬浮球', async () => {
-    const harness = petHarness({ ...snapshot(), pet: { collapsed: false, ballSize: 64, idleHideMs: 5000 } });
+    const harness = petHarness({ ...snapshot(), pet: { collapsed: false, ballSize: 64, idleHideMs: 0 } });
     await settle();
     expect(harness.element('pet-window').classList.toggle).toHaveBeenCalledWith('is-ball', false);
     expect(harness.element('pet-ball').hidden).toBe(true);
+  });
+
+  it('面板上的“收起为悬浮球”按钮按手动指令收起，不依赖计时', async () => {
+    const harness = petHarness({ ...snapshot(), pet: { collapsed: false, ballSize: 64, idleHideMs: 0 } });
+    await settle();
+    harness.click('pet-collapse');
+    await settle();
+    expect(harness.bridge.collapse).toHaveBeenCalledTimes(1);
   });
 
   it('半隐藏状态标记独立类名，拖动悬浮球转发坐标且不误触取回', async () => {

@@ -1215,6 +1215,10 @@
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); showMenu(); }
   });
   bind(element('pet-menu'), 'click', showMenu);
+  bind(element('pet-collapse'), 'click', () => {
+    if (typeof bridge?.collapse !== 'function') return;
+    void Promise.resolve(bridge.collapse()).catch(error => showError('收起未确认', error, () => { void bridge.collapse().catch(() => {}); }));
+  });
   let ballDrag = null;
   let suppressBallClick = false;
   const sendBallDrag = (action, point) => {

@@ -1316,13 +1316,17 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
   });
 });
 
-describe('桌宠自动收起为悬浮球且不置顶', () => {
-  it('启动后桌宠不置顶，空闲超过设定时间缩到右侧悬浮球，可用 IPC 取回', async () => {
-    const current = fixture({ autoHideMs: 20 });
+describe('桌宠只按手动指令收起为悬浮球且不置顶', () => {
+  it('启动后不自动收起；点击收起按钮缩到右侧悬浮球，可用 IPC 取回', async () => {
+    const current = fixture();
     await current.host.initialize();
     const pet = current.windows[0];
     expect(pet.alwaysOnTop).toBe(false);
-    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(current.host.snapshot().pet?.collapsed).toBe(false);
+    expect(pet.bounds.width).toBeGreaterThan(64);
+    expect(await current.invoke('nuanban:pet:collapse')).toBe(true);
+    expect(current.host.snapshot().pet?.collapsed).toBe(true);
     expect(pet.bounds.width).toBe(64);
     expect(pet.bounds.height).toBe(64);
     const area = current.screen.getPrimaryDisplay().workArea;
@@ -1334,18 +1338,15 @@ describe('桌宠自动收起为悬浮球且不置顶', () => {
     expect(pet.alwaysOnTop).toBe(false);
   });
 
-  it('打开其他窗口导致失焦时以边缘半隐藏悬浮球出现，语音唤醒会取回桌宠', async () => {
-    const current = fixture({ autoHideMs: 60_000 });
+  it('打开其他窗口导致失焦不再自动收起；手动收起后语音唤醒仍可取回', async () => {
+    const current = fixture();
     await current.host.initialize();
     const pet = current.windows[0];
-    const area = current.screen.getPrimaryDisplay().workArea;
     pet.emit('blur');
-    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
-    expect(pet.bounds.width).toBe(64);
-    expect(current.host.snapshot().pet?.hidden).toBe(true);
-    expect(current.host.snapshot().pet?.edge).toBe('right');
-    expect(pet.bounds.x + pet.bounds.width / 2).toBe(area.x + area.width);
-    expect(pet.alwaysOnTop).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect(current.host.snapshot().pet?.collapsed).toBe(false);
+    await current.invoke('nuanban:pet:collapse');
+    expect(current.host.snapshot().pet?.collapsed).toBe(true);
     current.setWakeState({ state: 'listening', enabled: true, microphoneActive: true });
     current.wakeUp();
     await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(false));
@@ -1354,11 +1355,11 @@ describe('桌宠自动收起为悬浮球且不置顶', () => {
   });
 
   it('悬浮球可以拖动，拖到边上吸附为半隐藏，拖到中间保持完整可见', async () => {
-    const current = fixture({ autoHideMs: 20 });
+    const current = fixture();
     await current.host.initialize();
     const pet = current.windows[0];
     const area = current.screen.getPrimaryDisplay().workArea;
-    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    expect(await current.invoke('nuanban:pet:collapse')).toBe(true);
     const dragEvent = { sender: pet.webContents, senderFrame: pet.webContents.mainFrame };
     const dragCall = (action: string, point: { x: number; y: number }) => current.handlers.get('nuanban:pet:drag')!(dragEvent, action, point);
     const start = { x: pet.bounds.x + 32, y: pet.bounds.y + 32 };
@@ -1370,7 +1371,7 @@ describe('桌宠自动收起为悬浮球且不置顶', () => {
     expect(pet.bounds.x).toBe(area.x - 32);
     await current.invoke('nuanban:pet:expand');
     await current.invoke('nuanban:pet:collapse');
-    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    expect(current.host.snapshot().pet?.collapsed).toBe(true);
     const middle = { x: pet.bounds.x + 32, y: pet.bounds.y + 32 };
     await dragCall('start', middle);
     await dragCall('move', { x: area.x + 400, y: area.y + 300 });
@@ -1379,19 +1380,19 @@ describe('桌宠自动收起为悬浮球且不置顶', () => {
     expect(pet.bounds.x).toBeGreaterThan(area.x + 100);
   });
 
-  it('持续活动会把自动收起推迟到空闲时间之后', async () => {
-    const current = fixture({ autoHideMs: 1_000 });
+  it('长时间空闲与活动上报都不会触发自动收起', async () => {
+    const current = fixture();
     await current.host.initialize();
-    await new Promise(resolve => setTimeout(resolve, 600));
+    await new Promise(resolve => setTimeout(resolve, 400));
     await current.invoke('nuanban:pet:activity');
-    await new Promise(resolve => setTimeout(resolve, 600));
+    await new Promise(resolve => setTimeout(resolve, 1_200));
     expect(current.host.snapshot().pet?.collapsed).toBe(false);
-    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true), { timeout: 2_000 });
+    expect(current.windows[0].bounds.width).toBeGreaterThan(64);
   });
 
   it('桌宠菜单提供一键配置云端智能服务入口', async () => {
     const configureAiProvider = vi.fn(async () => ({ configured: false }));
-    const current = fixture({ autoHideMs: 60_000, configureAiProvider });
+    const current = fixture({ configureAiProvider });
     await current.host.initialize();
     await current.invoke('nuanban:pet:context-menu');
     const template = current.menus.at(-1)!;
