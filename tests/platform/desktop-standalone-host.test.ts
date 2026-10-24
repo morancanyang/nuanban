@@ -1176,13 +1176,13 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     expect(current.showManagement).not.toHaveBeenCalled();
   });
 
-  it('智能查询直接复用教学模型，不读取 AnySearch 密钥或开启屏幕和麦克风', async () => {
+  it('未配置 AnySearch 密钥时智能查询回退本机模型，不开启屏幕和麦克风', async () => {
     const provider = { status: () => ({ available: true }), answer: vi.fn(async () => ({ text: '合成查询回答' })) };
     const current = fixture({ questioner: provider });
     await current.host.initialize();
     const petWindow = current.windows[0];
     const event = { sender: petWindow.webContents, senderFrame: petWindow.webContents.mainFrame };
-    expect(current.handlers.get('nuanban:pet-search:status')!(event)).toEqual({ provider: 'ConfiguredModel', configured: true });
+    expect(current.handlers.get('nuanban:pet-search:status')!(event)).toEqual({ provider: 'ConfiguredModel', configured: true, webSearch: false });
     expect(provider.answer).not.toHaveBeenCalled();
     await expect(current.handlers.get('nuanban:pet-search:run')!(event, { query: '怎样保存文件', consent: true })).resolves.toMatchObject({
       ok: true, kind: 'model-answer', answer: '合成查询回答', webSearch: false, results: [],
@@ -1191,6 +1191,16 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     expect(current.host.snapshot().observation.captureActive).toBe(false);
     expect(current.host.snapshot().wake.microphoneActive).toBe(false);
     expect(current.showManagement).not.toHaveBeenCalled();
+  });
+
+  it('配置了加密 AnySearch 密钥时智能查询改走实时检索，不再调用模型', async () => {
+    const provider = { status: () => ({ available: true }), answer: vi.fn(async () => ({ text: '不应被调用' })) };
+    const current = fixture({ questioner: provider, anysearchKeyStore: { read: () => 'synthetic-anysearch-key', save: () => ({ saved: true }) } });
+    await current.host.initialize();
+    const petWindow = current.windows[0];
+    const event = { sender: petWindow.webContents, senderFrame: petWindow.webContents.mainFrame };
+    expect(current.handlers.get('nuanban:pet-search:status')!(event)).toEqual({ provider: 'AnySearch', configured: true, webSearch: true });
+    expect(provider.answer).not.toHaveBeenCalled();
   });
 
   it('取消原生用途确认不会采集，云端同意默认不勾选', async () => {

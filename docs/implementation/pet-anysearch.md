@@ -1,47 +1,59 @@
-# 桌宠智能查询 · 复用已有模型
+# 桌宠智能查询 · AnySearch 实时检索
 
-> 文档同步：2026-10-22。产品显示名称为**微光指引**；[当前功能与平台边界](product-current-state.md)统一说明现行入口、已实现范围和待验证能力。本文已有测试数字与生成日期仍只对应原批次，不因文档更新自动视为重新验收。
+> 文档同步：2026-10-24。产品显示名称为**微光指引**；[当前功能与平台边界](product-current-state.md)统一说明现行入口、已实现范围和待验证能力。本文已有测试数字与生成日期仍只对应原批次，不因文档更新自动视为重新验收。
 
-2026-10-18：桌宠原有搜索入口改为直接使用本机已配置的模型。不要求 AnySearch API Key，不需要新账号，不跳转管理客户端。桌宠底部“搜索”、功能页“智能查询”和右键菜单“智能查询 · 已配置模型”均可打开。
+2026-10-18 曾把桌宠搜索入口临时改为只复用本机模型（不联网检索）。**2026-10-24 起改回 AnySearch 实时检索**：桌宠底部“搜索”、功能页“智能查询”和右键菜单“智能查询”都走同一条链路；用户要的是能核验的实时信息，模型知识回答只在没有密钥时作为如实标注的降级路径。
 
-## 当前运行路径
+## 供应选择
 
-- 桌宠主进程把已有的 questioner 注入 model-search-client.cjs，与普通问答、教学使用同一模型实例、网关和加密凭证；不自动换模型。
-- 当前本机配置为 gpt-6.1-sol，网关为 api.openai-next.com。这是用户指定的第三方模型标识，不表示已认证其官方型号或网页检索能力。
-- 原 AnySearch 适配器与密钥仓储仅保留兼容代码和隔离测试；桌宠默认运行路径不再导入它们，不读取 AnySearch 环境变量或保存的密钥，也不会在模型失败时回退调用它。
-- 状态只返回固定供应类型与 configured 布尔值，不把网关、模型凭证或供应错误正文返回页面。配置就绪不保证实际鉴权、余额或网络请求成功。
+| 状态 | 行为 | 页面标注 |
+| --- | --- | --- |
+| 已配置 AnySearch 密钥 | 调用 `POST https://api.anysearch.com/v1/search`（Bearer 鉴权），展示来源标题/摘要/链接 | “已接入 AnySearch 实时检索 · 结果来自公开网页，可打开原文核对” |
+| 无任何密钥，但本机模型可用 | 复用本机已配置模型回答，不上网检索 | “已复用现有模型 · 未接入实时检索；回答不代表已联网核验” |
+| 两者都不可用 | 拒绝发送并提示配置 | “AnySearch 实时检索尚未配置密钥 …” 或 “实时检索与本机模型都未就绪 …” |
+
+- AnySearch **已配置但调用失败**（鉴权、额度、超时、畸形回包）时直接报错，不会静默改走模型，避免把模型生成内容冒充检索结果。
+- 每次调用按当次读取的密钥判断供应，密钥在运行中配置后无需重启。
+- 状态只返回固定供应类型、`configured` 与 `webSearch` 布尔值，不把密钥、网关或上游错误正文返回页面。
+
+## 密钥配置（不入仓库、不入安装包）
+
+密钥明文只允许出现在进程环境变量或本机 DPAPI 加密存储中：
+
+~~~powershell
+# 交互输入（不回显，不落盘）
+.\scripts\set-anysearch-key.ps1
+# 或从密钥文件读取
+.\scripts\set-anysearch-key.ps1 -KeyFile C:\path\to\key.txt
+~~~
+
+存储位置：`%APPDATA%\@nuanban\desktop\nuanban-anysearch-key.bin`（DPAPI，仅当前 Windows 用户可解密，约 69 字节密文）。环境变量 `NUANBAN_ANYSEARCH_API_KEY`（或官方 `ANYSEARCH_API_KEY`）优先于存储，用于临时验证；两者都不存在时不发匿名请求。
+
+`tests/platform/desktop-anysearch-key-hygiene.test.ts` 会扫描源码、脚本、测试与实现文档，确保没有 `as_sk_` 形式的真实密钥被提交；请勿把密钥写入任何会进版本库的文件。
 
 ## 发送与展示
 
-- 打开页面不会请求模型。用户手动输入问题并勾选本次发送确认，再点击“请模型回答”才会发送。
-- 只发送当前手动问题及固定说明，不附加屏幕、麦克风、图片、教学记录、学习档案或搜索历史。查询不启动观察、语音或其他客户端窗口。
+- 打开页面不请求接口。用户手动输入问题并勾选本次发送确认，再点击“请模型回答”才会发送当前问题文本。
+- 只发送当前手动问题与固定参数（`max_results: 10`、`language: zh-CN`）；不附带屏幕、麦克风、图片、教学记录、学习档案或搜索历史，不启动观察、语音或其他窗口。
 - 本机继续拒绝常见个人号码、密码和密钥格式；这不代表能识别所有隐私。
-- 页面显示“模型回答 · 未联网核验”。当前使用普通模型问答端口，没有接入实际网页检索工具；不得把模型生成的答案或链接包装成已验证的网页结果。
-- 回答作为纯文本显示，不执行 HTML、脚本，不自动打开其中的链接；不提供模型编造的来源按钮。兼容来源结果仍只接受本次返回的安全 HTTPS 地址及受限来源 ID。
-- 对实时、最新、价格、天气等问题明确提示无法实时核实；医疗、法律、金融问题仍需可靠原始来源或专业人士确认。
+- 结果只接受本次返回的 **HTTPS** 地址（禁止明文、内网、本机与 IP 直连地址），去重后最多 10 条；标题/摘要做长度与控制字符清洗。
+- 链接需用户点击才由系统浏览器打开，页面不执行 HTML/脚本、不自动打开、不提供模型编造的来源按钮。
+- 对实时、最新、价格、天气等问题的回答来自检索来源，**仍需用户打开原文核对**；医疗、法律、金融问题仍需可靠原始来源或专业人士确认。
 
 ## 停止与失败
 
-- 沿用模型适配器的 45 秒超时、响应长度限制、固定网关、禁止重定向和禁止自动重试；缺配置、鉴权失败、限流、取消、超时及畸形回包均给出固定提示，无 Mock 或匿名搜索回退。
-- 新查询、停止、离开功能页、停止全部采集和退出都会取消在途请求。迟到回答不能恢复页面、覆盖新结果或跨页显示。
-- 收起或离开页面后撤销本次发送确认，重新打开不会自动发送。模型请求可能在供应商侧已开始处理，取消不保证撤销上游计费。
-- 沿用本机已有模型配置，无需重新输入 AnySearch 密钥。模型接入说明见 real-ai-provider.md。主进程接线升级后需要正常退出并重启桌宠。
+- 单次检索 15 秒超时；新查询、停止、离开功能页、停止全部采集和退出都会取消在途请求，迟到结果不能恢复页面或覆盖新结果。
+- 鉴权失败、额度不足、超时、取消与畸形回包映射为固定中文提示，无 Mock 或匿名回退。
+- 收起或离开页面后撤销本次发送确认，重新打开不会自动发送。取消不保证撤销上游计费。
 
 ## 验证方式
 
-单元与接线回归：
-
 ~~~powershell
-pnpm exec vitest run tests/platform/desktop-model-search.test.ts tests/platform/desktop-anysearch.test.ts tests/platform/desktop-anysearch-settings.test.ts tests/platform/desktop-pet-ui.test.ts tests/platform/desktop-standalone-host.test.ts tests/provider/desktop-ai-provider.test.ts
+pnpm exec vitest run tests/platform/desktop-pet-search-client.test.ts tests/platform/desktop-anysearch.test.ts tests/platform/desktop-anysearch-settings.test.ts tests/platform/desktop-anysearch-key-hygiene.test.ts tests/platform/desktop-model-search.test.ts tests/platform/desktop-standalone-host.test.ts tests/platform/desktop-pet-ui.test.ts
+# 配置密钥后的一次真实调用核对（不打印密钥；可用第二个参数换问题）
+apps\desktop\node_modules\electron\dist\electron.exe scripts/check-anysearch-live.cjs "今天北京天气"
 ~~~
 
-界面回归：
+单元与接线测试使用合成供应，验证供应优先级、如实标注、无匿名请求、无静默回退、密钥不回传页面；**不证明真实检索质量**。
 
-~~~powershell
-$env:PLAYWRIGHT_CHANNEL = 'msedge'
-pnpm exec playwright test --config tests/helpers/desktop-pet-playwright.config.ts desktop-pet-search.spec.ts desktop-pet-features.spec.ts
-~~~
-
-这些测试使用显式合成供应及隔离浏览器，验证共用模型、固定鉴权路径、发送确认、纯文本回答、无伪造来源、错误和迟到响应隔离，不证明真实网页检索可用。
-
-2026-10-18：使用本机已有 DPAPI 模型配置和不含个人数据的“Windows 怎样新建文件夹”问题，完成一次真实模型查询，返回非空中文回答，未返回或伪造网页来源；未发送用户屏幕、附件或音频。这只证明该次模型网关请求成功，不证明网页检索或所有回答质量已经验收，不能据此改写 D07 或发布结论。
+2026-10-24 真实调用记录：用本机 DPAPI 存储中的密钥，经 `createPetSearchClient` 组合链路查询“今天北京天气”返回 7 条、查询“2026年10月24日 人民币 美元 汇率”返回 9 条结果，全部为 HTTPS 且来源各异，模型调用次数为 0，状态为 `{provider: AnySearch, configured: true, webSearch: true}`。这只证明该次第三方检索请求成功、结果可投影，不证明内容准确性、持续可用性、额度或所有问题的回答质量，也不能据此改写发布结论。

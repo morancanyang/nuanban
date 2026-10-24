@@ -31,7 +31,7 @@ function registerPetSearchBridge({ ipcMain, isTrusted, showSearch, openExternal,
     });
   }
 
-  handle('status', () => ({ provider: 'ConfiguredModel', configured: client.status().configured === true }));
+  handle('status', () => { const current = client.status(); return { provider: current.provider, configured: current.configured === true, webSearch: current.webSearch === true }; });
   handle('show', () => { showSearch(); return { ok: true }; });
   handle('cancel', () => { cancel(); return { ok: true }; });
   handle('run', async payload => {

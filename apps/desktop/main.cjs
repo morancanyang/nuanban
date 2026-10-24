@@ -27,6 +27,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const { PRODUCT_ICON_PATH } = require('./brand.cjs');
+const { createAnySearchKeyStore } = require('./anysearch-settings.cjs');
 const { createCaptureVisibility } = require('./capture-visibility.cjs');
 const indexPath = path.join(__dirname, 'ui', 'index.html');
 const developmentIndex = path.join(__dirname, '..', 'web', 'dist', 'index.html');
@@ -251,6 +252,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     analyzer: aiProvider ? createProviderAnalysisClient({ provider: aiProvider }) : undefined,
     questioner: aiProvider,
     configureAiProvider,
+    anysearchKeyStore: createAnySearchKeyStore({ userDataPath: app.getPath('userData'), safeStorage }),
     reminderStore, reminderNotifications, isQuitting: () => quitAfterLifecycle, hasManagementWindow: hasVisibleClientWindow, onExit: () => app.quit() });
   await Promise.all([standaloneHost.initialize(), process.argv.includes('--management') ? showMainWindow('/') : Promise.resolve()]);
 }).catch(() => {
