@@ -12,6 +12,11 @@ const { registerPetSearchBridge } = require('./pet-search-bridge.cjs');
 const { createPetSearchClient } = require('./pet-search-client.cjs');
 const { createAnySearchClient } = require('./anysearch-client.cjs');
 const { createModelSearchClient } = require('./model-search-client.cjs');
+const { createAppLauncherRegistry } = require('./app-launcher-registry.cjs');
+const { createAppLauncher } = require('./app-launcher.cjs');
+const { createAppLauncherIntent } = require('./app-launcher-intent.cjs');
+const { createAppLauncherHistory } = require('./app-launcher-history.cjs');
+const { registerAppLauncherBridge } = require('./app-launcher-bridge.cjs');
 const { createRealtimeVoiceHost } = require('./realtime-voice-host.cjs');
 const { registerDictationBridge } = require('./wake/dictation-bridge.cjs');
 const { loadXingyunCredentials } = require('./xingyun-credentials.cjs');
@@ -66,6 +71,7 @@ function createStandaloneHost(options) {
   let learningFailure = '';
   let reminderTimer = null;
   let searchBridge = null;
+  let appLauncherBridge = null;
   let voiceHost = null;
   let faceVoiceVisible = false;
   let voiceBubble = { user: '', assistant: '' };
@@ -829,6 +835,7 @@ function createStandaloneHost(options) {
     const singleFrameStopping = singleFrame.cancel().then(() => true, () => false);
     const voiceStopping = voiceHost?.stop(reason) ?? { stopped: true, microphoneActive: false };
     searchBridge?.cancel();
+    appLauncherBridge?.cancel();
     observationConsentGeneration += 1;
     consentedSourceId = null;
     const [result, localWake, voiceResult, avatarResult, singleFrameStopped] = await Promise.all([runtime.stopObservation(reason), disableWake(), voiceStopping, avatarService?.stop(reason) ?? { stopped: true }, singleFrameStopping]);
@@ -881,6 +888,7 @@ function createStandaloneHost(options) {
       { label: '和微光指引说说 / 教我操作', click: showPetPanel },
       { label: '面对面实时语音…', click: () => runAction(openFaceVoice) },
       { label: '智能查询', click: () => searchBridge?.show() },
+      { label: '智能打开软件…', click: () => appLauncherBridge?.show() },
       { label: '开始本地观察…', enabled: !choosingSource && ['off', 'stopped'].includes(current.observation.state), click: () => runAction(() => chooseObservation()) },
       { label: '继续共享（本人确认）…', enabled: !choosingSource && current.observation.state === 'privacy_paused', click: () => runAction(() => chooseObservation(true)) },
       { label: '我点好了 · 重新核验', enabled: current.task.state === 'awaiting_action' && current.observation.state === 'observing', click: () => runAction(() => runtime.verify()) },
@@ -1206,6 +1214,22 @@ function createStandaloneHost(options) {
         showPetPanel({ focusInput: false, section: 'search' });
         petWindow.webContents.send('nuanban:pet-search:opened');
       } });
+    const launcherRegistry = options.appLauncherRegistry ?? createAppLauncherRegistry();
+    appLauncherBridge = registerAppLauncherBridge({ ipcMain, isTrusted: event => trusted(event, petWindow, petPath),
+      registry: launcherRegistry,
+      launcher: options.appLauncher ?? createAppLauncher({ spawn: options.spawnProcess ?? require('node:child_process').spawn, shell: options.electron.shell }),
+      intent: createAppLauncherIntent({ provider: options.questioner, registry: launcherRegistry }),
+      history: createAppLauncherHistory({ filePath: path.join(options.userDataPath, 'nuanban-app-launcher.json') }),
+      pickFolder: async () => {
+        dialogOpen += 1;
+        try {
+          const picked = live(petWindow)
+            ? await dialog.showOpenDialog(petWindow, { title: '选择要打开的文件夹', properties: ['openDirectory'], buttonLabel: '打开这个文件夹' })
+            : await dialog.showOpenDialog({ title: '选择要打开的文件夹', properties: ['openDirectory'], buttonLabel: '打开这个文件夹' });
+          return picked?.canceled || !picked?.filePaths?.length ? undefined : picked.filePaths[0];
+        } finally { dialogOpen = Math.max(0, dialogOpen - 1); }
+      },
+      showPage: () => showPetPanel({ focusInput: false, section: 'openApp' }) });
     voiceHost = (options.createVoiceHost ?? createRealtimeVoiceHost)({ electron: options.electron, showDialog, onState: updateVoiceState, onTranscript: updateVoiceTranscript,
       presentation: 'pet', client: options.voiceClient, provider: options.questioner,
       beforeStart: async () => {
@@ -1245,6 +1269,7 @@ function createStandaloneHost(options) {
     closing = true;
     const voiceStopping = voiceHost?.dispose() ?? { stopped: true, microphoneActive: false };
     searchBridge?.dispose();
+    appLauncherBridge?.dispose();
     dictationBridge?.dispose();
     observationConsentGeneration += 1;
     clearTimeout(guideTimer);

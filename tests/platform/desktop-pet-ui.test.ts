@@ -8,6 +8,7 @@ type StateListener = (state: unknown) => void;
 class UiElement extends EventTarget {
   hidden = false;
   disabled = false;
+  checked = false;
   value = '';
   textContent = '';
   className = '';
@@ -85,7 +86,7 @@ function snapshot(observation: Record<string, unknown> = {}, task: Record<string
   };
 }
 
-function petHarness(initial: unknown = snapshot()) {
+function petHarness(initial: unknown = snapshot(), openApp?: Record<string, unknown>) {
   let current = initial;
   let listener: StateListener | undefined;
   let panelListener: StateListener | undefined;
@@ -110,7 +111,7 @@ function petHarness(initial: unknown = snapshot()) {
     collapse: vi.fn(async () => true),
     close: vi.fn(async () => true),
   };
-  const window = Object.assign(new EventTarget(), { nuanbanPet: bridge, setInterval: vi.fn(), setTimeout: vi.fn() });
+  const window = Object.assign(new EventTarget(), { nuanbanPet: bridge, ...(openApp ? { nuanbanOpenApp: openApp } : {}), setInterval: vi.fn(), setTimeout: vi.fn() });
   runInNewContext(source('pet.js'), { window, document, console, Date, CustomEvent });
   cleanups.push(() => dispatch(window, 'pagehide'));
   const element = (name: string) => document.getElementById(name);
@@ -2703,5 +2704,328 @@ describe('桌宠自动收起为悬浮球的界面状态', () => {
     harness.click('pet-ball');
     await settle();
     expect(harness.bridge.expand).not.toHaveBeenCalled();
+  });
+});
+
+describe('功能小屋的智能打开软件入口', () => {
+  const openAppIds = ['open-app-view', 'open-app-query', 'open-app-submit', 'open-app-voice', 'open-app-auto', 'open-app-auto-status',
+    'open-app-consent', 'open-app-history', 'open-app-cancel', 'open-app-progress', 'open-app-error', 'open-app-confirm',
+    'open-app-confirm-text', 'open-app-confirm-ok', 'open-app-confirm-cancel', 'open-app-clarify', 'open-app-result'];
+
+  const planReply = (overrides: Record<string, unknown> = {}) => ({
+    ok: true,
+    kind: 'plan',
+    plan: { planId: 'plan-1', appId: 'calculator', appName: '计算器', target: 'default', targetDescription: '默认界面', risk: 'low',
+      parameters: {}, requiresConfirmation: true, reason: '已登记的软件', ...overrides },
+  });
+  const started = { ok: true, result: { success: true, appId: 'calculator', target: 'default', message: '已发送启动请求；仅确认已发送启动请求，无法确认软件内部页面已加载' } };
+
+  function openAppHarness(status: Record<string, unknown> = {}, initial: unknown = snapshot()) {
+    const api = {
+      status: vi.fn(async (): Promise<unknown> => ({ ok: true, modelReady: true, autoExecute: false, catalog: [], ...status })),
+      parse: vi.fn(async (_input: unknown): Promise<unknown> => ({ ok: true, kind: 'clarify', question: '想打开哪个软件？' })),
+      execute: vi.fn(async (_input: unknown): Promise<unknown> => ({ ok: true, result: { success: false, errorCode: 'CANCELLED' } })),
+      pickFolder: vi.fn(async (): Promise<unknown> => ({ ok: false, code: 'CANCELLED' })),
+      cancel: vi.fn(async (): Promise<unknown> => ({ ok: true })),
+      history: vi.fn(async (): Promise<unknown> => ({ ok: true, entries: [] })),
+      setAutoExecute: vi.fn(async (_enabled: boolean): Promise<unknown> => ({ ok: true, autoExecute: false })),
+    };
+    const harness = petHarness(initial, api);
+    const open = async (goal = '打开计算器') => {
+      harness.click('feature-open-app');
+      await settle();
+      harness.element('open-app-consent').checked = true;
+      dispatch(harness.element('open-app-consent'), 'change');
+      harness.element('open-app-query').value = goal;
+      dispatch(harness.element('open-app-query'), 'input');
+    };
+    return { ...harness, api, open, submit: () => dispatch(harness.element('open-app-form'), 'submit') };
+  }
+
+  it('功能卡片与契约元素齐全，语音按钮禁用且不接入任何采集', async () => {
+    const harness = openAppHarness();
+    await settle();
+    const html = source('pet.html');
+    expect(html).toMatch(/<button id="feature-open-app"[^>]*><strong>智能打开软件<\/strong><small>说一句话，暖暖帮你打开软件<\/small><\/button>/);
+    expect(html).toMatch(/<section id="open-app-view"[^>]*hidden>/);
+    expect(html).toMatch(/<button id="open-app-voice"[^>]*disabled/);
+    expect(html).toContain('语音输入尚未接入本页面');
+    for (const identifier of openAppIds) expect(harness.element(identifier)).toBeTruthy();
+    expect(harness.element('open-app-view').hidden).toBe(true);
+    expect(harness.element('open-app-auto').checked).toBe(false);
+    expect(harness.api.status).not.toHaveBeenCalled();
+    expect(source('pet.js')).not.toMatch(/getUserMedia|getDisplayMedia|desktopCapturer|mediaDevices|SpeechRecognition/);
+    expect(source('pet.js')).not.toMatch(/innerHTML|outerHTML|\bfetch\s*\(|XMLHttpRequest|setInterval/);
+  });
+
+  it('点击卡片切到独立页面，未勾选本次发送确认前不能发送', async () => {
+    const harness = openAppHarness();
+    await settle();
+    harness.click('feature-open-app');
+    await settle();
+    expect(harness.element('pet-panel').dataset.view).toBe('openApp');
+    expect(harness.element('open-app-view').hidden).toBe(false);
+    expect(harness.element('feature-home').hidden).toBe(true);
+    expect(harness.api.status).toHaveBeenCalledTimes(1);
+    expect(harness.api.history).toHaveBeenCalled();
+    expect(harness.element('open-app-submit').disabled).toBe(true);
+    harness.element('open-app-query').value = '打开计算器';
+    dispatch(harness.element('open-app-query'), 'input');
+    expect(harness.element('open-app-submit').disabled).toBe(true);
+    harness.element('open-app-consent').checked = true;
+    dispatch(harness.element('open-app-consent'), 'change');
+    expect(harness.element('open-app-submit').disabled).toBe(false);
+    expect(harness.bridge.ask).not.toHaveBeenCalled();
+    expect(harness.bridge.dictate).not.toHaveBeenCalled();
+    expect(harness.bridge.openMain).not.toHaveBeenCalled();
+    expect(harness.bridge.openTool).not.toHaveBeenCalled();
+    expect(harness.bridge.command.mock.calls.every(([payload]) => (payload as { type: string }).type === 'panel.set-expanded')).toBe(true);
+  });
+
+  it('确认卡片显示即将打开/目标界面/是否继续，只有本人点继续才带 approved:true 执行', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.parse.mockResolvedValueOnce(planReply());
+    harness.submit();
+    await settle();
+    expect(harness.api.parse).toHaveBeenCalledWith({ goal: '打开计算器', consent: true });
+    expect(harness.element('open-app-confirm').hidden).toBe(false);
+    expect(harness.element('open-app-confirm-text').textContent).toBe('即将打开：计算器\n目标界面：默认界面\n是否继续？');
+    expect(harness.api.execute).not.toHaveBeenCalled();
+    harness.api.execute.mockResolvedValueOnce(started);
+    harness.click('open-app-confirm-ok');
+    await settle();
+    expect(harness.api.execute).toHaveBeenCalledExactlyOnceWith({ planId: 'plan-1', approved: true });
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.element('open-app-result').hidden).toBe(false);
+    expect(harness.element('open-app-result').textContent).toContain('仅确认已发送启动请求，无法确认软件内部页面已加载');
+    expect(harness.element('open-app-result').textContent).not.toMatch(/已进入|内部页面已就绪/);
+    expect(harness.element('open-app-result').dataset.tone).toBe('success');
+  });
+
+  it('主进程判定无需确认时直接带 approved:false 请求，不自行猜测自动执行', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.parse.mockResolvedValueOnce(planReply({ requiresConfirmation: false }));
+    harness.api.execute.mockResolvedValueOnce(started);
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.api.execute).toHaveBeenCalledExactlyOnceWith({ planId: 'plan-1', approved: false });
+  });
+
+  it('需要文件夹时先由本人选择：取消只提示，返回更新后的计划再按规则确认', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.parse.mockResolvedValueOnce(planReply({ requiresFolder: true }));
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-folder-row').hidden).toBe(false);
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.api.execute).not.toHaveBeenCalled();
+    harness.click('open-app-folder');
+    await settle();
+    expect(harness.element('open-app-progress').textContent).toContain('没有选择文件夹');
+    expect(harness.api.execute).not.toHaveBeenCalled();
+    harness.api.pickFolder.mockResolvedValueOnce({ ok: false, code: 'FOLDER_MISSING', message: '请先选择要打开的文件夹。' });
+    harness.click('open-app-folder');
+    await settle();
+    expect(harness.element('open-app-error').hidden).toBe(false);
+    expect(harness.element('open-app-error').textContent).toContain('请先选择要打开的文件夹');
+    expect(harness.element('open-app-error').textContent).toContain('FOLDER_MISSING');
+    harness.api.pickFolder.mockResolvedValueOnce({ ok: true, path: 'C:\\Users\\me\\项目', display: '项目',
+      plan: planReply({ requiresFolder: false, parameters: { folder: 'C:\\Users\\me\\项目' } }).plan });
+    harness.click('open-app-folder');
+    await settle();
+    expect(harness.element('open-app-folder-row').hidden).toBe(true);
+    expect(harness.element('open-app-confirm').hidden).toBe(false);
+    expect(harness.element('open-app-confirm-text').textContent).toContain('即将打开：计算器');
+    expect(harness.api.execute).not.toHaveBeenCalled();
+  });
+
+  it('解析失败显示中文提示与错误码，停止让未执行的计划作废，失败结果如实显示错误码', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.parse.mockResolvedValueOnce({ ok: false, code: 'MODEL_UNAVAILABLE', message: '解析模型尚未就绪，请检查配置。' });
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-error').hidden).toBe(false);
+    expect(harness.element('open-app-error').textContent).toContain('解析模型尚未就绪');
+    expect(harness.element('open-app-error').textContent).toContain('MODEL_UNAVAILABLE');
+    harness.api.parse.mockResolvedValueOnce(planReply());
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-confirm').hidden).toBe(false);
+    harness.click('open-app-cancel');
+    await settle();
+    expect(harness.api.cancel).toHaveBeenCalledTimes(1);
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.element('open-app-progress').textContent).toContain('作废');
+    expect(harness.api.execute).not.toHaveBeenCalled();
+    harness.api.parse.mockResolvedValueOnce(planReply());
+    harness.submit();
+    await settle();
+    harness.api.execute.mockResolvedValueOnce({ ok: true, result: { success: false, errorCode: 'EXECUTABLE_MISSING', message: '没有找到可执行的程序。' } });
+    harness.click('open-app-confirm-ok');
+    await settle();
+    expect(harness.element('open-app-result').textContent).toContain('没有找到可执行的程序');
+    expect(harness.element('open-app-result').textContent).toContain('EXECUTABLE_MISSING');
+    expect(harness.element('open-app-result').dataset.tone).toBe('failure');
+  });
+
+  it('自动执行开关默认关闭，切换只调用 setAutoExecute 并如实回退状态', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    expect(harness.element('open-app-auto').checked).toBe(false);
+    expect(harness.element('open-app-auto-status').textContent).toBe('自动执行已关闭：每次打开都需要你确认');
+    harness.api.setAutoExecute.mockResolvedValueOnce({ ok: true, autoExecute: true });
+    harness.element('open-app-auto').checked = true;
+    dispatch(harness.element('open-app-auto'), 'change');
+    await settle();
+    expect(harness.api.setAutoExecute).toHaveBeenCalledExactlyOnceWith(true);
+    expect(harness.element('open-app-auto').checked).toBe(true);
+    expect(harness.element('open-app-auto-status').textContent).toContain('自动执行已开启');
+    harness.api.setAutoExecute.mockResolvedValueOnce({ ok: false, code: 'AUTO_EXECUTE_DENIED', message: '未确认' });
+    harness.element('open-app-auto').checked = false;
+    dispatch(harness.element('open-app-auto'), 'change');
+    await settle();
+    expect(harness.api.setAutoExecute).toHaveBeenLastCalledWith(false);
+    expect(harness.element('open-app-auto').checked).toBe(true);
+    expect(harness.element('open-app-auto-status').textContent).toContain('自动执行已开启');
+    expect(harness.element('open-app-error').textContent).toContain('未确认');
+    const fresh = openAppHarness();
+    await settle();
+    await fresh.open();
+    fresh.api.setAutoExecute.mockResolvedValueOnce({ ok: false, code: 'AUTO_EXECUTE_DENIED', message: '未确认' });
+    fresh.element('open-app-auto').checked = true;
+    dispatch(fresh.element('open-app-auto'), 'change');
+    await settle();
+    expect(fresh.element('open-app-auto').checked).toBe(false);
+    expect(fresh.element('open-app-auto-status').textContent).toContain('自动执行已关闭');
+    expect(fresh.element('open-app-error').textContent).toContain('未确认');
+  });
+
+  it('追问、不支持与取消都只如实显示文字，不执行任何打开', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.parse.mockResolvedValueOnce({ ok: true, kind: 'clarify', question: '想打开哪个软件的哪个界面？' });
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-clarify').hidden).toBe(false);
+    expect(harness.element('open-app-clarify').textContent).toContain('哪个界面');
+    harness.api.parse.mockResolvedValueOnce({ ok: true, kind: 'cancel', message: '已取消，不会打开任何软件。' });
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-clarify').textContent).toContain('已取消');
+    harness.api.parse.mockResolvedValueOnce({ ok: true, kind: 'unsupported', message: '该软件暂不支持直接打开这个界面，可以改为打开主界面。' });
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-clarify').textContent).toContain('暂不支持');
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.api.execute).not.toHaveBeenCalled();
+  });
+
+  it('离开本页作废未执行的计划并清除本次发送确认', async () => {
+    const harness = openAppHarness();
+    await settle();
+    await harness.open();
+    harness.api.parse.mockResolvedValueOnce(planReply());
+    harness.submit();
+    await settle();
+    expect(harness.element('open-app-confirm').hidden).toBe(false);
+    harness.click('view-features');
+    await settle();
+    expect(harness.api.cancel).toHaveBeenCalledTimes(1);
+    expect(harness.element('open-app-confirm').hidden).toBe(true);
+    expect(harness.element('open-app-consent').checked).toBe(false);
+  });
+
+  it('最近记录只显示时间、软件、界面与结果，不显示问题原文', async () => {
+    const harness = openAppHarness();
+    await settle();
+    harness.api.history.mockResolvedValue({ ok: true, entries: [{ at: Date.now(), appId: 'calculator', target: 'default', success: true, question: '打开计算器后退出登录' }] });
+    await harness.open();
+    await settle();
+    const text = harness.element('open-app-history').children.map(item => item.children.map(part => part.textContent).join(' ')).join(' ');
+    expect(text).toContain('calculator');
+    expect(text).toContain('成功');
+    expect(text).not.toContain('打开计算器后退出登录');
+  });
+
+  it('preload 只暴露 7 个冻结方法，严格校验入参并投影状态、计划与结果', async () => {
+    const harness = preloadHarness('pet-preload.cjs');
+    const api = harness.exposed.nuanbanOpenApp;
+    expect(Object.isFrozen(api)).toBe(true);
+    expect(Object.keys(api).sort()).toEqual(['cancel', 'execute', 'history', 'parse', 'pickFolder', 'setAutoExecute', 'status']);
+    expect(Object.keys(api).join(' ')).not.toMatch(/ipcRenderer|process|channel/i);
+    expect(source('pet-preload.cjs')).not.toMatch(/exposeInMainWorld\(\s*['"](?:ipcRenderer|process|require)/);
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, modelReady: true, autoExecute: false, secret: 'discard',
+      catalog: [{ appId: 'calculator', displayName: '计算器', secret: 'discard',
+        targets: [{ target: 'default', description: '默认界面', risk: 'low', requiresFolder: false, requiresUrl: false, secret: 'discard' }] }] });
+    const status = await api.status() as { catalog: Array<Record<string, unknown>> };
+    expect(status.catalog[0]).toEqual({ appId: 'calculator', displayName: '计算器',
+      targets: [{ target: 'default', description: '默认界面', risk: 'low', requiresFolder: false, requiresUrl: false }] });
+    expect(JSON.stringify(status)).not.toContain('discard');
+    for (const input of [null, [], { goal: '打开计算器' }, { goal: '', consent: true }, { goal: '字'.repeat(301), consent: true },
+      { goal: '打开计算器', consent: false }, { goal: '打开计算器', consent: true, extra: 1 }]) expect(() => api.parse(input)).toThrow();
+    expect(harness.ipcRenderer.invoke).toHaveBeenCalledTimes(1);
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, kind: 'plan', plan: { planId: 'plan-1', appId: 'calculator', appName: '计算器',
+      target: 'default', targetDescription: '默认界面', risk: 'low', parameters: { url: 'https://example.com', folder: 'C:\\项目' },
+      requiresConfirmation: true, reason: '已登记', shell: 'powershell -c calc' } });
+    const parsed = await api.parse({ goal: '打开计算器', consent: true }) as { plan: Record<string, unknown> };
+    expect(harness.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:parse', { goal: '打开计算器', consent: true });
+    expect(parsed.plan).toEqual({ planId: 'plan-1', appId: 'calculator', appName: '计算器', target: 'default', targetDescription: '默认界面',
+      risk: 'low', parameters: { url: 'https://example.com', folder: 'C:\\项目' }, requiresConfirmation: true, reason: '已登记' });
+    expect(JSON.stringify(parsed)).not.toContain('powershell');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, kind: 'cancel', message: '已取消，不会打开任何软件。', extra: 'discard' });
+    expect(await api.parse({ goal: '打开计算器', consent: true })).toEqual({ ok: true, kind: 'cancel', message: '已取消，不会打开任何软件。' });
+    for (const input of [null, [], { planId: '', approved: true }, { planId: 'plan-1', approved: 1 }, { planId: 'plan-1', approved: true, extra: 1 }]) {
+      expect(() => api.execute(input)).toThrow();
+    }
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, result: { success: true, appId: 'calculator', target: 'default',
+      message: '仅确认已发送启动请求，无法确认软件内部页面已加载', errorCode: null, raw: 'discard' } });
+    const executed = await api.execute({ planId: 'plan-1', approved: true }) as { result: Record<string, unknown> };
+    expect(harness.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:execute', { planId: 'plan-1', approved: true });
+    expect(executed.result).toEqual({ success: true, appId: 'calculator', target: 'default', message: '仅确认已发送启动请求，无法确认软件内部页面已加载' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'LAUNCH_FAILED', message: '启动失败', detail: 'discard' });
+    expect(await api.execute({ planId: 'plan-1', approved: false })).toEqual({ ok: false, code: 'LAUNCH_FAILED', message: '启动失败' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'NOT_A_CODE', message: '未知错误' });
+    await expect(api.parse({ goal: '打开计算器', consent: true })).rejects.toThrow('错误码');
+    const channels = harness.ipcRenderer.invoke.mock.calls.map(([channel]) => channel as string);
+    expect(channels.every(channel => channel.startsWith('nuanban:pet-open-app:'))).toBe(true);
+  });
+
+  it('preload 的目录选择、取消、记录与自动执行只投影声明字段', async () => {
+    const harness = preloadHarness('pet-preload.cjs');
+    const api = harness.exposed.nuanbanOpenApp;
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, extra: 'discard' });
+    expect(await api.cancel()).toEqual({ ok: true });
+    expect(harness.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:cancel');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'CANCELLED', message: '已取消选择文件夹，未打开任何软件。', extra: 'discard' });
+    expect(await api.pickFolder()).toEqual({ ok: false, code: 'CANCELLED', message: '已取消选择文件夹，未打开任何软件。' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'FOLDER_MISSING', message: '请先选择要打开的文件夹。', extra: 'discard' });
+    expect(await api.pickFolder()).toEqual({ ok: false, code: 'FOLDER_MISSING', message: '请先选择要打开的文件夹。' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, path: 'C:\\项目', display: '项目', plan: null, secret: 'discard' });
+    expect(await api.pickFolder()).toEqual({ ok: true, path: 'C:\\项目', display: '项目' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, path: 'C:\\项目', display: '项目', secret: 'discard',
+      plan: { planId: 'plan-2', appId: 'vscode', appName: 'Visual Studio Code', target: 'folder', targetDescription: '打开文件夹', risk: 'confirm',
+        parameters: { folder: 'C:\\项目' }, requiresConfirmation: true, requiresFolder: false, reason: '本人已选择文件夹' } });
+    expect(await api.pickFolder()).toEqual({ ok: true, path: 'C:\\项目', display: '项目',
+      plan: expect.objectContaining({ planId: 'plan-2', risk: 'confirm', parameters: { folder: 'C:\\项目' } }) });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, secret: 'discard',
+      entries: [{ at: 1, appId: 'calculator', target: 'default', success: true, errorCode: undefined, question: 'discard' }, { at: 2 }] });
+    expect(await api.history()).toEqual({ ok: true, entries: [{ at: 1, appId: 'calculator', target: 'default', success: true }, { at: 2 }] });
+    for (const enabled of [undefined, null, 'true', 1]) expect(() => api.setAutoExecute(enabled)).toThrow('布尔');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'PARAMETERS_INVALID', message: '自动执行开关必须是布尔值。', extra: 'discard' });
+    expect(await api.setAutoExecute(false)).toEqual({ ok: false, code: 'PARAMETERS_INVALID', message: '自动执行开关必须是布尔值。' });
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ok: true, autoExecute: true, extra: 'discard' });
+    expect(await api.setAutoExecute(true)).toEqual({ ok: true, autoExecute: true });
+    expect(harness.ipcRenderer.invoke).toHaveBeenLastCalledWith('nuanban:pet-open-app:auto', { enabled: true });
   });
 });

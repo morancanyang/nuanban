@@ -318,3 +318,186 @@ contextBridge.exposeInMainWorld('nuanbanPet', Object.freeze({
   expand: () => ipcRenderer.invoke('nuanban:pet:expand'),
   collapse: () => ipcRenderer.invoke('nuanban:pet:collapse'),
 }));
+
+const openAppErrorCodes = ['APP_UNKNOWN', 'TARGET_UNKNOWN', 'TARGET_UNSUPPORTED', 'PARAMETERS_INVALID', 'PARAMETERS_FORBIDDEN', 'URL_PROTOCOL_BLOCKED', 'URL_INVALID', 'FOLDER_NOT_ALLOWED', 'FOLDER_MISSING', 'MODEL_UNAVAILABLE', 'MODEL_INVALID_JSON', 'UNSAFE_MODEL_OUTPUT', 'EXECUTABLE_MISSING', 'LAUNCH_FAILED', 'CANCELLED', 'PLAN_EXPIRED', 'PLAN_UNKNOWN', 'AUTO_EXECUTE_DENIED'];
+
+function openAppPlanId(value) {
+  if (!validIdentifier(value)) throw new TypeError('打开计划标识无效，请重新解析');
+  return value;
+}
+
+function projectOpenAppError(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== false) throw new TypeError('智能打开软件回复无效');
+  if (!openAppErrorCodes.includes(value.code)) throw new TypeError('智能打开软件错误码无效');
+  if (typeof value.message !== 'string' || value.message.length > 500) throw new TypeError('智能打开软件提示无效');
+  return { ok: false, code: value.code, message: value.message };
+}
+
+function projectOpenAppParameters(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('智能打开软件参数无效');
+  const parameters = {};
+  if (Object.hasOwn(value, 'url')) {
+    if (typeof value.url !== 'string' || !value.url.trim() || value.url.length > 2048 || !/^https?:\/\//.test(value.url)) throw new TypeError('智能打开软件网址参数无效');
+    parameters.url = value.url;
+  }
+  if (Object.hasOwn(value, 'folder')) {
+    if (typeof value.folder !== 'string' || !value.folder.trim() || value.folder.length > 1024) throw new TypeError('智能打开软件文件夹参数无效');
+    parameters.folder = value.folder;
+  }
+  return parameters;
+}
+
+function projectOpenAppPlan(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('打开计划无效');
+  if (!validIdentifier(value.appId)) throw new TypeError('打开计划软件标识无效');
+  if (!validIdentifier(value.target)) throw new TypeError('打开计划界面标识无效');
+  if (typeof value.appName !== 'string' || !value.appName.trim() || value.appName.length > 100) throw new TypeError('打开计划软件名无效');
+  if (typeof value.targetDescription !== 'string' || value.targetDescription.length > 200) throw new TypeError('打开计划界面说明无效');
+  if (!['low', 'confirm'].includes(value.risk)) throw new TypeError('打开计划风险等级无效');
+  if (typeof value.requiresConfirmation !== 'boolean') throw new TypeError('打开计划确认要求无效');
+  if (value.requiresFolder !== undefined && typeof value.requiresFolder !== 'boolean') throw new TypeError('打开计划文件夹要求无效');
+  if (value.reason !== undefined && (typeof value.reason !== 'string' || value.reason.length > 300)) throw new TypeError('打开计划说明无效');
+  return {
+    planId: openAppPlanId(value.planId),
+    appId: value.appId,
+    appName: value.appName,
+    target: value.target,
+    targetDescription: value.targetDescription,
+    risk: value.risk,
+    parameters: projectOpenAppParameters(value.parameters),
+    requiresConfirmation: value.requiresConfirmation,
+    ...(value.requiresFolder !== undefined ? { requiresFolder: value.requiresFolder } : {}),
+    reason: typeof value.reason === 'string' ? value.reason : '',
+  };
+}
+
+function projectOpenAppResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.success !== 'boolean') throw new TypeError('打开结果无效');
+  const result = { success: value.success };
+  if (value.appId !== undefined) {
+    if (!validIdentifier(value.appId)) throw new TypeError('打开结果软件标识无效');
+    result.appId = value.appId;
+  }
+  if (value.target !== undefined) {
+    if (!validIdentifier(value.target)) throw new TypeError('打开结果界面标识无效');
+    result.target = value.target;
+  }
+  if (value.message !== undefined) {
+    if (typeof value.message !== 'string' || !value.message.trim() || value.message.length > 1000) throw new TypeError('打开结果说明无效');
+    result.message = value.message;
+  }
+  if (value.errorCode !== undefined && value.errorCode !== null) {
+    if (!openAppErrorCodes.includes(value.errorCode)) throw new TypeError('打开结果错误码无效');
+    result.errorCode = value.errorCode;
+  }
+  if (value.success === true && typeof result.message !== 'string') throw new TypeError('打开结果缺少说明');
+  return result;
+}
+
+function projectOpenAppReply(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('智能打开软件回复无效');
+  if (value.ok === false) return projectOpenAppError(value);
+  if (value.ok !== true) throw new TypeError('智能打开软件回复无效');
+  if (value.kind === 'plan') return { ok: true, kind: 'plan', plan: projectOpenAppPlan(value.plan) };
+  if (value.kind === 'clarify') {
+    if (typeof value.question !== 'string' || !value.question.trim() || value.question.length > 300) throw new TypeError('智能打开软件追问无效');
+    return { ok: true, kind: 'clarify', question: value.question };
+  }
+  if (value.kind === 'unsupported' || value.kind === 'cancel') {
+    if (typeof value.message !== 'string' || !value.message.trim() || value.message.length > 300) throw new TypeError('智能打开软件说明无效');
+    return { ok: true, kind: value.kind, message: value.message };
+  }
+  throw new TypeError('智能打开软件回复无效');
+}
+
+function projectOpenAppExecuteReply(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('智能打开软件回复无效');
+  if (value.ok === false) return projectOpenAppError(value);
+  if (value.ok !== true) throw new TypeError('智能打开软件回复无效');
+  return { ok: true, result: projectOpenAppResult(value.result) };
+}
+
+function projectOpenAppFolder(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('目录选择结果无效');
+  if (value.ok === false) return projectOpenAppError(value);
+  if (value.ok !== true) throw new TypeError('目录选择结果无效');
+  if (typeof value.path !== 'string' || !value.path.trim() || value.path.length > 1024) throw new TypeError('目录选择结果无效');
+  if (typeof value.display !== 'string' || value.display.length > 200) throw new TypeError('目录选择结果无效');
+  const result = { ok: true, path: value.path, display: value.display };
+  if (value.plan !== undefined && value.plan !== null) result.plan = projectOpenAppPlan(value.plan);
+  return result;
+}
+
+function projectOpenAppHistory(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true || !Array.isArray(value.entries) || value.entries.length > 100) throw new TypeError('最近打开记录无效');
+  return {
+    ok: true,
+    entries: value.entries.slice(-20).map(entry => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !Number.isFinite(entry.at)) throw new TypeError('最近打开记录无效');
+      const record = { at: entry.at };
+      if (typeof entry.appId === 'string' && entry.appId.length <= 128) record.appId = entry.appId;
+      if (typeof entry.target === 'string' && entry.target.length <= 128) record.target = entry.target;
+      if (typeof entry.success === 'boolean') record.success = entry.success;
+      if (typeof entry.errorCode === 'string' && openAppErrorCodes.includes(entry.errorCode)) record.errorCode = entry.errorCode;
+      return record;
+    }),
+  };
+}
+
+function projectOpenAppStatus(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true) throw new TypeError('智能打开软件状态无效');
+  if (typeof value.modelReady !== 'boolean' || typeof value.autoExecute !== 'boolean' || !Array.isArray(value.catalog) || value.catalog.length > 50) throw new TypeError('智能打开软件状态无效');
+  const catalog = value.catalog.map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !validIdentifier(entry.appId)) throw new TypeError('智能打开软件清单无效');
+    if (typeof entry.displayName !== 'string' || !entry.displayName.trim() || entry.displayName.length > 100) throw new TypeError('智能打开软件清单无效');
+    if (!Array.isArray(entry.targets) || entry.targets.length > 20) throw new TypeError('智能打开软件清单无效');
+    return {
+      appId: entry.appId,
+      displayName: entry.displayName,
+      targets: entry.targets.map(target => {
+        if (!target || typeof target !== 'object' || Array.isArray(target) || !validIdentifier(target.target)) throw new TypeError('智能打开软件目标无效');
+        if (typeof target.description !== 'string' || target.description.length > 200) throw new TypeError('智能打开软件目标说明无效');
+        if (!['low', 'confirm'].includes(target.risk)) throw new TypeError('智能打开软件风险等级无效');
+        if (typeof target.requiresFolder !== 'boolean' || typeof target.requiresUrl !== 'boolean') throw new TypeError('智能打开软件目标参数无效');
+        return { target: target.target, description: target.description, risk: target.risk, requiresFolder: target.requiresFolder, requiresUrl: target.requiresUrl };
+      }),
+    };
+  });
+  return { ok: true, modelReady: value.modelReady, autoExecute: value.autoExecute, catalog };
+}
+
+function projectOpenAppCancelled(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true) throw new TypeError('停止请求未确认');
+  return { ok: true };
+}
+
+function projectOpenAppAuto(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('自动执行状态未确认');
+  if (value.ok === false) return projectOpenAppError(value);
+  if (value.ok !== true || typeof value.autoExecute !== 'boolean') throw new TypeError('自动执行状态未确认');
+  return { ok: true, autoExecute: value.autoExecute };
+}
+
+contextBridge.exposeInMainWorld('nuanbanOpenApp', Object.freeze({
+  status: () => ipcRenderer.invoke('nuanban:pet-open-app:status').then(projectOpenAppStatus),
+  parse: input => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 2) throw new TypeError('智能打开软件请求无效');
+    if (typeof input.goal !== 'string' || !input.goal.trim() || input.goal.length > 300) throw new TypeError('请输入 1 至 300 字的打开目标');
+    if (input.consent !== true) throw new TypeError('请先确认本次由本人发起解析');
+    return ipcRenderer.invoke('nuanban:pet-open-app:parse', { goal: input.goal, consent: true }).then(projectOpenAppReply);
+  },
+  execute: input => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 2) throw new TypeError('智能打开软件请求无效');
+    const planId = openAppPlanId(input.planId);
+    if (typeof input.approved !== 'boolean') throw new TypeError('请明确是否继续打开');
+    return ipcRenderer.invoke('nuanban:pet-open-app:execute', { planId, approved: input.approved }).then(projectOpenAppExecuteReply);
+  },
+  pickFolder: () => ipcRenderer.invoke('nuanban:pet-open-app:pick-folder').then(projectOpenAppFolder),
+  cancel: () => ipcRenderer.invoke('nuanban:pet-open-app:cancel').then(projectOpenAppCancelled),
+  history: () => ipcRenderer.invoke('nuanban:pet-open-app:history').then(projectOpenAppHistory),
+  setAutoExecute: enabled => {
+    if (typeof enabled !== 'boolean') throw new TypeError('自动执行开关必须是布尔值');
+    return ipcRenderer.invoke('nuanban:pet-open-app:auto', { enabled }).then(projectOpenAppAuto);
+  },
+}));

@@ -15,6 +15,7 @@
     voice: { title: '语音陪伴', target: 'voice-section', panels: ['voice-section'] },
     observation: { title: '本地观察与脱敏', target: 'observation-section', panels: ['observation-section'] },
     search: { title: '智能查询', target: 'search-query', panels: ['search-view'] },
+    openApp: { title: '智能打开软件', target: 'open-app-query', panels: ['open-app-view'] },
     learning: { title: '学习笔记与复习', target: 'learning-summary', panels: ['learning-view'] },
     archive: { title: '学习档案', target: 'archive-view', panels: ['archive-view'] },
     todos: { title: '待办与复习', target: 'todos-view', panels: ['todos-view'] },
@@ -1060,7 +1061,7 @@
       const target = element(sectionViews[activeSection].target);
       if (options.section === 'accessibility') target.open = true;
       target.scrollIntoView({ block: 'start' });
-      if (['question', 'search'].includes(activeSection)) focusTextInput(target);
+      if (['question', 'search', 'openApp'].includes(activeSection)) focusTextInput(target);
       else target.focus({ preventScroll: true });
     }
     else if (retryAction && options.notifyHost !== false) element('retry-action').focus({ preventScroll: true });
@@ -1202,7 +1203,7 @@
     renderNotifications();
   });
   bind(element('collapse-panel'), 'click', () => setExpanded(false));
-  for (const [control, section] of Object.entries({ 'view-features': 'features', 'view-guidance': 'guidance', 'feature-guidance': 'guidance', 'view-voice': 'voice', 'feature-question': 'question', 'feature-dictation': 'dictation', 'feature-observation': 'observation', 'guidance-observation': 'observation', 'observation-guidance': 'guidance', 'feature-learning': 'learning', 'feature-archive': 'archive', 'feature-todos': 'todos', 'archive-learning': 'learning', 'todos-archive': 'archive', 'pet-due-todos': 'todos', 'feature-captions': 'captions', 'feature-wake': 'wake', 'feature-management': 'accessibility' })) {
+  for (const [control, section] of Object.entries({ 'view-features': 'features', 'view-guidance': 'guidance', 'feature-guidance': 'guidance', 'view-voice': 'voice', 'feature-question': 'question', 'feature-dictation': 'dictation', 'feature-observation': 'observation', 'guidance-observation': 'observation', 'observation-guidance': 'guidance', 'feature-learning': 'learning', 'feature-archive': 'archive', 'feature-todos': 'todos', 'archive-learning': 'learning', 'todos-archive': 'archive', 'pet-due-todos': 'todos', 'feature-captions': 'captions', 'feature-wake': 'wake', 'feature-open-app': 'openApp', 'feature-management': 'accessibility' })) {
     bind(element(control), 'click', () => {
       setExpanded(true, { section, focusInput: false });
       if (control === 'feature-dictation') element('start-dictation').focus({ preventScroll: true });
@@ -1346,6 +1347,390 @@
     };
     bind(button, 'click', open);
   }
+  let openAppStatus;
+  let openAppPlan;
+  let openAppGoal = '';
+  let openAppBusy = false;
+  let openAppNeedsFolder = false;
+  let openAppRequest = 0;
+
+  const openAppApi = () => {
+    const api = window.nuanbanOpenApp;
+    return api && typeof api === 'object' ? api : undefined;
+  };
+
+  function openAppNotice(message) {
+    element('open-app-error').textContent = message;
+    element('open-app-error').hidden = !message;
+  }
+
+  function openAppAutoStatus(enabled) {
+    element('open-app-auto-status').textContent = enabled === true
+      ? '自动执行已开启：只有低风险且确认过的目标会免确认'
+      : '自动执行已关闭：每次打开都需要你确认';
+  }
+
+  function renderOpenApp() {
+    const api = openAppApi();
+    const available = Boolean(api) && typeof api.status === 'function' && typeof api.parse === 'function';
+    const canParse = available && openAppStatus?.modelReady === true;
+    element('open-app-query').readOnly = openAppBusy;
+    element('open-app-submit').disabled = openAppBusy || !canParse || !element('open-app-consent').checked || !element('open-app-query').value.trim();
+    element('open-app-submit').textContent = openAppBusy ? '正在解析…' : '请暖暖解析';
+    element('open-app-consent').disabled = openAppBusy;
+    element('open-app-cancel').disabled = !openAppBusy && !openAppPlan;
+    element('open-app-auto').disabled = !available || openAppBusy;
+    element('open-app-confirm-ok').disabled = openAppBusy || !openAppPlan;
+    element('open-app-confirm-cancel').disabled = openAppBusy || !openAppPlan;
+    element('open-app-folder-row').hidden = !openAppNeedsFolder;
+    element('open-app-folder').disabled = openAppBusy;
+  }
+
+  function openAppTime(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '时间未确认';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '时间未确认';
+    const pad = part => String(part).padStart(2, '0');
+    const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const today = new Date();
+    const sameDay = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+    return sameDay ? clock : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
+  }
+
+  async function openAppRefreshHistory() {
+    const api = openAppApi();
+    const list = element('open-app-history');
+    if (!api || typeof api.history !== 'function') { list.replaceChildren(); return; }
+    try {
+      const reply = await api.history();
+      if (disposed) return;
+      const entries = reply?.ok === true && Array.isArray(reply.entries) ? reply.entries.slice(-10) : [];
+      const fragment = document.createDocumentFragment();
+      for (const entry of entries) {
+        const item = document.createElement('li');
+        const title = document.createElement('p');
+        const state = document.createElement('small');
+        title.textContent = `${openAppTime(entry?.at)} · ${text(entry?.appId, '软件未记录')} · ${text(entry?.target, '界面未记录')}`;
+        state.textContent = `${entry?.success === true ? '成功' : '未打开'}${text(entry?.errorCode) ? ` · ${entry.errorCode}` : ''}`;
+        item.append(title, state);
+        fragment.append(item);
+      }
+      if (!entries.length) {
+        const empty = document.createElement('li');
+        empty.className = 'muted';
+        empty.textContent = '还没有本机打开记录。';
+        fragment.append(empty);
+      }
+      list.replaceChildren(fragment);
+    } catch {
+      if (!disposed) openAppNotice('最近打开记录读取失败；不影响本次操作，也不会显示模拟记录。');
+    }
+  }
+
+  async function openAppLoadStatus() {
+    const api = openAppApi();
+    openAppNotice('');
+    if (!api || typeof api.status !== 'function') {
+      openAppStatus = undefined;
+      element('open-app-auto').checked = false;
+      openAppAutoStatus(false);
+      element('open-app-progress').textContent = '智能打开软件的桌宠接口尚未接入本页面：不会显示模拟清单，也不会打开任何软件。';
+      renderOpenApp();
+      return;
+    }
+    try {
+      const status = await api.status();
+      if (disposed) return;
+      if (!status || status.ok !== true || typeof status.modelReady !== 'boolean' || typeof status.autoExecute !== 'boolean') throw new Error('状态未确认');
+      openAppStatus = status;
+      element('open-app-auto').checked = status.autoExecute === true;
+      openAppAutoStatus(status.autoExecute === true);
+      element('open-app-progress').textContent = status.modelReady === true
+        ? `已就绪：本机登记了 ${status.catalog.length} 个可打开的软件；说出名字后先解析，再由你确认。`
+        : '解析模型尚未就绪：暂时无法解析自然语言，也不会用固定答案代替；请先检查“接口与能力状态”。';
+    } catch {
+      if (disposed) return;
+      openAppStatus = undefined;
+      element('open-app-auto').checked = false;
+      openAppAutoStatus(false);
+      element('open-app-progress').textContent = '';
+      openAppNotice('读取智能打开软件的状态失败：未执行任何打开动作，可离开本页后重新进入再试。');
+    }
+    renderOpenApp();
+  }
+
+  function openAppPlanNote(plan) {
+    const parameters = record(plan.parameters);
+    const parts = [];
+    if (text(parameters.url)) parts.push(`网址：${parameters.url}`);
+    if (text(parameters.folder)) parts.push(`文件夹：${parameters.folder}`);
+    if (plan.risk === 'confirm') parts.push('这一步需要你本人确认。');
+    parts.push('只发送打开请求，不代你在软件里点击或输入；打开后由你亲手操作。');
+    return parts.join(' ');
+  }
+
+  function openAppApplyPlan(plan) {
+    openAppPlan = plan;
+    openAppNeedsFolder = plan.requiresFolder === true && !text(record(plan.parameters).folder);
+    if (openAppNeedsFolder) {
+      element('open-app-confirm').hidden = true;
+      element('open-app-progress').textContent = '这个目标需要一个你本人选择过的文件夹：先选择文件夹，再由你确认。';
+      return;
+    }
+    element('open-app-confirm-text').textContent = `即将打开：${text(plan.appName, text(plan.appId, '未提供软件名'))}\n目标界面：${text(plan.targetDescription, text(plan.target, '主界面'))}\n是否继续？`;
+    element('open-app-confirm-note').textContent = openAppPlanNote(plan);
+    if (plan.requiresConfirmation === true) {
+      element('open-app-confirm').hidden = false;
+      element('open-app-progress').textContent = '请核对下面的目标，再由你决定是否继续。';
+      return;
+    }
+    element('open-app-confirm').hidden = true;
+  }
+
+  async function openAppParse(goal) {
+    const api = openAppApi();
+    const value = typeof goal === 'string' ? goal.trim() : element('open-app-query').value.trim();
+    if (!value) return;
+    if (!api || typeof api.parse !== 'function') {
+      openAppNotice('智能打开软件的桌宠接口尚未接入本页面：这句话没有被解析，也不会打开任何软件。');
+      return;
+    }
+    if (element('open-app-consent').checked !== true) {
+      openAppNotice('请先勾选“本次发送确认”，才会把这句话交给已配置的模型解析。');
+      return;
+    }
+    const current = ++openAppRequest;
+    openAppGoal = value;
+    openAppBusy = true;
+    openAppPlan = undefined;
+    openAppNeedsFolder = false;
+    openAppNotice('');
+    element('open-app-confirm').hidden = true;
+    element('open-app-clarify').hidden = true;
+    element('open-app-clarify').textContent = '';
+    element('open-app-result').hidden = true;
+    element('open-app-result').textContent = '';
+    element('open-app-progress').textContent = '正在把这句话解析成已登记的目标…';
+    renderOpenApp();
+    let autoRun = false;
+    try {
+      const reply = await api.parse({ goal: value, consent: true });
+      if (disposed || current !== openAppRequest) return;
+      if (!reply || typeof reply !== 'object') throw new Error('回复无效');
+      if (reply.ok !== true) {
+        const code = text(reply.code);
+        openAppNeedsFolder = ['FOLDER_NOT_ALLOWED', 'FOLDER_MISSING'].includes(code);
+        element('open-app-progress').textContent = '';
+        openAppNotice(`${text(reply.message, '本次解析未完成，请稍后手动重试。')}${code ? `（${code}）` : ''}`);
+      } else if (reply.kind === 'plan') {
+        openAppApplyPlan(record(reply.plan));
+        autoRun = Boolean(openAppPlan) && !openAppNeedsFolder && openAppPlan.requiresConfirmation !== true;
+        if (autoRun) element('open-app-progress').textContent = '主进程判定该目标无需再次确认，正在发送打开请求…';
+      } else if (reply.kind === 'clarify') {
+        element('open-app-progress').textContent = '';
+        element('open-app-clarify').textContent = text(reply.question, '还需要再确认一下：想打开哪个软件的哪个界面？');
+        element('open-app-clarify').hidden = false;
+      } else {
+        element('open-app-progress').textContent = '';
+        element('open-app-clarify').textContent = text(reply.message, '这个目标不在已登记的软件范围内，不会尝试打开。');
+        element('open-app-clarify').hidden = false;
+      }
+    } catch {
+      if (disposed || current !== openAppRequest) return;
+      element('open-app-progress').textContent = '';
+      openAppNotice('解析未完成或返回内容无法使用：这句话没有交给任何软件，请稍后手动重试。');
+    } finally {
+      if (!disposed && current === openAppRequest) { openAppBusy = false; renderOpenApp(); }
+    }
+    if (autoRun && !disposed && current === openAppRequest) await openAppExecute(false);
+  }
+
+  function openAppShowResult(result) {
+    const success = result.success === true;
+    const errorCode = text(result.errorCode);
+    const message = text(result.message, success ? '运行核心已受理本次打开请求。' : '本次没有打开软件，请核对后重试。');
+    const lines = [message];
+    if (errorCode) lines.push(`错误码：${errorCode}`);
+    element('open-app-result').textContent = lines.join('\n');
+    element('open-app-result').dataset.tone = success ? 'success' : 'failure';
+    element('open-app-result').hidden = false;
+    element('open-app-progress').textContent = '';
+  }
+
+  async function openAppExecute(approved) {
+    const api = openAppApi();
+    const plan = openAppPlan;
+    if (!api || typeof api.execute !== 'function' || !plan) {
+      openAppNotice('没有可执行的计划：请先说出想打开的软件，再重试。');
+      renderOpenApp();
+      return;
+    }
+    const current = ++openAppRequest;
+    openAppBusy = true;
+    openAppNotice('');
+    element('open-app-confirm').hidden = true;
+    element('open-app-progress').textContent = approved === true ? '正在发送打开请求…' : '正在按主进程的判定处理这次请求…';
+    renderOpenApp();
+    try {
+      const reply = await api.execute({ planId: plan.planId, approved: approved === true });
+      if (disposed || current !== openAppRequest) return;
+      openAppPlan = undefined;
+      openAppNeedsFolder = false;
+      if (!reply || reply.ok !== true) {
+        element('open-app-progress').textContent = '';
+        openAppNotice(`${text(reply?.message, '打开请求未完成或未被接受，请重新解析后再试。')}${text(reply?.code) ? `（${reply.code}）` : ''}`);
+        return;
+      }
+      openAppShowResult(record(reply.result));
+      await openAppRefreshHistory();
+    } catch {
+      if (disposed || current !== openAppRequest) return;
+      element('open-app-progress').textContent = '';
+      openAppNotice('打开请求未完成：不会自动重试，也不会重复发送；请核对后手动重新解析。');
+    } finally {
+      if (!disposed && current === openAppRequest) { openAppBusy = false; renderOpenApp(); }
+    }
+  }
+
+  async function openAppCancel() {
+    const api = openAppApi();
+    const interrupt = openAppBusy || Boolean(openAppPlan);
+    openAppRequest += 1;
+    openAppBusy = false;
+    openAppPlan = undefined;
+    openAppNeedsFolder = false;
+    element('open-app-confirm').hidden = true;
+    openAppNotice('');
+    element('open-app-progress').textContent = interrupt ? '已停止：本次计划作废，不会打开任何软件，迟到的结果也不会执行。' : '没有待执行的计划。';
+    renderOpenApp();
+    if (!interrupt) return;
+    try { if (api && typeof api.cancel === 'function') await api.cancel(); }
+    catch { if (!disposed) openAppNotice('停止请求尚未确认；迟到的结果不会显示，也不会执行。'); }
+    await openAppRefreshHistory();
+  }
+
+  async function openAppPickFolder() {
+    const api = openAppApi();
+    if (!api || typeof api.pickFolder !== 'function') {
+      openAppNotice('本机目录选择器尚未接入本页面：没有选择任何文件夹，也不会用其他路径代替。');
+      return;
+    }
+    const goal = openAppGoal;
+    let picked = false;
+    let updatedPlan;
+    openAppBusy = true;
+    openAppNeedsFolder = false;
+    openAppNotice('');
+    element('open-app-progress').textContent = '请在弹出的系统窗口中选择文件夹…';
+    renderOpenApp();
+    try {
+      const reply = await api.pickFolder();
+      if (disposed) return;
+      if (!reply || reply.ok !== true) {
+        const code = text(reply?.code);
+        if (code === 'CANCELLED') {
+          element('open-app-progress').textContent = '已取消：没有选择文件夹，本次没有做任何修改，也没有打开软件。';
+        } else {
+          element('open-app-progress').textContent = '没有选择文件夹，本次未打开任何软件。';
+          openAppNotice(`${text(reply?.message, '目录选择未完成。')}${code ? `（${code}）` : ''}`);
+        }
+        return;
+      }
+      picked = true;
+      updatedPlan = reply.plan;
+      element('open-app-progress').textContent = `已选择：${text(reply.display, text(reply.path, '已选择文件夹'))}。`;
+    } catch {
+      if (disposed) return;
+      element('open-app-progress').textContent = '';
+      openAppNotice('目录选择未完成：没有选择任何文件夹。');
+    } finally {
+      if (!disposed) { openAppBusy = false; renderOpenApp(); }
+    }
+    if (disposed || !picked) return;
+    if (updatedPlan) {
+      openAppApplyPlan(updatedPlan);
+      if (openAppPlan && !openAppNeedsFolder && openAppPlan.requiresConfirmation !== true) await openAppExecute(false);
+      return;
+    }
+    if (goal) await openAppParse(goal);
+  }
+
+  async function openAppSetAuto(enabled) {
+    const api = openAppApi();
+    const input = element('open-app-auto');
+    if (!api || typeof api.setAutoExecute !== 'function') {
+      input.checked = false;
+      openAppAutoStatus(false);
+      openAppNotice('自动执行开关尚未接入本页面：已恢复为关闭，每次打开仍需你本人确认。');
+      renderOpenApp();
+      return;
+    }
+    const previous = openAppStatus?.autoExecute === true;
+    openAppBusy = true;
+    renderOpenApp();
+    try {
+      const reply = await api.setAutoExecute(enabled === true);
+      if (disposed) return;
+      if (reply && reply.ok === false) throw new Error(text(reply.message, '开关未被接受'));
+      if (!reply || reply.ok !== true || typeof reply.autoExecute !== 'boolean') throw new Error('未确认');
+      openAppStatus = { ...record(openAppStatus), autoExecute: reply.autoExecute };
+      input.checked = reply.autoExecute;
+      openAppAutoStatus(reply.autoExecute);
+      openAppNotice('');
+      element('open-app-progress').textContent = reply.autoExecute
+        ? '自动执行已开启：只有低风险且确认过的目标会免确认，其余仍需你本人点击。'
+        : '自动执行已关闭；仍可在本页核对后手动确认打开。';
+    } catch (error) {
+      if (disposed) return;
+      input.checked = previous;
+      openAppAutoStatus(previous);
+      openAppNotice(`自动执行设置未确认（${text(error?.message, '未确认')}）：已恢复为上一次的状态，不会静默改为开启。`);
+    } finally {
+      if (!disposed) { openAppBusy = false; renderOpenApp(); }
+    }
+  }
+
+  async function openAppLeave() {
+    const api = openAppApi();
+    const interrupt = openAppBusy || Boolean(openAppPlan);
+    openAppRequest += 1;
+    openAppBusy = false;
+    openAppPlan = undefined;
+    openAppNeedsFolder = false;
+    element('open-app-consent').checked = false;
+    element('open-app-confirm').hidden = true;
+    element('open-app-clarify').hidden = true;
+    element('open-app-clarify').textContent = '';
+    openAppNotice('');
+    element('open-app-progress').textContent = interrupt ? '已离开本页：未执行的计划已作废，不会自动打开软件。' : '';
+    renderOpenApp();
+    if (!interrupt) return;
+    try { if (api && typeof api.cancel === 'function') await api.cancel(); } catch {}
+  }
+
+  function openAppShow() {
+    if (disposed) return;
+    void openAppRefreshHistory();
+    void openAppLoadStatus();
+  }
+
+  bind(element('open-app-form'), 'submit', event => { event.preventDefault(); void openAppParse(); });
+  bind(element('open-app-query'), 'input', renderOpenApp);
+  bind(element('open-app-consent'), 'change', renderOpenApp);
+  bind(element('open-app-auto'), 'change', () => { void openAppSetAuto(element('open-app-auto').checked === true); });
+  bind(element('open-app-cancel'), 'click', () => { void openAppCancel(); });
+  bind(element('open-app-confirm-ok'), 'click', () => { void openAppExecute(true); });
+  bind(element('open-app-confirm-cancel'), 'click', () => { void openAppExecute(false); });
+  bind(element('open-app-folder'), 'click', () => { void openAppPickFolder(); });
+  bind(window, 'nuanban:pet:view-changed', event => {
+    const section = record(event.detail).section;
+    if (section === 'openApp') { openAppShow(); return; }
+    if (!openAppBusy && !openAppPlan && element('open-app-consent').checked !== true) return;
+    void openAppLeave();
+  });
+  openAppAutoStatus(false);
+  renderOpenApp();
+
   bind(element('close-pet'), 'click', () => { element('exit-confirmation').hidden = false; element('confirm-exit').focus({ preventScroll: true }); });
   bind(element('cancel-exit'), 'click', () => { element('exit-confirmation').hidden = true; element('close-pet').focus({ preventScroll: true }); });
   const exit = () => { void perform('exit', '关闭桌宠未确认', () => bridge.close(), exit); };

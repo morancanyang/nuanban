@@ -48,6 +48,7 @@
             <button id="feature-question" class="feature-button" type="button"><strong>桌宠提问</strong><small>说说想学的软件操作</small></button>
             <button class="feature-button" type="button" data-tool="/chat/new"><strong>文字与图片问答</strong><small>聊天、选图并按需提问</small></button>
             <button id="feature-search" class="feature-button" type="button"><strong>智能查询</strong><small>接入实时检索，可打开原文核对</small></button>
+            <button id="feature-open-app" class="feature-button" type="button" aria-controls="open-app-view"><strong>智能打开软件</strong><small>说一句话，暖暖帮你打开软件</small></button>
             <button id="feature-voice" class="feature-button" type="button" disabled><strong>面对面语音</strong><small>收起小屋，和桌宠用气泡聊天</small></button>
             <button id="feature-dictation" class="feature-button" type="button"><strong>语音输入</strong><small>本地听写，只填草稿不发送</small></button>
             <button id="feature-observation" class="feature-button" type="button"><strong>本地观察与脱敏</strong><small>选择屏幕、授权与共享状态</small></button>
@@ -185,6 +186,35 @@
           <p class="fine-print">本页复用已有模型，不需要 AnySearch 密钥。当前未接入网页检索，模型回答不代表已核实最新信息；医疗、法律、金融问题请另行咨询专业人士。</p>
         </section>
         </div>
+        <section id="open-app-view" class="function-page open-app-page" aria-labelledby="open-app-title" tabindex="-1" hidden>
+          <div class="section-heading"><span class="eyebrow">说一句话，暖暖去打开</span><span class="feature-tag">本人确认后执行</span></div>
+          <h2 id="open-app-title">智能打开软件</h2>
+          <p class="page-lead">用一句话说出想打开的软件和界面。暖暖先把这句话解析成一个已登记的目标，再由你本人确认后送出打开请求；不会代你在软件里点击、输入或切换界面。</p>
+          <form id="open-app-form" class="open-app-form">
+            <label for="open-app-query">想打开哪个软件？</label>
+            <input id="open-app-query" type="text" maxlength="300" autocomplete="off" placeholder="例如：帮我打开记事本" aria-describedby="open-app-scope">
+            <p id="open-app-scope" class="fine-print">这里只接受软件名和已登记的界面，不接受命令、脚本、任意路径或网址；本页不读取屏幕、麦克风与摄像头。</p>
+            <label class="open-app-consent"><input id="open-app-consent" type="checkbox">我同意把这句话发送给已配置的模型，只用于解析要打开的软件</label>
+            <div class="button-row"><button id="open-app-submit" class="primary-button" type="submit" disabled>请暖暖解析</button><button id="open-app-voice" type="button" disabled title="语音输入尚未接入本页面">语音说</button><button id="open-app-cancel" type="button" disabled>停止</button></div>
+          </form>
+          <p id="open-app-voice-note" class="fine-print">语音输入尚未接入本页面：现在只能打字，点击“语音说”不会打开麦克风，也不会显示假的识别结果。</p>
+          <label class="open-app-auto"><input id="open-app-auto" type="checkbox" disabled><span>自动打开本会话已确认过的低风险目标</span></label>
+          <p id="open-app-auto-status" class="fine-print" role="status">自动执行已关闭：每次打开都需要你确认</p>
+          <p id="open-app-progress" class="open-app-progress" role="status" aria-live="polite">进入本页后读取本机可打开的软件清单，不会显示模拟结果。</p>
+          <p id="open-app-error" class="library-error" role="alert" hidden></p>
+          <section id="open-app-confirm" class="open-app-confirm" aria-labelledby="open-app-confirm-title" hidden>
+            <h3 id="open-app-confirm-title">请核对后确认</h3>
+            <p id="open-app-confirm-text" class="open-app-confirm-text"></p>
+            <p id="open-app-confirm-note" class="fine-print"></p>
+            <div class="button-row"><button id="open-app-confirm-ok" class="primary-button" type="button">继续打开</button><button id="open-app-confirm-cancel" class="text-button" type="button">先不打开</button></div>
+          </section>
+          <p id="open-app-folder-row" class="open-app-folder" hidden><button id="open-app-folder" class="text-button" type="button">选择要打开的文件夹</button><span id="open-app-folder-note" class="fine-print">只有你本人选择过的文件夹才可被打开。</span></p>
+          <p id="open-app-clarify" class="open-app-clarify" role="status" hidden></p>
+          <section id="open-app-result" class="open-app-result" aria-live="polite" hidden></section>
+          <h3 class="open-app-history-title">最近打开记录 · 仅本机</h3>
+          <ul id="open-app-history" class="open-app-history" aria-label="最近打开记录"></ul>
+          <p class="fine-print">记录只保存时间、软件、界面、成功与否和错误码，不上云；这里只说明启动请求是否发出，不代表软件内部页面已经打开。未登记的软件、命令、脚本与任意路径一律不会执行。</p>
+        </section>
         <section id="voice-section" class="status-card" aria-label="面对面实时语音" tabindex="-1" hidden>
           <div class="section-heading"><span class="eyebrow">不用打字，直接聊</span><span class="muted">纯语音，不开摄像头</span></div>
           <h2>和暖暖面对面聊一聊</h2>
