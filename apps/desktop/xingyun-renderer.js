@@ -9,6 +9,10 @@ const startButton = element('avatar-start');
 const stopButton = element('avatar-stop');
 const progress = element('avatar-progress');
 const conversationStartButton = element('avatar-conversation-start');
+const conversationBoundariesLabel = element('avatar-conversation-boundaries');
+// 与 pet.html 中的原文一致：没有会话时可切换时用下面这句替换，切回默认时恢复原文。
+const CONVERSATION_BOUNDARIES = '这是单独的显式模式，默认关闭。点击“开启实时对话”后会先弹出原生确认框：确认后麦克风音频会上传星云做识别，提问由星云模型回答、语音由星云合成，按其平台规则计费；停止即结束会话，不自动重连。';
+const CONVERSATION_BOUNDARIES_SWITCH = '当前正在播放星云实时形象。点击“切换到实时对话”会先停止这个仅形象会话并确认远端关闭，再建立实时对话会话；原生确认框会说明音频上传、由星云模型回答与计费。停止对话即结束会话，不自动重连。';
 const conversationStopButton = element('avatar-conversation-stop');
 const conversationListenButton = element('avatar-conversation-listen');
 const conversationInterruptButton = element('avatar-conversation-interrupt');
@@ -132,7 +136,16 @@ function render() {
     const button = element(motion.button);
     if (button) button.disabled = state.phase !== 'ready' || !instance || mode === 'conversation';
   }
-  if (conversationStartButton) conversationStartButton.disabled = !state.configured || !['idle', 'error'].includes(state.phase) || Boolean(instance);
+  if (conversationStartButton) {
+    // 仅形象会话运行中时按钮必须可用：点击后先停掉它再建立对话会话，否则用户只看到"点不动"。
+    const switchable = mode === 'render' && state.phase === 'ready' && Boolean(instance);
+    conversationStartButton.disabled = !state.configured || mode === 'conversation'
+      || (!switchable && !['idle', 'error'].includes(state.phase));
+    conversationStartButton.textContent = switchable ? '切换到实时对话' : '开启实时对话';
+    if (conversationBoundariesLabel) {
+      conversationBoundariesLabel.textContent = switchable ? CONVERSATION_BOUNDARIES_SWITCH : CONVERSATION_BOUNDARIES;
+    }
+  }
   if (conversationStopButton) conversationStopButton.disabled = !conversationRunning;
   if (conversationListenButton) {
     conversationListenButton.hidden = !conversationLive();
@@ -220,9 +233,10 @@ async function sessionFetch(resource, options) {
 }
 
 async function start(nextMode = 'render') {
-  if (disposed || instance) return;
+  if (disposed) return;
   const conversationMode = nextMode === 'conversation';
-  if (!conversationMode && startButton.disabled) return;
+  const switchingFromRender = conversationMode && mode === 'render' && Boolean(instance);
+  if (!conversationMode && (instance || startButton.disabled)) return;
   if (conversationMode && (!conversationStartButton || conversationStartButton.disabled)) return;
   if (!conversationMode) consent.checked = false;
   if (conversationMode) {
@@ -235,6 +249,11 @@ async function start(nextMode = 'render') {
       mode = 'render';
       return;
     }
+  }
+  if (switchingFromRender) {
+    // 先停掉仅形象会话并确认远端关闭，再申请对话会话；取消确认时不会走到这里，因此不会误停形象。
+    await stop();
+    if (disposed) return;
   }
   const current = ++generation;
   mode = conversationMode ? 'conversation' : 'render';

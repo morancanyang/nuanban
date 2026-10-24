@@ -393,6 +393,35 @@ test('实时对话确认后开麦聆听、显示识别与回答，停止确认�
   expect(errors).toEqual([]);
 });
 
+test('仅形象会话运行中也能进入实时对话：按钮可用、先停形象再建立对话会话', async ({ page }) => {
+  // 现场问题：用户已启用花环水獭（仅形象）后，"开启实时对话"按钮被禁用且界面不说明原因，等于点不动。
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await fixture(page, 'conversation');
+  await page.locator('#avatar-consent').check();
+  await page.locator('#avatar-start').click();
+  await expect(page.locator('#avatar-motion-idle')).toBeEnabled();
+  const enabledAudit = await audit(page);
+  expect(enabledAudit).toMatchObject({ begins: 1, modes: ['render'], asrStarts: 0 });
+
+  await expect(page.locator('#avatar-conversation-start')).toBeEnabled();
+  await expect(page.locator('#avatar-conversation-start')).toHaveText('切换到实时对话');
+  await expect(page.locator('#avatar-conversation-boundaries')).toContainText('会先停止这个仅形象会话');
+
+  await page.locator('#avatar-conversation-start').click();
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'speaking');
+  expect(await audit(page)).toMatchObject({ confirms: 1, modes: ['render', 'conversation'], stops: 1, destroyed: 1,
+    asrStarts: 1, volume: 1, microphones: 0 });
+  expect(errors).toEqual([]);
+
+  await page.locator('#avatar-conversation-stop').click();
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'stopped');
+  const stoppedAudit = await audit(page);
+  expect(stoppedAudit).toMatchObject({ asrStarts: 1, asr: 'idle' });
+  // 停止是幂等的：SDK 自身与销毁路径都会结束上行，这里只要求"确实停过、且没有新的上行"。
+  expect(Number(stoppedAudit.asrStops)).toBeGreaterThanOrEqual(1);
+});
+
 test('实时对话停止后，迟到的 ASR、回答与连接回调被 generation 丢弃', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
