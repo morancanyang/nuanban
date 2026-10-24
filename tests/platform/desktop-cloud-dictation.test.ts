@@ -29,7 +29,8 @@ describe('云端听写客户端（音频仅在本次请求内存留，由宿主�
     expect(client.status()).toMatchObject({ available: true, model: 'gpt-4o-transcribe', uploadsAudio: true });
   });
 
-  it.each([...TRANSCRIBE_MODELS])('接受受支持的转写模型 %s', async (model) => {
+  it.each(['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'] as const)('接受受支持的转写模型 %s', async (model) => {
+    expect([...TRANSCRIBE_MODELS]).toContain(model);
     const client = createCloudDictation({ ...configuration, model, fetch: async () => jsonResponse({ text: '好' }) });
     await expect(client.transcribe({ wav })).resolves.toMatchObject({ text: '好' });
   });
@@ -82,7 +83,7 @@ describe('云端听写客户端（音频仅在本次请求内存留，由宿主�
     await expect(client.transcribe({ wav: 'not a buffer' as never })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(fetchRequest).not.toHaveBeenCalled();
 
-    expect(() => createCloudDictation({ ...configuration, model: 'gpt-4' })).toThrow('INVALID_REQUEST');
+    expect(() => createCloudDictation({ ...configuration, model: 'gpt-4' as never })).toThrow('INVALID_REQUEST');
     expect(() => createCloudDictation({ baseUrl: 'http://gateway.example.net/v1', apiKey: configuration.apiKey })).toThrow('INVALID_REQUEST');
     expect(() => createCloudDictation({ baseUrl: configuration.baseUrl, apiKey: 'short' })).toThrow('INVALID_REQUEST');
     expect(() => createCloudDictation({ ...configuration, timeoutMs: 10 })).toThrow('INVALID_REQUEST');
