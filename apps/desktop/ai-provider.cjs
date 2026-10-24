@@ -17,7 +17,9 @@ function checkedConfiguration(value) {
     || typeof value.apiKey !== 'string' || value.apiKey.length < 10 || value.apiKey.length > 4096 || /[\s\x00-\x1f]/.test(value.apiKey)) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   let endpoint;
   try { endpoint = new URL(value.baseUrl); } catch { throw new ProviderFailure('PROVIDER_UNAVAILABLE'); }
-  if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
+  // Cloud gateways must use HTTPS; plain HTTP is only accepted for a loopback model runtime.
+  const loopback = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(endpoint.hostname);
+  if (!(endpoint.protocol === 'https:' || (endpoint.protocol === 'http:' && loopback)) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   endpoint.pathname = endpoint.pathname.replace(/\/+$/, '') + '/chat/completions';
   return { endpoint: endpoint.href, model: value.model, apiKey: value.apiKey };
 }
@@ -172,10 +174,40 @@ async function readProviderConfiguration(options = {}) {
   return { baseUrl: configuration.baseUrl, model: configuration.model, apiKey, timeoutMs: checkedTimeout(configuration.timeoutMs) };
 }
 
+const LOCAL_MODEL_ENDPOINTS = Object.freeze([
+  Object.freeze({ baseUrl: 'http://127.0.0.1:11434/v1', credential: 'local-ollama-runtime' }),
+  Object.freeze({ baseUrl: 'http://127.0.0.1:1234/v1', credential: 'local-lm-studio-runtime' }),
+]);
+
+// A local model runtime needs no account and no key, so the owner can talk to the pet without
+// configuring anything. Detection is fail-closed: no runtime means no provider, never a fake answer.
+async function detectLocalModelProvider(options = {}) {
+  const fetchRequest = options.fetch ?? globalThis.fetch;
+  if (typeof fetchRequest !== 'function') return undefined;
+  const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 700;
+  for (const candidate of LOCAL_MODEL_ENDPOINTS) {
+    try {
+      const response = await fetchRequest(`${candidate.baseUrl}/models`, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { accept: 'application/json' } });
+      if (!response.ok) { await response.body?.cancel().catch(() => undefined); continue; }
+      const parsed = await response.json().catch(() => undefined);
+      const identifiers = Array.isArray(parsed?.data) ? parsed.data
+        .map(entry => entry?.id)
+        .filter(id => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(id)) : [];
+      const model = identifiers.find(id => /qwen|llama|mistral|gemma|phi|deepseek|chat|instruct/i.test(id)) ?? identifiers[0];
+      if (!model) continue;
+      return createOpenAiCompatibleProvider({ baseUrl: candidate.baseUrl, model, apiKey: candidate.credential, fetch: fetchRequest });
+    } catch { /* try the next local runtime */ }
+  }
+  return undefined;
+}
+
 async function loadConfiguredProvider(options = {}) {
   const configuration = await readProviderConfiguration(options);
-  if (!configuration) return undefined;
+  if (!configuration) {
+    if (options.detectLocal === false) return undefined;
+    return (options.detectLocalProvider ?? detectLocalModelProvider)({ fetch: options.fetch, timeoutMs: options.localDetectTimeoutMs });
+  }
   return createOpenAiCompatibleProvider({ ...configuration, fetch: options.fetch });
 }
 
-module.exports = { ProviderFailure, createOpenAiCompatibleProvider, loadConfiguredProvider, readProviderConfiguration };
+module.exports = { ProviderFailure, createOpenAiCompatibleProvider, loadConfiguredProvider, readProviderConfiguration, detectLocalModelProvider };

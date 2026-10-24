@@ -52,7 +52,7 @@ describe('桌宠智能查询供应选择（合成供应，不调用真实接口�
   });
 
   it('实时检索失败直接报错，不静默改走模型冒充检索结果', async () => {
-    const live = { status: () => ({ provider: 'AnySearch', configured: true }), search: vi.fn(async () => { const error = new Error('auth'); error.code = 'SEARCH_AUTH_FAILED'; throw error; }) };
+    const live = { status: () => ({ provider: 'AnySearch', configured: true }), search: vi.fn(async () => { throw Object.assign(new Error('auth'), { code: 'SEARCH_AUTH_FAILED' }); }) };
     const fallback = model(true);
     const client = createPetSearchClient({ anySearch: live, model: fallback });
     await expect(client.search('今天北京天气')).rejects.toMatchObject({ code: 'SEARCH_AUTH_FAILED' });

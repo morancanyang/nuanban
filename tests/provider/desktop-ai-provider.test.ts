@@ -129,7 +129,7 @@ describe('桌面密钥配置', () => {
   });
 
   it('没有配置时关闭，不回退或生成默认密钥', async () => {
-    expect(await loadConfiguredProvider({ env: {}, configurationPath: join(tmpdir(), crypto.randomUUID(), 'missing.json') })).toBeUndefined();
+    expect(await loadConfiguredProvider({ env: {}, configurationPath: join(tmpdir(), crypto.randomUUID(), 'missing.json'), detectLocal: false })).toBeUndefined();
     await expect(loadConfiguredProvider({ env: { NUANBAN_AI_MODEL: 'gpt-6.1-sol' } })).rejects.toThrow('PROVIDER_UNAVAILABLE');
   });
 
@@ -175,5 +175,36 @@ describe('模型超时上限与可配置超时', () => {
     const provider = await loadConfiguredProvider({ env: {}, configurationPath: file, decrypt: async () => configuration.apiKey, fetch: fetchRequest });
     expect(provider).toBeDefined();
     await expect(provider!.answer({ question: '请解释' })).rejects.toMatchObject({ code: 'TIMEOUT' });
+  });
+});
+
+describe('本机模型自动检测（无需账号或密钥）', () => {
+  const models = (identifiers: string[]) => new Response(JSON.stringify({ data: identifiers.map(id => ({ id })) }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  it('未配置时自动使用本机 Ollama 模型，不要求密钥', async () => {
+    const fetchRequest = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/v1/models')) return models(['qwen2.5:7b', 'llava:latest']);
+      expect(url).toBe('http://127.0.0.1:11434/v1/chat/completions');
+      return completed();
+    });
+    const provider = await loadConfiguredProvider({ env: {}, configurationPath: join(tmpdir(), crypto.randomUUID(), 'missing.json'), fetch: fetchRequest });
+    expect(provider?.status()).toEqual({ available: true });
+    expect(await provider?.answer({ question: '测试' })).toEqual({ text: '这是测试响应。' });
+    const body = JSON.parse(String(fetchRequest.mock.calls.at(-1)?.[1]?.body));
+    expect(body.model).toBe('qwen2.5:7b');
+    expect(JSON.stringify(provider?.status())).not.toContain('127.0.0.1');
+  });
+
+  it('本机没有模型运行时时保持关闭，不伪造回答', async () => {
+    const fetchRequest = vi.fn<typeof fetch>(async () => { throw new Error('ECONNREFUSED'); });
+    expect(await loadConfiguredProvider({ env: {}, configurationPath: join(tmpdir(), crypto.randomUUID(), 'missing.json'), fetch: fetchRequest })).toBeUndefined();
+    expect(fetchRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('明文 HTTP 只允许本机回环地址', () => {
+    expect(() => createOpenAiCompatibleProvider({ baseUrl: 'http://192.168.1.9/v1', model: 'gpt-4o-mini', apiKey: 'x'.repeat(12) })).toThrow('PROVIDER_UNAVAILABLE');
+    const provider = createOpenAiCompatibleProvider({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b', apiKey: 'local-ollama-runtime' });
+    expect(provider.status()).toEqual({ available: true });
   });
 });

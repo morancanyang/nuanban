@@ -133,7 +133,7 @@
     const generationKnown = Number.isSafeInteger(observation.generation) && observation.generation >= 0;
     const safeObserving = ready && observation.state === 'observing' && observation.captureActive === true && generationKnown && observation.generation > 0;
     const taskBusy = ['analyzing', 'verifying'].includes(task.state);
-    const activeTask = ['analyzing', 'awaiting_action', 'verifying', 'needs_help'].includes(task.state);
+    const activeTask = ['analyzing', 'awaiting_action', 'awaiting_verify', 'verifying', 'needs_help'].includes(task.state);
     const taskOutdated = activeTask && (!generationKnown || task.observationGeneration !== observation.generation);
     const blocked = cleanupFailed || safetyUnclassified || captureConflict || privacyConflict;
     const observationPending = [...pending].some(type => type.startsWith('observation.'));
@@ -152,7 +152,10 @@
         || pending.has('ask') || (task.kind === 'text' && taskBusy)
         || record(runtime.wake).state === 'enabled' || record(runtime.wake).microphoneActive === true || record(runtime.voice).active === true || record(runtime.voice).microphoneActive === true || pending.has('voice.open') || pending.has('wake.enable') || pending.has('dictate') || observationPending),
       canResume: ready && privacyPaused && !cleanupFailed && !captureConflict && !privacyConflict && observation.captureActive === false && generationKnown && !observationPending,
-      canVerify: safeObserving && !blocked && !taskOutdated && ['awaiting_action', 'needs_help'].includes(task.state) && Boolean(text(task.instruction)) && !guidancePending && !observationPending && !pending.has('ask'),
+      canVerify: safeObserving && !blocked && !taskOutdated && ['awaiting_action', 'awaiting_verify', 'needs_help'].includes(task.state)
+        && (Boolean(text(task.instruction)) || task.state === 'awaiting_verify') && !guidancePending && !observationPending && !pending.has('ask'),
+      canAutoStep: ready && safeObserving && observation.cloudConsent === true && !blocked && !taskBusy && !observationPending && !guidancePending
+        && !pending.has('ask') && !pending.has('dictate') && bridgeAvailable,
       canRepeat: ready && !privacyPaused && !blocked && !taskOutdated && ['awaiting_action', 'needs_help', 'completed'].includes(task.state) && Boolean(text(task.instruction)) && !guidancePending && !observationPending && !pending.has('ask'),
       canFinish: ready && activeTask && !pending.has('guidance.finish'),
     };
@@ -428,6 +431,7 @@
     const { observation, task, analysis } = state;
     const ballMode = record(runtime.pet).collapsed === true;
     element('pet-window').classList.toggle('is-ball', ballMode);
+    element('pet-window').classList.toggle('is-ball-hidden', ballMode && record(runtime.pet).hidden === true);
     element('pet-ball').hidden = !ballMode;
     const captions = record(runtime.captions);
     const wake = record(runtime.wake);
@@ -506,6 +510,17 @@
     element('finish-lesson').disabled = !state.canFinish;
     element('verify-step').textContent = pending.has('guidance.verify') || task.state === 'verifying' ? '等待新画面核验…' : '我点好了，请核验';
     element('finish-lesson').textContent = pending.has('guidance.finish') ? '正在请求结束…' : '结束教学';
+    element('auto-step-start').disabled = !state.canAutoStep || task.autoStep === true;
+    element('auto-step-start').textContent = pending.has('guidance.auto-start') ? '正在开启自动步进…'
+      : task.autoStep === true ? `自动步进进行中 · 第 ${Number.isSafeInteger(task.stepIndex) && task.stepIndex > 0 ? task.stepIndex : 1} 步` : '③ 自动步进指引（共享后自动截帧）';
+    const autoStepProgress = element('auto-step-progress');
+    autoStepProgress.hidden = task.autoStep !== true;
+    if (task.autoStep === true) autoStepProgress.textContent = task.state === 'awaiting_action'
+      ? '箭头已显示：请亲手点击目标；箭头消失后点“我点好了，请核验”继续下一步。'
+      : task.state === 'awaiting_verify' ? '箭头已隐藏：请点“我点好了，请核验”，模型会再截一帧分析下一步。'
+        : task.state === 'needs_help' ? '模型需要补充信息：请查看说明并回答后继续。'
+          : task.state === 'completed' ? '目标已找到或打开，自动步进已结束。'
+            : '正在本机遮盖并由模型分析本步画面…';
     element('send-question').disabled = !state.canAsk || !element('question').value.trim();
     element('send-question').textContent = cloudAuthorizing ? '正在等待分析授权…' : pending.has('ask') ? '正在发送…' : state.analysis.state === 'capture_retry' ? '正在刷新画面…' : task.state === 'analyzing' ? task.kind === 'text' ? '正在等待回答…' : '正在分析画面…' : activeSection === 'guidance' ? '查找并指引 ↗' : '问暖暖 ↗';
     element('question-hint').textContent = state.privacyPaused || state.blocked ? '安全状态待处理，可保留草稿，不能发送' : !ready ? '等待连接，可先写下问题' : activeSection === 'guidance'
@@ -904,6 +919,12 @@
       taskGeneration: context.taskGeneration, observationGeneration: context.observationGeneration }), rescanGuidance, true);
   }
 
+  function startAutoStep() {
+    if (!flags().canAutoStep) return;
+    const goal = element('question').value.trim();
+    void perform('guidance.auto-start', '自动步进未确认', () => bridge.command({ type: 'guidance.auto-start', ...(goal ? { goal } : {}) }), startAutoStep, true);
+  }
+
   function sendQuestion() {
     if (disposed || !flags().canAsk) return;
     const draft = element('question').value;
@@ -1193,9 +1214,42 @@
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); showMenu(); }
   });
   bind(element('pet-menu'), 'click', showMenu);
+  let ballDrag = null;
+  let suppressBallClick = false;
+  const sendBallDrag = (action, point) => {
+    if (typeof bridge?.drag !== 'function') return;
+    void Promise.resolve(bridge.drag(action, point)).catch(() => {});
+  };
+  bind(element('pet-ball'), 'pointerdown', event => {
+    if (event.button !== 0 || event.isPrimary === false || typeof bridge?.drag !== 'function') return;
+    suppressBallClick = false;
+    ballDrag = { pointerId: event.pointerId, x: event.screenX, y: event.screenY, moved: false };
+    try { element('pet-ball').setPointerCapture?.(event.pointerId); } catch {}
+    sendBallDrag('start', { x: event.screenX, y: event.screenY });
+  }, true);
+  bind(element('pet-ball'), 'pointermove', event => {
+    if (!ballDrag || event.pointerId !== ballDrag.pointerId) return;
+    if (!ballDrag.moved && Math.hypot(event.screenX - ballDrag.x, event.screenY - ballDrag.y) > 2) {
+      ballDrag.moved = true;
+      element('pet-ball').classList.toggle('is-dragging', true);
+    }
+    if (ballDrag.moved) sendBallDrag('move', { x: event.screenX, y: event.screenY });
+  }, true);
+  const endBallDrag = event => {
+    if (!ballDrag || (event && event.pointerId !== ballDrag.pointerId)) return;
+    const moved = ballDrag.moved;
+    ballDrag = null;
+    element('pet-ball').classList.toggle('is-dragging', false);
+    sendBallDrag('end', event ? { x: event.screenX, y: event.screenY } : undefined);
+    if (moved) suppressBallClick = true;
+  };
+  bind(element('pet-ball'), 'pointerup', endBallDrag, true);
+  bind(element('pet-ball'), 'pointercancel', endBallDrag, true);
+  bind(element('pet-ball'), 'lostpointercapture', () => endBallDrag(undefined));
   bind(element('pet-ball'), 'click', event => {
     event.preventDefault();
     event.stopPropagation();
+    if (suppressBallClick) { suppressBallClick = false; return; }
     if (typeof bridge?.expand !== 'function') return;
     void Promise.resolve(bridge.expand()).catch(error => showError('无法取回桌宠', error, () => { void bridge.expand().catch(() => {}); }));
   });
@@ -1266,6 +1320,7 @@
     requestCommand(type, 'guidance-start-observation');
   });
   bind(element('screen-voice-find'), 'click', () => { void startVoiceFind(); });
+  bind(element('auto-step-start'), 'click', () => startAutoStep());
   bind(element('pet-voice-mute'), 'click', () => requestCommand(record(runtime.voice).state === 'muted' ? 'voice.unmute' : 'voice.mute', 'pet-voice-mute'));
   bind(element('toggle-wake'), 'click', () => requestCommand(record(runtime.wake).state === 'enabled' ? 'wake.disable' : 'wake.enable', 'toggle-wake'));
   bind(element('view-learning'), 'click', () => setExpanded(true, { section: 'learning', focusInput: false }));

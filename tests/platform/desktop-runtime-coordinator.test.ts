@@ -1998,3 +1998,89 @@ describe('全屏慢链路下的安装边界', () => {
     expect(setup.runtime.snapshot().analysis.state).toBe('ready');
   });
 });
+
+describe('光标指引自动步进（合成端口单测，不代表真实验收）', () => {
+  it('无需输入问题即可开始：自动截帧、上传并显示第一步', async () => {
+    const setup = fixture();
+    await setup.start();
+    await setup.runtime.startAutoStep('帮我打开显示设置');
+    await setup.runtime.whenIdle();
+    const state = setup.runtime.snapshot();
+    expect(state.task).toMatchObject({ kind: 'guidance', autoStep: true, stepIndex: 1, state: 'awaiting_action', question: '帮我打开显示设置' });
+    expect(setup.analyze).toHaveBeenCalledOnce();
+    expect(setup.analyze.mock.calls[0][0]).toMatchObject({ reason: 'question', question: '帮我打开显示设置' });
+    expect(state.task.targetState).toBe('visible');
+    expect(setup.recordTeaching).not.toHaveBeenCalled();
+  });
+
+  it('没有目标文本时使用默认目标，不新建文字任务', async () => {
+    const setup = fixture();
+    await setup.start();
+    await setup.runtime.startAutoStep();
+    await setup.runtime.whenIdle();
+    expect(setup.analyze.mock.calls[0][0].question).toContain('下一步');
+    expect(setup.runtime.snapshot().task).toMatchObject({ kind: 'guidance', autoStep: true });
+  });
+
+  it('点“我点好了，请核验”总会再截一帧上传，并推进到下一步', async () => {
+    const setup = fixture();
+    await setup.start();
+    await setup.runtime.startAutoStep('帮我打开显示设置');
+    await setup.runtime.whenIdle();
+    expect(setup.analyze).toHaveBeenCalledOnce();
+    const capturesBefore = setup.source.capture.mock.calls.length;
+    await setup.runtime.verify();
+    await setup.runtime.whenIdle();
+    expect(setup.source.capture.mock.calls.length).toBeGreaterThan(capturesBefore);
+    expect(setup.analyze).toHaveBeenCalledTimes(2);
+    expect(setup.analyze.mock.calls[1][0]).toMatchObject({ reason: 'verification' });
+    expect(setup.runtime.snapshot().task).toMatchObject({ state: 'awaiting_action', stepIndex: 2 });
+  });
+
+  it('达到 12 步上限后停止上传并结束教学', async () => {
+    const setup = fixture();
+    await setup.start();
+    await setup.runtime.startAutoStep('一直点下去');
+    await setup.runtime.whenIdle();
+    for (let index = 0; index < 12; index += 1) {
+      await setup.runtime.verify();
+      await setup.runtime.whenIdle();
+    }
+    const state = setup.runtime.snapshot();
+    expect(setup.analyze.mock.calls.length).toBeLessThanOrEqual(13);
+    expect(['ended', 'completed']).toContain(state.task.state);
+  });
+
+  it('自动步进下本机分类失败会重试并跳过该帧，不暂停共享也不报错', async () => {
+    const setup = fixture();
+    let failing = false;
+    setup.source.detect.mockImplementation(async frame => failing
+      ? { ...syntheticDetection(frame), status: 'unavailable', reason: 'no_readable_text' }
+      : syntheticDetection(frame));
+    await setup.start();
+    failing = true;
+    await setup.runtime.startAutoStep('帮我打开显示设置');
+    await setup.runtime.whenIdle();
+    const state = setup.runtime.snapshot();
+    expect(state.observation).toMatchObject({ state: 'observing', captureActive: true });
+    expect(state.analysis.message).toContain('已跳过这一帧');
+    expect(setup.analyze).not.toHaveBeenCalled();
+    expect(setup.source.stop).not.toHaveBeenCalled();
+    expect(setup.source.capture.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('手动指引保持原来的失败关闭：分类失败立即暂停且不重试', async () => {
+    const setup = fixture();
+    let failing = false;
+    setup.source.detect.mockImplementation(async frame => failing
+      ? { ...syntheticDetection(frame), status: 'unavailable', reason: 'no_readable_text' }
+      : syntheticDetection(frame));
+    await setup.start();
+    failing = true;
+    await setup.runtime.ask('帮我打开显示设置');
+    await setup.runtime.whenIdle();
+    expect(setup.runtime.snapshot().observation).toMatchObject({ state: 'privacy_paused', reason: 'no_readable_text' });
+    expect(setup.source.capture).toHaveBeenCalledTimes(2);
+    expect(setup.source.stop).toHaveBeenCalledOnce();
+  });
+});

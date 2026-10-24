@@ -78,6 +78,8 @@ function createStandaloneHost(options) {
   let expanded = false;
   let collapsed = false;
   let restoreBounds = null;
+  let ballPosition = null;
+  let ballEdge = null;
   let idleTimer = null;
   let blurTimer = null;
   let menuOpen = false;
@@ -132,7 +134,7 @@ function createStandaloneHost(options) {
 
   function snapshot() {
     const state = runtime.snapshot();
-    state.pet = { collapsed, ballSize, idleHideMs };
+    state.pet = { collapsed, ballSize, idleHideMs, hidden: ballEdge !== null, edge: ballEdge };
     state.voice = voiceHost?.snapshot() ?? { state: 'off', active: false, microphoneActive: false, configured: false, message: '面对面语音未开启。' };
     state.voice = { ...state.voice, presentation: 'pet', ...(faceVoiceVisible ? { bubble: { ...voiceBubble } } : {}) };
     const localWake = wake.snapshot();
@@ -306,8 +308,46 @@ function createStandaloneHost(options) {
     };
   }
 
-  function ballBoundsFor(bounds) {
+  function freeBallBounds(bounds, area) {
+    const width = ballSize;
+    const height = ballSize;
+    return {
+      x: Math.round(Math.max(area.x + 8, Math.min(bounds.x, area.x + area.width - width - 8))),
+      y: Math.round(Math.max(area.y + 8, Math.min(bounds.y, area.y + area.height - height - 8))),
+      width,
+      height,
+    };
+  }
+
+  function halfHiddenBallBounds(bounds, area, edge) {
+    const half = ballSize / 2;
+    const centeredX = Math.round(Math.max(area.x + 8, Math.min(bounds.x + bounds.width / 2 - half, area.x + area.width - ballSize - 8)));
+    const centeredY = Math.round(Math.max(area.y + 8, Math.min(bounds.y + bounds.height / 2 - half, area.y + area.height - ballSize - 8)));
+    if (edge === 'left') return { x: area.x - half, y: centeredY, width: ballSize, height: ballSize };
+    if (edge === 'top') return { x: centeredX, y: area.y - half, width: ballSize, height: ballSize };
+    if (edge === 'bottom') return { x: centeredX, y: area.y + area.height - half, width: ballSize, height: ballSize };
+    return { x: area.x + area.width - half, y: centeredY, width: ballSize, height: ballSize };
+  }
+
+  function nearestEdgeFor(bounds, area, threshold = 32) {
+    const distances = [
+      ['left', bounds.x - area.x],
+      ['right', area.x + area.width - (bounds.x + bounds.width)],
+      ['top', bounds.y - area.y],
+      ['bottom', area.y + area.height - (bounds.y + bounds.height)],
+    ];
+    const nearest = distances.reduce((best, entry) => entry[1] < best[1] ? entry : best, distances[0]);
+    return nearest[1] <= threshold ? nearest[0] : null;
+  }
+
+  function ballBoundsFor(bounds, { half = false } = {}) {
     const area = screen.getDisplayMatching(bounds).workArea;
+    if (half) {
+      ballEdge = nearestEdgeFor(bounds, area) ?? ballEdge ?? 'right';
+      return halfHiddenBallBounds(bounds, area, ballEdge);
+    }
+    if (ballEdge) return halfHiddenBallBounds(bounds, area, ballEdge);
+    if (ballPosition) return freeBallBounds(ballPosition, area);
     const centerY = bounds.y + Math.round(bounds.height / 2);
     return {
       x: area.x + area.width - ballSize - 8,
@@ -366,10 +406,34 @@ function createStandaloneHost(options) {
     clearTimeout(blurTimer);
     blurTimer = null;
     clearPetDrag();
-    petWindow.setAlwaysOnTop(false);
-    petWindow.setBounds(ballBoundsFor(restoreBounds));
+    const target = ballBoundsFor(restoreBounds, { half: reason === 'blur' });
+    if (!ballEdge) ballPosition = target;
+    petWindow.setBounds(target);
+    // Only the small ball stays above other windows so the owner can always see and grab it;
+    // the expanded pet window itself never stays on top.
+    petWindow.setAlwaysOnTop(true, 'floating');
     petWindow.showInactive();
     publish();
+    return true;
+  }
+
+  function settleBallAfterDrag() {
+    if (!live(petWindow)) return false;
+    const bounds = petWindow.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const edge = nearestEdgeFor(bounds, area, 48);
+    if (edge) {
+      ballEdge = edge;
+      petWindow.setBounds(halfHiddenBallBounds(bounds, area, edge));
+    } else {
+      ballEdge = null;
+      const target = freeBallBounds(bounds, area);
+      ballPosition = target;
+      petWindow.setBounds(target);
+    }
+    petWindow.setAlwaysOnTop(true, 'floating');
+    publish();
+    resetIdleTimer();
     return true;
   }
 
@@ -419,10 +483,15 @@ function createStandaloneHost(options) {
 
   function dragPet(action, point) {
     if (!['start', 'move', 'end'].includes(action)) throw new Error('桌宠移动请求无效');
-    if (collapsed) return false;
     noteActivity();
     if (point !== undefined && (!point || Object.keys(point).length !== 2 || !['x', 'y'].every(key => Number.isFinite(point[key]) && Math.abs(point[key]) <= 1000000))) throw new Error('桌宠指针坐标无效');
-    if (action === 'end') { clearPetDrag(); if (live(petWindow)) lili.rememberPosition(petWindow.getBounds()); return true; }
+    if (action === 'end') {
+      clearPetDrag();
+      if (collapsed) return settleBallAfterDrag();
+      if (live(petWindow)) lili.rememberPosition(petWindow.getBounds());
+      resetIdleTimer();
+      return true;
+    }
     if (closing || !live(petWindow) || !petWindow.isVisible()) { clearPetDrag(); return false; }
     const cursor = point ?? screen.getCursorScreenPoint();
     if (action === 'start') {
@@ -775,6 +844,8 @@ function createStandaloneHost(options) {
     blurTimer = null;
     collapsed = false;
     restoreBounds = null;
+    ballPosition = null;
+    ballEdge = null;
     if (!options.hasManagementWindow?.()) {
       options.onExit();
       return true;
@@ -824,6 +895,9 @@ function createStandaloneHost(options) {
       { label: '待办与复习', click: () => showPetPanel({ section: 'todos', focusInput: false }) },
       ...[['文字与图片问答', '/chat/new'], ['我的小伙伴', '/pets'], ['本地 3D 桌宠', '/pets/import-3d'], ['画一画', '/pets/draw'], ['亲情陪伴（远程未接通）', '/family'], ['设置与隐私', '/settings'], ['接口与能力状态', '/settings/status'], ['陪伴与无障碍模式', '/onboarding/mode'], ['账号与设备（远程未接入）', '/onboarding/login'], ['资料冲突处理', '/sync/conflicts']].map(([label, route]) => ({ label, click: () => runAction(() => openPetTool(route)) })),
       { label: '打开管理窗口', click: () => runAction(() => options.showManagement('/')) },
+      { label: typeof options.questioner?.answer === 'function' ? '配置云端智能服务（当前已连接模型）…' : '配置云端智能服务（一键填 key）…',
+        enabled: typeof options.configureAiProvider === 'function',
+        click: () => runAction(() => options.configureAiProvider()) },
       { type: 'separator' }, { label: '停止观察、语音和发送', click: () => runAction(() => stop('user')) },
       { label: '关闭桌宠（停止所有采集）', click: () => runAction(closePetWindow) },
     ]);
@@ -953,6 +1027,7 @@ function createStandaloneHost(options) {
       }
       case 'observation.resume': return chooseObservation(true);
       case 'observation.stop': await stop(); break;
+      case 'guidance.auto-start': await runtime.startAutoStep(typeof payload.goal === 'string' ? payload.goal : undefined); break;
       case 'guidance.verify': await runtime.verify(); break;
       case 'guidance.finish': await runtime.finishTeaching(); break;
       case 'guidance.repeat': runtime.repeat(); break;
