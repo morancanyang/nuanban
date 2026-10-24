@@ -15,4 +15,8 @@ export function loadConfiguredProvider(options?: {
   configurationPath?: string;
   decrypt?(encrypted: string): Promise<string>;
   fetch?: typeof fetch;
+  detectLocal?: boolean;
+  detectLocalProvider?(options?: { fetch?: typeof fetch; timeoutMs?: number }): Promise<AiProvider | undefined>;
+  localDetectTimeoutMs?: number;
 }): Promise<AiProvider | undefined>;
+export function detectLocalModelProvider(options?: { fetch?: typeof fetch; timeoutMs?: number }): Promise<AiProvider | undefined>;
