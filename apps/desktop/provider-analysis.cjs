@@ -15,13 +15,13 @@ function checkedLabels(labels) {
   return [...new Set(labels.map(label => label.trim()))];
 }
 
-function parseResult(text, input, elements) {
+function parseResult(text, input, elements, relaxed = false) {
   let parsed;
   try { parsed = JSON.parse(text); } catch { throw failure('INVALID_ANALYSIS_RESPONSE'); }
   const fields = new Set(['kind', 'instruction', 'target_id', 'presentation', 'expected_labels', 'evidence_labels']);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).some(key => !fields.has(key))
     || !['step', 'clarify', 'unsupported', 'completed'].includes(parsed.kind) || typeof parsed.instruction !== 'string'
-    || !parsed.instruction.trim() || parsed.instruction.length > 600 || isRestrictedText(parsed.instruction)) throw failure('INVALID_ANALYSIS_RESPONSE');
+    || !parsed.instruction.trim() || parsed.instruction.length > 600 || (!relaxed && isRestrictedText(parsed.instruction))) throw failure('INVALID_ANALYSIS_RESPONSE');
   const result = {
     observation_id: input.observationId, guide_id: input.guideId, observation_generation: input.observationGeneration,
     task_generation: input.taskGeneration, trigger_id: input.triggerId, frame_id: input.frame.frameId,
@@ -49,28 +49,33 @@ function parseResult(text, input, elements) {
   return result;
 }
 
-function createProviderAnalysisClient({ provider, now = Date.now } = {}) {
+function createProviderAnalysisClient({ provider, now = Date.now, relaxedSafety = false } = {}) {
+  // Owner-only "maximum permissions" mode on a single-machine install: the restricted-word filter is
+  // skipped for the question, follow-up replies and the model instruction. Every structural check,
+  // frame admission check and target-id validation still applies.
+  const safetyOff = () => (typeof relaxedSafety === 'function' ? relaxedSafety() === true : relaxedSafety === true);
   return {
     capabilities() { return { configured: typeof provider?.answer === 'function', protocol: 'standalone-guidance-v1' }; },
     async analyze(input) {
       if (typeof provider?.answer !== 'function') throw failure('ANALYSIS_UNAVAILABLE');
       // 本机纯文字模型看不到图片；直接给出准确原因，而不是让模型解释一张它根本没看到的画面。
       if (provider.vision === false) throw failure('ANALYSIS_VISION_REQUIRED');
+      const relaxed = safetyOff();
       if (!input || input.signal?.aborted || typeof input.canSend !== 'function' || !input.canSend()
         || !isAdmittedFrame(input.frame, now()) || typeof input.question !== 'string' || !input.question.trim()
-        || input.question.length > 1500 || isRestrictedText(input.question)) throw failure('OUTBOUND_CLOSED');
+        || input.question.length > 1500 || (!relaxed && isRestrictedText(input.question))) throw failure('OUTBOUND_CLOSED');
       const previous = input.previousStep;
       if (previous && (typeof previous.instruction !== 'string' || previous.instruction.length > 600
-        || isRestrictedText(previous.instruction))) throw failure('OUTBOUND_CLOSED');
+        || (!relaxed && isRestrictedText(previous.instruction)))) throw failure('OUTBOUND_CLOSED');
       const expectedLabels = previous ? checkedLabels(previous.expectedLabels) : [];
       const replies = input.clarificationReplies === undefined ? [] : input.clarificationReplies;
       if (!Array.isArray(replies) || replies.length > 3 || Array.from(replies).some(reply => !reply
         || typeof reply !== 'object' || Array.isArray(reply) || Object.keys(reply).length !== 2
         || !Object.hasOwn(reply, 'prompt') || !Object.hasOwn(reply, 'answer')
         || typeof reply.prompt !== 'string' || !reply.prompt.trim() || reply.prompt.length > 600
-        || forbiddenTextPattern.test(reply.prompt) || isRestrictedText(reply.prompt)
+        || forbiddenTextPattern.test(reply.prompt) || (!relaxed && isRestrictedText(reply.prompt))
         || typeof reply.answer !== 'string' || !reply.answer.trim() || reply.answer.length > 500
-        || forbiddenTextPattern.test(reply.answer) || isRestrictedText(reply.answer))) throw failure('OUTBOUND_CLOSED');
+        || forbiddenTextPattern.test(reply.answer) || (!relaxed && isRestrictedText(reply.answer)))) throw failure('OUTBOUND_CLOSED');
       const elements = selectAnalysisElements(input);
       const context = JSON.stringify({
         reason: input.reason, width: input.frame.width, height: input.frame.height,
@@ -119,7 +124,7 @@ function createProviderAnalysisClient({ provider, now = Date.now } = {}) {
       if (!input.signal?.aborted && !installOk() && typeof input.confirmCurrentFrame === 'function') await input.confirmCurrentFrame();
       if (input.signal?.aborted || !installOk() || !isAdmittedFrame(input.frame, input.frame.capturedAt)) throw failure('OUTBOUND_CLOSED');
       if (typeof reply?.text !== 'string' || reply.text.length > 24000) throw failure('INVALID_ANALYSIS_RESPONSE');
-      return parseResult(reply.text, input, elements);
+      return parseResult(reply.text, input, elements, relaxed);
     },
   };
 }

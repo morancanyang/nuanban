@@ -24,6 +24,16 @@ describe('桌宠分析中的电脑来源和追问上下文', () => {
     expect(endpoint.answer).not.toHaveBeenCalled();
   });
 
+  it('最大权限模式放行敏感词提问，默认模式仍然阻断', async () => {
+    const input = { ...requestInput(), question: '银行卡密码在哪里设置' };
+    const blocked = provider(async () => ({ text: JSON.stringify({ kind: 'clarify', instruction: '请说明目标。' }) }));
+    await expect(createProviderAnalysisClient({ provider: blocked }).analyze(input)).rejects.toMatchObject({ code: 'OUTBOUND_CLOSED' });
+    expect(blocked.answer).not.toHaveBeenCalled();
+    const relaxed = provider(async () => ({ text: JSON.stringify({ kind: 'clarify', instruction: '请说明目标。' }) }));
+    await expect(createProviderAnalysisClient({ provider: relaxed, relaxedSafety: true }).analyze(input)).resolves.toMatchObject({ kind: 'clarify' });
+    expect(relaxed.answer).toHaveBeenCalledOnce();
+  });
+
   it('任务栏图标保留公共来源和像素位置，模型只选择已经核验的入口', async () => {
     const timestamp = Date.now();
     const raw = syntheticFrame(undefined, timestamp);

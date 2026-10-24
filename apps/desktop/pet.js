@@ -434,7 +434,12 @@
     element('pet-window').classList.toggle('is-ball', ballMode);
     element('pet-window').classList.toggle('is-ball-hidden', ballMode && record(runtime.pet).hidden === true);
     element('pet-ball').hidden = !ballMode;
-    element('unredacted-warning').hidden = record(runtime.observation).unredactedUpload !== true;
+    const observationFlags = record(runtime.observation);
+    const maxPermissionsOn = observationFlags.maxPermissions === true;
+    element('unredacted-warning').hidden = observationFlags.unredactedUpload !== true && !maxPermissionsOn;
+    element('unredacted-warning').textContent = maxPermissionsOn
+      ? '最大权限模式：原始画面直接上传，且不再因敏感词或未分类画面暂停；可在桌宠右键菜单关闭。'
+      : '已开启“关闭本机遮盖”：上传的是原始画面，本机不再遮盖文字与人脸；可在桌宠右键菜单改回。';
     const captions = record(runtime.captions);
     const wake = record(runtime.wake);
     const unsafe = state.captureConflict || state.privacyConflict;

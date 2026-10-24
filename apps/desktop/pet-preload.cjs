@@ -185,7 +185,7 @@ function projectSnapshot(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok === false) return null;
   const result = projectRecord(value, { message: 'string', learningUnavailable: 'boolean', learningError: 'string' });
   const sections = {
-    observation: { state: 'string', sourceName: 'string', reason: 'string', generation: 'number', captureActive: 'boolean', cloudConsent: 'boolean', unredactedUpload: 'boolean' },
+    observation: { state: 'string', sourceName: 'string', reason: 'string', generation: 'number', captureActive: 'boolean', cloudConsent: 'boolean', unredactedUpload: 'boolean', relaxedSafety: 'boolean', maxPermissions: 'boolean' },
     task: { id: 'string', kind: 'string', generation: 'number', observationGeneration: 'number', state: 'string', question: 'string', instruction: 'string', explanation: 'string', presentation: 'string', targetState: 'string', awaitingReply: 'boolean', result: 'string', autoStep: 'boolean', stepIndex: 'number' },
     analysis: { state: 'string', message: 'string' },
     captions: { enabled: 'boolean', text: 'string' },
