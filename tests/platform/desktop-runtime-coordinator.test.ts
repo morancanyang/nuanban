@@ -1408,8 +1408,8 @@ describe('驻留运行核心（合成端口单测，不替代原生/供应验收
     expect(setup.records).toHaveLength(age <= 5000 ? 1 : 0);
   });
 
-  it.each(['source', 'display', 'geometry', 'signature'] as const)(
-    '慢响应不接受上下文曾发生变化的安全帧续接旧分析：%s', async changed => {
+  it.each(['source', 'display', 'geometry'] as const)(
+    '慢响应不接受采集范围变化的安全帧续接旧分析：%s', async changed => {
       vi.useFakeTimers();
       const setup = fixture({ intervalMs: 1500 });
       const pending = await beginSlowAnalysis(setup);
@@ -1421,7 +1421,6 @@ describe('驻留运行核心（合成端口单测，不替代原生/供应验收
           if (changed === 'geometry' && frame.geometry) frame.geometry.x += 10;
           return frame;
         });
-        if (changed === 'signature') setup.controls.labels.push('帮助');
         await advanceObservation(setup, 6000);
         expect(pending.request.signal.aborted).toBe(true);
         expect(pending.request.canSend()).toBe(false);
@@ -1432,6 +1431,42 @@ describe('驻留运行核心（合成端口单测，不替代原生/供应验收
       expect(setup.suggestReview).not.toHaveBeenCalled();
     },
   );
+
+  // 现场活锁根因：周期抽帧 tick 取消并重发飞行中的分析请求。同一采集范围内控件集合变化只合并 tick、
+  // 不取消请求；返回后仍要按最新安全帧独立核验，核验不过照样拒绝。
+  it('慢响应期间控件集合变化只合并周期 tick，不取消请求也不重发', async () => {
+    vi.useFakeTimers();
+    const setup = fixture({ intervalMs: 1500 });
+    const pending = await beginSlowAnalysis(setup);
+    try {
+      setup.controls.labels.push('帮助');
+      await advanceObservation(setup, 6000);
+      expect(pending.request.signal.aborted).toBe(false);
+      expect(pending.fetchRequest).toHaveBeenCalledOnce();
+    } finally { pending.complete(); }
+    await setup.runtime.whenIdle();
+    expect(pending.fetchRequest).toHaveBeenCalledOnce();
+    expect(setup.analyze).toHaveBeenCalledTimes(2);
+    expect(setup.runtime.snapshot().task.state).toBe('completed');
+    expect(setup.records).toHaveLength(1);
+  });
+
+  it('慢响应期间预期控件消失时按新帧拒绝完成，不透出兜底文案', async () => {
+    vi.useFakeTimers();
+    const setup = fixture({ intervalMs: 1500 });
+    const pending = await beginSlowAnalysis(setup);
+    try {
+      setup.controls.labels = ['设置', '显示', '今天天气不错', '返回'];
+      await advanceObservation(setup, 6000);
+      expect(pending.request.signal.aborted).toBe(false);
+    } finally { pending.complete(); }
+    await setup.runtime.whenIdle();
+    expect(setup.runtime.snapshot().task.state).toBe('needs_help');
+    expect(setup.runtime.snapshot().analysis.message).toContain('没有在新画面里核验到预期变化');
+    expect(setup.runtime.snapshot().analysis.message).not.toContain('本次分析未获得可核验的结果');
+    expect(setup.records).toEqual([]);
+    expect(setup.suggestReview).not.toHaveBeenCalled();
+  });
 
   it.each(['missing', 'invalid', 'aspect', 'scale', 'display'] as const)(
     '慢响应不能借相同但未验证的几何或显示信息续接：%s', async invalid => {

@@ -29,6 +29,15 @@
 - **OCR 兜底未实现**：UIA 名为空/纯符号的元素仍被跳过，没有用本地 OCR 就近匹配；无名图标的图形候选仍由既有 `visual-controls.cjs`（“未标注图标” + 外观指纹）在本人框选/已授权共享路径提供。
 - 验证：新增/更新合成单测覆盖任意名称（WeGame、中文名、超长、空名、控制字符、纯符号）、友好名映射、同名同位置去重、数量与范围过滤，以及运行时对非白名单桌面入口的箭头续显；`pnpm typecheck` 通过。**真机验收未完成**：需要用户在整屏共享下点击“重新识别当前画面”后确认 WeGame 出现箭头，并核对箭头位置与图标一致。
 
+## 2026-10-24 周期抽帧 tick 合并而非取消：核验不再卡在“正在分析画面”（`deviceVerified=false`）
+
+现场问题：第一步截帧与箭头正常，用户点“我点好了，请核验”后一直显示“正在分析画面”，最后报“本次分析未获得可核验的结果”。`%APPDATA%\@nuanban\desktop\guidance-trace.log` 每约 3 秒稳定重复 `capture_cycle(allow) → analysis_error(ANALYSIS_CANCELLED, timedOut:false) → analysis_request(page_changed, ~1.6MB) → analysis_image_scaled(0.77MB, 1600×1000)`，即周期 `page_changed` tick 取消并立刻重发仍在飞行中的请求；一次桌面提供方分析实测 >3.5 秒 > 3 秒 tick，请求永远拿不到结果（活锁）。修正后：
+
+- 飞行中的分析不再被周期 tick 取消：tick 合并/延后（`analysis_deferred{reason:'in_flight'}`），本人动作（结束观察、改范围、停止共享、重新提问、点核验）与“预期控件已出现”的自动续步仍立即取消并重发（`analysis_preempted`）。取消权仍只属于本人动作。
+- 合并后的补发遵守**最小间隔 6 秒**与**连续慢响应退避**（6→12→24 秒上限，`analysis_recheck_scheduled{delayMs,trigger,slowStreak}`）；退避只延后补发，不放宽五秒帧龄、准入、来源/几何与敏感文本门控。只有这次分析根本没发出去（`analysis_skipped`）才自动补发一次。
+- 核验路径跑到完成或明确失败，失败透出真实原因（`target_not_in_current_frame`、`completion_not_verified`、`previous_step_not_verified`、`stale_analysis_frame`、`invalid_analysis*`、非本人取消的 `ANALYSIS_CANCELLED`），兜底文案只作最后手段；采集范围变化或新画面无可核验控件时明确作废（`analysis_abandoned`）而不是静默停在“正在分析画面”。
+- 真机验收未完成（`deviceVerified=false`）：需要用户在整屏共享下点“我点好了，请核验”，确认不再卡住并拿到箭头或真实失败原因；本轮只有假时钟 + 假 provider 的合成单测（`tests/platform/desktop-guidance-analysis-recheck.test.ts`）与 trace 事件写入断言。
+
 ## 验证与边界
 
 定向单测覆盖授权来源、坐标映射、名称清洗（不再限于白名单）、未请求结果拒绝、附件隔离、脱敏布局、敏感内容以及回复/捕获间隙。真实 Windows 检测使用内存画面，只输出固定计数、耗时和原因，不落盘私有画面或 OCR 正文。

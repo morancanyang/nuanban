@@ -116,6 +116,18 @@ Electron 从 Node 启动时应移除子进程环境变量 `ELECTRON_RUN_AS_NODE`
 
 **2026-10-24 新增待验收项（`deviceVerified=false`）：** 整屏共享下，桌面第二列顶部的 WeGame 图标（以及任意第三方快捷方式）应被本机 UIA 枚举为候选并在本人点击“重新识别当前画面”后出现箭头；这一条只有用户在实际设备、实际整屏共享下才能确认，本轮只完成合成单测与脚本静态校验。
 
+## 2026-10-24 周期 tick 合并而非取消（核验不再卡在“正在分析画面”）
+
+现场 trace（`%APPDATA%\@nuanban\desktop\guidance-trace.log`）显示：点“我点好了，请核验”后每约 3 秒稳定重复 `capture_cycle(allow) → analysis_error(ANALYSIS_CANCELLED, timedOut:false) → analysis_request(page_changed) → analysis_image_scaled`，而一次分析实测 >3.5 秒 > 3 秒 tick，请求永远被取消并立刻重发，界面一直停在“正在分析画面”，最后落到兜底文案。修正规则：
+
+- 已有分析在飞行中时，周期 `page_changed` tick **只合并/延后**（记 `recheckPending` 标志并写 `analysis_deferred{reason:'in_flight'}`），**不取消、不重发**；只有本人动作（结束观察、改范围、停止共享、重新提问、点“我点好了，请核验”）与“预期控件已出现”的自动续步才取消并立即重发（`analysis_preempted`）。安全语义不变：取消仍是本人动作的特权，周期 tick 不再拥有它。
+- 合并后的补发有**最小间隔 6 秒**，并按连续慢响应**退避**（6→12→24 秒上限）；退避只延后补发，不放宽五秒帧龄、准入、来源/几何或敏感文本门控。延后补发写 `analysis_recheck_scheduled{delayMs,trigger,slowStreak}`，到点后重新采集一帧再按既有门控决定是否上传。
+- 只有这一次分析**根本没发出去**（画面在发送前已过期，写 `analysis_skipped`）才自动补发一次；已有结论、明确失败或被安全作废的都不自动重试，失败仍由本人重新核验。
+- 核验（verification）路径不再被周期 tick 取消；失败按 `analysisFailureMessage` 透出**真实原因**（`target_not_in_current_frame`、`completion_not_verified`、`previous_step_not_verified`、`stale_analysis_frame`、`invalid_analysis*`、非本人取消的 `ANALYSIS_CANCELLED` 等），兜底文案“本次分析未获得可核验的结果”只作最后手段。
+- 采集范围在分析期间变化、或新画面没有任何可核验控件时，不再静默 `abort`（那会让界面永远停在“正在分析画面”），而是明确作废该次分析并给出原因（`analysis_abandoned`）。
+- trace 变化：新增 `analysis_deferred`、`analysis_recheck_scheduled`、`analysis_settled{durationMs,outcome,slowStreak}`、`analysis_skipped`、`analysis_preempted`、`analysis_abandoned`；`analysis_reply`/`analysis_error` 增加 `durationMs`，判断“分析是否慢于 tick”一眼可见。
+- 验证：`tests/platform/desktop-guidance-analysis-recheck.test.ts` 用假时钟 + 假 provider（不接触真实网络）覆盖“provider 4 秒 > tick 3 秒时 0 次取消、恰好一次完成、箭头显示”“本人结束观察/重新提问仍立即取消并清理”“6 秒最小间隔与 12 秒退避”“核验失败透出真实原因”，并断言上述 trace 事件确实写入临时目录（不碰用户日志）。**真机验收未完成（`deviceVerified=false`）**：需要用户在整屏共享下点“我点好了，请核验”，确认不再卡在“正在分析画面”并拿到箭头或真实失败原因。
+
 ## 官方 API 核对
 
 - Electron desktopCapturer（零尺寸缩略图、来源枚举与大小限制）：https://www.electronjs.org/docs/latest/api/desktop-capturer

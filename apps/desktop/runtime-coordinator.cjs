@@ -30,21 +30,39 @@ function checkedLabels(value) {
   return [...new Map(value.map(label => [normalizeLabel(label), label])).values()];
 }
 
+// 核验/安装阶段的失败同样要有真实原因：这些错误由运行时自己抛出（只有 message，没有 code），
+// 以前一律落到"未获得可核验的结果"兜底文案，现场无法判断到底卡在哪一步。
+const analysisFailureMessages = {
+  ANALYSIS_TIMEOUT: '本次屏幕分析超时，已取消请求；可以手动重新提问或结束教学，不会自动重试。',
+  ANALYSIS_UNAVAILABLE: '模型服务暂时不可用（网络中断或服务端错误，已做有界自动重试）；未显示箭头，不会用演示数据替代。可稍后手动重新提问。',
+  ANALYSIS_AUTH_FAILED: '模型认证或权限检查失败，请检查模型凭证和模型权限；未显示箭头。',
+  ANALYSIS_RATE_LIMITED: '模型服务暂时限流（已做有界自动重试）；未显示箭头；请稍后手动重新提问。',
+  ANALYSIS_IMAGE_TOO_LARGE: '脱敏画面超过分析服务大小上限，本次未发送，未显示箭头；当前本地共享仍保持。可停止共享后重新选择较小区域，再手动提问。',
+  ANALYSIS_VISION_REQUIRED: '当前本机模型是纯文字模型，看不到任何图片，因此无法分析屏幕；未发送画面、未显示箭头。请安装视觉模型（命令示例：ollama pull qwen2.5vl:3b），或在桌宠右键菜单“配置云端智能服务”里换成支持看图的云端模型。',
+  ANALYSIS_RESPONSE_INCOMPLETE: '模型结果未完整返回，未显示箭头；请手动重新提问，不会使用残缺结果。',
+  ANALYSIS_FAILED: '模型请求失败（网络、图片大小或返回异常），未显示箭头；请稍后手动重新提问，不会使用旧位置。',
+  INVALID_ANALYSIS_RESPONSE: '模型返回的格式或目标未通过本机校验，未显示箭头；请重新提问。若反复出现，请检查模型是否支持图片与 JSON 指引。',
+  OUTBOUND_CLOSED: '分析返回时画面已过期或观察范围发生变化，未显示箭头。请保持目标区域可见，再点击“查找并指引”；不会使用旧位置。',
+  // 客户端自身的连接超时（不是本人取消）也要给出真实原因，而不是兜底文案。
+  ANALYSIS_CANCELLED: '本次画面分析在返回前被中断（连接超时或请求已被取消），未显示箭头；可重新核验当前画面。',
+  // 核验与安装阶段的本地校验失败。
+  stale_analysis_frame: '分析结果对应的本地画面已经变化，未显示箭头（不会按旧位置操作）。请保持目标可见后重新核验。',
+  stale_analysis: '模型返回的结果与本次问题、代次或触发不匹配，已丢弃且未显示箭头。请重新核验当前画面。',
+  invalid_analysis: '模型返回的这一步说明未通过本机校验（格式或内容无效），未显示箭头。请重新核验或重新提问。',
+  invalid_analysis_labels: '模型给出的预期标签未通过本机校验，未显示箭头。请重新核验当前画面。',
+  invalid_analysis_kind: '模型返回的结果类型无法处理，未显示箭头。请重新提问。',
+  completion_geometry_unverified: '模型判断这一步已完成，但本机无法验证屏幕坐标，未标记完成、未显示箭头。请重新选择观察屏幕后再核验。',
+  completion_not_verified: '模型判断这一步已完成，但本机没有在新画面里核验到预期变化，未标记完成、未显示箭头。请先亲手完成上一步，再点“我点好了，请核验”。',
+  target_not_in_current_frame: '模型选中的目标在当前新画面里找不到唯一位置，未显示箭头（不会按旧位置操作）。请保持目标可见后重新核验。',
+  previous_step_not_verified: '这一步与上一步的目标或预期变化对不上，未显示箭头。请重新提问或点“再讲一遍”。',
+};
+
 function analysisFailureMessage(error, timedOut) {
-  const messages = {
-    ANALYSIS_TIMEOUT: '本次屏幕分析超时，已取消请求；可以手动重新提问或结束教学，不会自动重试。',
-    ANALYSIS_UNAVAILABLE: '模型服务暂时不可用（网络中断或服务端错误，已做有界自动重试）；未显示箭头，不会用演示数据替代。可稍后手动重新提问。',
-    ANALYSIS_AUTH_FAILED: '模型认证或权限检查失败，请检查模型凭证和模型权限；未显示箭头。',
-    ANALYSIS_RATE_LIMITED: '模型服务暂时限流（已做有界自动重试）；未显示箭头；请稍后手动重新提问。',
-    ANALYSIS_IMAGE_TOO_LARGE: '脱敏画面超过分析服务大小上限，本次未发送，未显示箭头；当前本地共享仍保持。可停止共享后重新选择较小区域，再手动提问。',
-    ANALYSIS_VISION_REQUIRED: '当前本机模型是纯文字模型，看不到任何图片，因此无法分析屏幕；未发送画面、未显示箭头。请安装视觉模型（命令示例：ollama pull qwen2.5vl:3b），或在桌宠右键菜单“配置云端智能服务”里换成支持看图的云端模型。',
-    ANALYSIS_RESPONSE_INCOMPLETE: '模型结果未完整返回，未显示箭头；请手动重新提问，不会使用残缺结果。',
-    ANALYSIS_FAILED: '模型请求失败（网络、图片大小或返回异常），未显示箭头；请稍后手动重新提问，不会使用旧位置。',
-    INVALID_ANALYSIS_RESPONSE: '模型返回的格式或目标未通过本机校验，未显示箭头；请重新提问。若反复出现，请检查模型是否支持图片与 JSON 指引。',
-    OUTBOUND_CLOSED: '分析返回时画面已过期或观察范围发生变化，未显示箭头。请保持目标区域可见，再点击“查找并指引”；不会使用旧位置。',
-  };
-  const code = timedOut ? 'ANALYSIS_TIMEOUT' : error?.code;
-  return Object.hasOwn(messages, code) ? messages[code]
+  const code = timedOut ? 'ANALYSIS_TIMEOUT'
+    : typeof error?.code === 'string' && Object.hasOwn(analysisFailureMessages, error.code) ? error.code
+      : typeof error?.message === 'string' && Object.hasOwn(analysisFailureMessages, error.message) ? error.message
+        : error?.code;
+  return Object.hasOwn(analysisFailureMessages, code) ? analysisFailureMessages[code]
     : '本次分析未获得可核验的结果。可以重新提问、核验或结束，不会继续指错。';
 }
 
@@ -90,6 +108,11 @@ function createDesktopRuntime(options) {
   const analysisTimeoutLimitMs = options.analysisTimeoutLimitMs ?? 60000;
   if (!Number.isSafeInteger(analysisTimeoutMs) || analysisTimeoutMs < 1 || analysisTimeoutMs > analysisTimeoutLimitMs
     || !Number.isSafeInteger(analysisTimeoutLimitMs) || analysisTimeoutLimitMs < 1 || analysisTimeoutLimitMs > 180000) throw new TypeError('屏幕分析超时配置无效');
+  // 周期抽帧 tick 不得取消仍在飞行中的分析：现场实测一次分析 ~3.5 秒 > 3 秒 tick，取消并立刻重发会让
+  // 请求永远拿不到结果（界面一直"正在分析画面"）。tick 只做合并/延后，补发至少间隔 6 秒，连续慢响应退避到 24 秒。
+  const analysisRecheckMinMs = 6000;
+  const analysisRecheckMaxMs = 24000;
+  const slowAnalysisThresholdMs = Math.max(3000, intervalMs);
   // A locally detected runtime reports `vision`; cloud providers leave it undefined (unknown).
   const localModelProvider = options.questioner?.vision !== undefined;
   const localModelVision = options.questioner?.vision === true;
@@ -112,6 +135,13 @@ function createDesktopRuntime(options) {
   let cleanupJob = null;
   let pendingReason = null;
   let pendingAnalysis = null;
+  // 合并/延后的周期 tick：等飞行中的分析 settle 后再决定是否补发，或按最小间隔排队。
+  let recheckPending = null;
+  let recheckTimer = null;
+  let inflightAnalysisReason = null;
+  let lastAnalysisSettledAt = null;
+  let lastAnalysisOutcome = null;
+  let analysisSlowStreak = 0;
   let latestFrame = null;
   let analysisFrame = null;
   let previousStep = null;
@@ -176,6 +206,58 @@ function createDesktopRuntime(options) {
     const obsolete = pendingAnalysis?.frame;
     pendingAnalysis = null;
     release(obsolete);
+    // 本人动作与安全作废都会让已排队的补发失去意义，避免迟到 tick 再拉起一次分析。
+    clearRecheck();
+  }
+
+  function clearRecheck() {
+    clearTimeout(recheckTimer);
+    recheckTimer = null;
+    recheckPending = null;
+  }
+
+  function analysisRecheckIntervalMs() {
+    return Math.min(analysisRecheckMaxMs, analysisRecheckMinMs * 2 ** analysisSlowStreak);
+  }
+
+  function scheduleAnalysisRecheck(delayMs, detail = {}) {
+    if (recheckTimer) return;
+    const delay = Math.max(0, Math.round(delayMs));
+    traceGuidance('analysis_recheck_scheduled', { delayMs: delay, ...detail });
+    recheckTimer = setTimeout(() => {
+      recheckTimer = null;
+      if (disposed || state.observation.state !== 'observing' || !gateOpen || !cloudConsent || !hasActiveGuidanceTask()) return;
+      recheckPending = null;
+      requestFrame('page_changed');
+    }, delay);
+    recheckTimer.unref?.();
+  }
+
+  // 飞行中的分析 settle 之后才决定是否补发：只有"这次分析根本没发出去"才自动补一次；
+  // 已拿到结论、已明确失败或被安全作废的都不自动重发（失败由本人重新核验，避免自动重试循环）。
+  function settleAnalysisLoop() {
+    const pending = recheckPending;
+    recheckPending = null;
+    if (!pending || lastAnalysisOutcome !== 'skipped') return;
+    if (disposed || state.observation.state !== 'observing' || !gateOpen || !cloudConsent || !hasActiveGuidanceTask()) return;
+    const earliest = (lastAnalysisSettledAt ?? now()) + analysisRecheckIntervalMs();
+    scheduleAnalysisRecheck(earliest - now(), { trigger: 'deferred_skipped', inflight: pending.inflight ?? null, slowStreak: analysisSlowStreak });
+  }
+
+  // 采集范围变化或新画面没有任何可核验控件时，飞行中的分析无法安装；以前只静默 abort，
+  // 界面会一直停在"正在分析画面"。这里给出真实原因并结束该次核验，而不是假装还在分析。
+  function abandonInFlightAnalysis(kind) {
+    const active = hasActiveGuidanceTask()
+      && (state.analysis.state === 'analyzing' || state.task.state === 'analyzing' || state.task.state === 'verifying');
+    invalidateAnalysis();
+    if (!active) return;
+    traceGuidance('analysis_abandoned', { kind, taskState: state.task.state });
+    clearTarget();
+    state.task.state = 'needs_help';
+    state.analysis = { state: 'error', message: kind === 'scope_changed'
+      ? '采集范围在分析期间发生变化，本次结果已作废、未显示箭头。请在当前范围重新核对后再点“我点好了，请核验”。'
+      : '新画面里没有本机可核验的控件，本次分析已作废（未显示箭头）。请保持目标软件可见，或框选包含目标软件的区域后重新核验。' };
+    publish();
   }
 
   function invalidateQuestion() {
@@ -645,7 +727,7 @@ function createDesktopRuntime(options) {
     return true;
   }
 
-  function queueAnalysis(frame, reason) {
+  function queueAnalysis(frame, reason, dispatch = {}) {
     if (!state.task.id || state.task.kind === 'text' || ['completed', 'ended', 'idle', 'finishing'].includes(state.task.state)) return;
     if (reason === 'page_changed' && (state.task.awaitingReply || state.analysis.state === 'capture_error')) return;
     if (!cloudConsent || !options.analyzer?.analyze) {
@@ -654,23 +736,55 @@ function createDesktopRuntime(options) {
       publish();
       return;
     }
+    // 本人动作（重新提问 / 核验，以及"预期控件已出现"的自动续步）优先：它们仍然立即取消旧请求并重发。
+    // 周期 page_changed tick 一律不取消飞行中的分析，只合并/延后。
+    const ownerAction = reason !== 'page_changed' || dispatch.urgent === true;
+    if (analysisJob) {
+      if (!ownerAction) {
+        recheckPending = { reason: 'in_flight', inflight: inflightAnalysisReason, at: now() };
+        traceGuidance('analysis_deferred', { reason: 'in_flight', inflight: inflightAnalysisReason, taskState: state.task.state });
+        return;
+      }
+      traceGuidance('analysis_preempted', { reason, inflight: inflightAnalysisReason, taskState: state.task.state });
+      const obsolete = pendingAnalysis?.frame;
+      pendingAnalysis = { frame, reason, observation: observationGeneration, task: taskGeneration, triggerId: randomUUID(), previous: previousStep,
+        guideId: state.task.id, question: state.task.question, clarificationReplies: clarificationReplies.map(reply => ({ ...reply })), observationId: state.observation.id };
+      release(obsolete);
+      clearRecheck();
+      analysisController?.abort();
+      return;
+    }
+    // 周期 tick 的补发最小间隔 + 连续慢响应退避，避免刚 settle 就又发一次（本人动作不受此限）。
+    const earliestRecheckAt = lastAnalysisSettledAt === null ? null : lastAnalysisSettledAt + analysisRecheckIntervalMs();
+    if (!ownerAction && earliestRecheckAt !== null && earliestRecheckAt > now()) {
+      recheckPending = { reason: 'min_interval', inflight: null, at: now() };
+      scheduleAnalysisRecheck(earliestRecheckAt - now(), { trigger: 'min_interval', slowStreak: analysisSlowStreak });
+      return;
+    }
     const obsolete = pendingAnalysis?.frame;
     pendingAnalysis = { frame, reason, observation: observationGeneration, task: taskGeneration, triggerId: randomUUID(), previous: previousStep,
       guideId: state.task.id, question: state.task.question, clarificationReplies: clarificationReplies.map(reply => ({ ...reply })), observationId: state.observation.id };
     release(obsolete);
-    if (analysisJob) {
-      analysisController?.abort();
-      return;
-    }
     analysisJob = (async () => {
       while (pendingAnalysis) {
         const job = pendingAnalysis;
         pendingAnalysis = null;
         analysisFrame = job.frame;
+        const startedAt = now();
+        let outcome = 'skipped';
         const sequence = ++analysisSequence;
         const controller = new AbortController();
         analysisController = controller;
-        if (!canUseFrame(job.frame, job.observation, job.task)) { analysisFrame = null; release(job.frame); continue; }
+        inflightAnalysisReason = job.reason;
+        if (!canUseFrame(job.frame, job.observation, job.task)) {
+          analysisFrame = null;
+          release(job.frame);
+          inflightAnalysisReason = null;
+          lastAnalysisSettledAt = now();
+          lastAnalysisOutcome = 'skipped';
+          traceGuidance('analysis_skipped', { reason: job.reason, sendMaxAgeMs: analysisSendMaxAgeMs });
+          continue;
+        }
         traceGuidance('analysis_request', { pngBytes: job.frame?.sanitizedPng?.length ?? 0, elements: job.frame?.elements?.length ?? 0,
           reason: job.reason, frameAgeMs: job.frame ? now() - job.frame.capturedAt : null, sendMaxAgeMs: analysisSendMaxAgeMs });
         state.analysis = { state: 'analyzing', message: localModelProvider && localModelVision
@@ -742,15 +856,18 @@ function createDesktopRuntime(options) {
             return result;
           }), cancellation]);
           if (sequence === analysisSequence && sameGeneration(job.observation, job.task) && !controller.signal.aborted) {
-            traceGuidance('analysis_reply', { kind: result?.kind, installable: installableOnLatest(job) });
+            traceGuidance('analysis_reply', { kind: result?.kind, installable: installableOnLatest(job), durationMs: now() - startedAt });
             const installed = await installAnalysis(result, job);
+            outcome = installed ? 'installed' : 'skipped';
             if (installed && state.task.state === 'awaiting_action') state.analysis = { state: 'ready', message: state.task.targetState === 'visible'
               ? '请核对箭头与当前一步说明，再亲手操作。' : '本次分析已返回，但未显示箭头；请查看这一步的说明，不要按旧位置操作。' };
             publish();
-          }
+          } else outcome = 'abandoned';
         } catch (error) {
+          // 本人取消（abort 且非超时）与真实失败要分开：前者不写失败文案，后者必须给出真实原因。
+          outcome = controller.signal.aborted && !timedOut ? 'aborted' : 'failed';
           traceGuidance('analysis_error', { code: error?.code ?? error?.message ?? 'unknown', name: error?.name, providerCode: error?.providerCode,
-            attempts: Number.isSafeInteger(error?.attempts) ? error.attempts : undefined, timedOut });
+            attempts: Number.isSafeInteger(error?.attempts) ? error.attempts : undefined, timedOut, durationMs: now() - startedAt, outcome });
           if (sequence === analysisSequence && sameGeneration(job.observation, job.task) && (!controller.signal.aborted || timedOut)) {
             clearTarget();
             state.task.state = 'needs_help';
@@ -763,9 +880,23 @@ function createDesktopRuntime(options) {
           controller.signal.removeEventListener('abort', rejectCancellation);
           analysisFrame = null;
           release(job.frame);
+          const durationMs = now() - startedAt;
+          // 连续慢响应退避：慢于 tick/阈值就把补发间隔翻倍（6s→12s→24s），快响应立刻回到最小间隔。
+          if (durationMs >= slowAnalysisThresholdMs) analysisSlowStreak = Math.min(analysisSlowStreak + 1, 3);
+          else analysisSlowStreak = 0;
+          lastAnalysisSettledAt = now();
+          lastAnalysisOutcome = outcome;
+          inflightAnalysisReason = null;
+          traceGuidance('analysis_settled', { reason: job.reason, durationMs, outcome, slowStreak: analysisSlowStreak,
+            recheckPending: recheckPending?.reason ?? null });
         }
       }
-    })().finally(() => { analysisJob = null; analysisController = null; });
+    })().finally(() => {
+      analysisJob = null;
+      analysisController = null;
+      inflightAnalysisReason = null;
+      settleAnalysisLoop();
+    });
   }
 
   async function captureOne(reason) {
@@ -858,7 +989,7 @@ function createDesktopRuntime(options) {
         // recognizable control cannot verify an in-flight answer. Benign text drift does not.
         if (!retainedTarget && (scopeChanged || admitted.elements.length === 0)) {
           clearTarget();
-          invalidateAnalysis();
+          abandonInFlightAnalysis(scopeChanged ? 'scope_changed' : 'no_controls');
         }
         release(old);
         if (!sameGeneration(generation, task)) return;
@@ -913,8 +1044,9 @@ function createDesktopRuntime(options) {
           }
           if (progressed) {
             // The expected post-action controls appeared: ask the model to confirm and continue.
+            // 这是"预期控件已出现"的强信号，按本人动作对待：不受补发最小间隔限制。
             targetMisses = 0;
-            queueAnalysis(admitted, reason);
+            queueAnalysis(admitted, reason, { urgent: true });
             return;
           }
           targetMisses += 1;
