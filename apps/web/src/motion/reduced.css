@@ -1,0 +1,42 @@
+/* 微光指引 · 减少动态总开关（补齐此前缺失的全站降级）
+   生效条件：设置页「减少动画」勾选（html.reduce-motion）或系统 prefers-reduced-motion。
+   策略：把时长压到 .001ms 而不是 animation:none——保留终态，避免 backwards 填充把内容留在不可见状态；
+   循环动画因此只跑一轮即停在末帧。 */
+
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: .001ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* 大面积装饰层直接停掉，避免 .001ms 收尾时闪一下 */
+  .ambient::after,
+  .ambient-rays {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}
+
+/* 页面隐藏 / 窗口失焦时暂停一切循环动画：省电，也避免桌宠透明窗空转 GPU */
+html.motion-paused *,
+html.motion-paused *::before,
+html.motion-paused *::after {
+  animation-play-state: paused !important;
+}

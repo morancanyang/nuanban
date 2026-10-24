@@ -1,1 +1,16 @@
-:root{--paper:#FFF8EF;--white:#FFFDF8;--ink:#2D2521;--primary:#A64B2A;--muted:#8A7966;--line:#E7DED0;--sage:#6C8172;--caption-size:32px}
+/* --muted 是次要正文色：在纸色/白卡/浅底上均 ≥4.5:1（WCAG AA），仍保持暖棕 */
+:root{--paper:#FFF8EF;--white:#FFFDF8;--ink:#2D2521;--primary:#A64B2A;--muted:#6F6152;--line:#E7DED0;--sage:#6C8172;--caption-size:32px}
+
+/* 动效令牌：只新增，不改动既有颜色/字号变量 */
+:root{
+  --motion-1:120ms;   /* 微交互：悬停、按下、勾选 */
+  --motion-2:220ms;   /* 状态切换：消息、展开、提示 */
+  --motion-3:340ms;   /* 区块入场 */
+  --motion-4:520ms;   /* 页面级编排上限 */
+  --motion-stagger:55ms;
+  --motion-rise:14px;
+  --motion-lift:-3px;
+  --motion-ease:cubic-bezier(.22,.61,.36,1);
+  --motion-ease-in-out:cubic-bezier(.45,.05,.55,.95);
+  --motion-spring:cubic-bezier(.34,1.28,.64,1);
+}

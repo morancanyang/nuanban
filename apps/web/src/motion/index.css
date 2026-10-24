@@ -1,0 +1,8 @@
+/* 微光指引 · 动效层入口
+   顺序：基础层 → 外壳 → 页面 → 组件 → 减少动态（最后，便于覆盖）。 */
+@import './base.css';
+@import './shell.css';
+@import './pages.css';
+@import './pages-workspace.css';
+@import './widgets.css';
+@import './reduced.css';

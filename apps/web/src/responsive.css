@@ -17,3 +17,10 @@
   .composer-bottom{grid-template-columns:1fr;}
   .composer-bottom .send-button{width:100%;}
 }
+
+/* 窄窗抽屉：可见的关闭入口（键盘另有 Esc 与焦点回收） */
+.sidebar-close{display:none}
+@media(max-width:760px){
+  .sidebar-close{display:inline-flex;position:absolute;top:14px;right:12px;z-index:2;width:48px;min-height:48px}
+  .sidebar .brand{padding-right:60px}
+}

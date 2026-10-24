@@ -9,6 +9,7 @@ import { announce, useApp } from '../store';
 import { Badge, Modal, PageTitle, Pet, useSpeech } from '../components';
 import { ScreenObservationPanel } from '../screen-observation';
 import { LocalVoicePanel } from '../local-voice-panel';
+import { stagger } from '../motion/stagger';
 
 interface Message {
   id: string;
@@ -158,7 +159,7 @@ export function ChatPage() {
       <section className="chat-panel" aria-label="讲解对话">
         <div className="chat-panel-head"><div><span className="online-dot" /><strong>暖暖在这里</strong></div><Badge>真实模型接口 · 不提供固定回答</Badge></div>
         <div className="messages" aria-live="off">
-          {!messages.length && <div className="chat-welcome"><Pet kind={preferences.pet} color={preferences.petColor} /><h2>不用想好怎么问，<br />说说你遇到的难处就好。</h2><div className="suggestions">{['手机上的字太小，怎么调大？', '怎么给家人拍一张照片？', '我忘了上次学过的步骤'].map(text => <button key={text} onClick={() => setInput(text)}>{text}<ArrowUpRight size={17} /></button>)}</div></div>}
+          {!messages.length && <div className="chat-welcome"><Pet kind={preferences.pet} color={preferences.petColor} /><h2>不用想好怎么问，<br />说说你遇到的难处就好。</h2><div className="suggestions">{['手机上的字太小，怎么调大？', '怎么给家人拍一张照片？', '我忘了上次学过的步骤'].map((text, index) => <button key={text} style={stagger(index)} onClick={() => setInput(text)}>{text}<ArrowUpRight size={17} /></button>)}</div></div>}
           {messages.map(message => <div className={'message ' + message.role} key={message.id} data-state={message.state}><span className="message-avatar">{message.role === 'user' ? '我' : '微'}</span><div><small>{message.role === 'user' ? '你' : message.source === 'image' ? '微光指引 · 图片讲解' : '微光指引 · 文字讲解'}</small><p>{message.text || '我在想，一会儿就好…'}</p>{message.state === 'failed' && <small className="message-state">讲解未完成 · 不生成学习笔记</small>}{message.state === 'stopped' && <small className="message-state">已停止 · 不会自动恢复</small>}</div></div>)}
           <div ref={bottom} />
         </div>

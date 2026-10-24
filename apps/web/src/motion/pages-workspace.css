@@ -1,0 +1,99 @@
+/* 微光指引 · 页面级动效（二）：教学、冲突、引导、设置、小伙伴、画稿、工具小屋 */
+
+/* ---------- 教学：只让真实高亮呼吸，不做装饰动画 ---------- */
+.target-glow {
+  animation: mf-target-breathe 2.4s var(--motion-ease-in-out) infinite;
+}
+
+.step-dots span.current {
+  animation: mf-pop var(--motion-1) var(--motion-ease);
+}
+
+.practice-phone h2,
+.phone-apps {
+  animation: mf-fade var(--motion-2) var(--motion-ease) backwards;
+}
+
+.practice-panel {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+/* ---------- 冲突 / 账号 / 引导 ---------- */
+.conflict-card {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.conflict-card:nth-child(1) { animation-delay: 0s; }
+.conflict-card:nth-child(2) { animation-delay: calc(var(--motion-stagger) * 1); }
+.conflict-card:nth-child(3) { animation-delay: calc(var(--motion-stagger) * 2); }
+
+.mode-card {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+  animation-delay: calc(var(--i, 0) * var(--motion-stagger));
+}
+
+.mode-card.selected > span {
+  animation: mf-pop var(--motion-2) var(--motion-spring);
+}
+
+/* ---------- 设置 / 能力账本 ---------- */
+.settings-section {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.capabilities-section {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+
+.toggle-row input[type='checkbox'],
+.setting-row select {
+  transition: accent-color var(--motion-1) var(--motion-ease), border-color var(--motion-1) var(--motion-ease);
+}
+
+/* ---------- 桌宠工具小屋 ---------- */
+.pet-workspace-header {
+  animation: mf-fade var(--motion-2) var(--motion-ease) backwards;
+}
+
+.pet-workspace-shortcuts a {
+  animation: mf-fade var(--motion-2) var(--motion-ease) backwards;
+  animation-delay: calc(var(--i, 0) * var(--motion-stagger));
+}
+
+/* ---------- 小伙伴 / 画稿 ---------- */
+.pet-option {
+  transition: transform var(--motion-2) var(--motion-ease), border-color var(--motion-2) var(--motion-ease), background var(--motion-2) var(--motion-ease);
+}
+
+.pet-option.selected {
+  animation: mf-pop var(--motion-2) var(--motion-spring);
+}
+
+.companion-card {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.companion-card:nth-child(1) { animation-delay: 0s; }
+.companion-card:nth-child(2) { animation-delay: calc(var(--motion-stagger) * 1); }
+
+.lili-companion {
+  animation: mf-fade var(--motion-3) var(--motion-ease) backwards;
+}
+
+.drawing-panel {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.color-swatch {
+  transition: transform var(--motion-1) var(--motion-ease), outline-color var(--motion-1) var(--motion-ease);
+}
+
+.color-swatch.selected {
+  animation: mf-pop var(--motion-2) var(--motion-spring);
+}
+
+.drawing-artwork-preview,
+.drawing-applied {
+  animation: mf-pop var(--motion-2) var(--motion-ease) backwards;
+}

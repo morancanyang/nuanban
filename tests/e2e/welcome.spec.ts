@@ -120,7 +120,7 @@ test.describe('已经选过游客模式', () => {
 
   test('首页卡片错峰入场，切页时主内容有淡入动效', async ({ page }) => {
     await page.goto('/#/');
-    await expect(page.locator('.home-card').first()).toHaveCSS('animation-name', 'rise-in');
+    await expect(page.locator('.home-card').first()).toHaveCSS('animation-name', 'mf-rise');
     const animations = await page.evaluate(async () => {
       const link = document.querySelector<HTMLAnchorElement>('a[href="#/notes"]');
       if (!link) return -1;

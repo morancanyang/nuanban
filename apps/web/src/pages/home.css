@@ -77,7 +77,7 @@
 .home-stat dt {
   font-size: calc(12px * var(--font-scale, 1));
   letter-spacing: 1px;
-  color: #8B7A61;
+  color: var(--muted);
 }
 
 .home-stat dd {
@@ -159,7 +159,7 @@
   flex: 1;
   font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.85;
-  color: #8A7A66;
+  color: var(--muted);
 }
 
 .home-card-foot {
@@ -203,7 +203,7 @@
 .home-guide > p {
   margin-bottom: 18px;
   font-size: calc(13px * var(--font-scale, 1));
-  color: #8A7A66;
+  color: var(--muted);
 }
 
 .home-guide ul {

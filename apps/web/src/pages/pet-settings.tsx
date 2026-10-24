@@ -10,6 +10,8 @@ import { LocalModelPanel } from '../three-d/model-panel';
 import { CompanionCatalog } from './companions';
 import { localModelBridge } from '../local-model';
 import { liliModel } from '../three-d/builtin-models';
+import { stagger } from '../motion/stagger';
+import { localCompanionBridge, showLiliCompanion } from '../local-companion';
 import { showBrowserCompanion } from '../browser-companion';
 
 const pets = [{ id: 'cat', name: '小橘猫', color: '#D98347' }, { id: 'rabbit', name: '小白兔', color: '#D7C5AB' }, { id: 'dog', name: '小暖狗', color: '#C19165' }, { id: 'lili', name: '栗栗小鹿', color: '#A66B4B' }] as const;
@@ -74,7 +76,7 @@ export function PetsPage() {
       </section>
       <section className="panel pet-editor-controls" aria-label="内置伙伴微调">
         <h2>让小伙伴，更像你喜欢的样子。</h2><p>选择与微调只改变本页预览，调用桌宠是单独操作。不上传画稿，不调用生成服务。</p>
-        <fieldset><legend>选择内置伙伴</legend><div className="pet-kind-options">{pets.map(pet => <button key={pet.id} className={'button ' + (draft.kind === pet.id ? 'primary' : 'secondary')} aria-pressed={draft.kind === pet.id} disabled={calling} onClick={() => selectPet(pet)}>{pet.name}</button>)}</div></fieldset>
+        <fieldset><legend>选择内置伙伴</legend><div className="pet-kind-options">{pets.map((pet, index) => <button key={pet.id} style={stagger(index)} className={'button ' + (draft.kind === pet.id ? 'primary' : 'secondary')} aria-pressed={draft.kind === pet.id} disabled={calling} onClick={() => selectPet(pet)}>{pet.name}</button>)}</div></fieldset>
         {isLili && <section className="lili-resource-card" aria-label="栗栗角色资源">
           <Badge tone="sage">本机 3D 模型 · 固定角色</Badge>
           <h3>栗栗小鹿 · 围一条暖围巾，陪在身旁。</h3>

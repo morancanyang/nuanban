@@ -3,7 +3,8 @@ import { installTextBridge } from '../helpers/text-bridge';
 
 test.beforeEach(async ({ page }) => { await installTextBridge(page); });
 
-test('键盘可以跳过导航、进入主内容并操作首页入口', async ({ page }) => {
+test('键盘可以跳过导航、进入主内容并操作首页入口', async ({ page, viewport }) => {
+  test.skip((viewport?.width ?? 0) < 760, '窄窗侧边栏改为抽屉，键盘路径由 a11y-basics 覆盖');
   await page.goto('/#/');
   await expect(page.locator('.skip-link')).toBeVisible();
   await page.evaluate(() => document.body.focus());

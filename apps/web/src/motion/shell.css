@@ -1,0 +1,88 @@
+/* 微光指引 · 外壳动效：路由入场、侧边栏、抽屉、顶栏、Toast、Modal、加载屏 */
+
+/* 路由入场：类名常驻，路由切换时由 JS 摘除再挂回以重放（便于断言） */
+main.route-enter {
+  animation: mf-route var(--motion-3) var(--motion-ease) both;
+}
+
+/* 侧边栏：图标随 hover 轻抬，选中竖条滑入 */
+.nav-item svg {
+  transition: transform var(--motion-1) var(--motion-ease);
+}
+
+.nav-item:hover svg,
+.nav-item:focus-visible svg {
+  transform: translateY(-1px);
+}
+
+.nav-item.active::before {
+  animation: mf-pop var(--motion-1) var(--motion-ease) both;
+}
+
+.desktop-pet-button .desktop-pet-open-icon {
+  transition: transform var(--motion-1) var(--motion-ease);
+}
+
+.desktop-pet-button:hover .desktop-pet-open-icon {
+  transform: translate(1px, -1px);
+}
+
+/* 移动端抽屉与幕布 */
+@media (max-width: 760px) {
+  .sidebar.is-open {
+    animation: mf-drawer var(--motion-2) var(--motion-ease) both;
+  }
+
+  .sidebar-backdrop {
+    animation: mf-fade var(--motion-2) var(--motion-ease) both;
+  }
+}
+
+/* 顶栏：守护状态点缓慢呼吸，表达「在守着」而不是在加载 */
+.status-pill > svg {
+  animation: mf-breathe 4.4s var(--motion-ease-in-out) infinite;
+  transform-origin: center;
+}
+
+.stop-button {
+  transition: border-color var(--motion-1) var(--motion-ease), background var(--motion-1) var(--motion-ease);
+}
+
+.stop-button:hover {
+  background: #FBEDE4;
+  border-color: #C0836A;
+}
+
+/* 页面标题：所有页面共用的第一段入场 */
+.page-title {
+  animation: mf-rise var(--motion-3) var(--motion-ease) both;
+}
+
+/* Toast：进入 rise，退出由 usePresence 用 WAAPI 收尾 */
+.toast {
+  animation: mf-toast-in var(--motion-2) var(--motion-ease) both;
+}
+
+/* Modal：Radix 的 data-state 驱动，Radix 会等 animationend 再卸载 */
+.modal-overlay[data-state='open'] {
+  animation: mf-fade var(--motion-2) var(--motion-ease) both;
+}
+
+.modal-overlay[data-state='closed'] {
+  animation: mf-fade var(--motion-1) var(--motion-ease) both;
+  animation-direction: reverse;
+}
+
+.modal[data-state='open'] {
+  animation: mf-modal-in var(--motion-2) var(--motion-ease) both;
+}
+
+.modal[data-state='closed'] {
+  animation: mf-modal-in var(--motion-1) var(--motion-ease) both;
+  animation-direction: reverse;
+}
+
+/* 首次进入前的空白屏：只做呼吸，不做假进度 */
+.loading-screen .pet {
+  animation: mf-breathe 3.6s var(--motion-ease-in-out) infinite;
+}

@@ -32,7 +32,7 @@
 
 .welcome-brand strong { display: block; font-size: calc(21px * var(--font-scale, 1)); letter-spacing: 3px; line-height: 1.2; }
 
-.welcome-brand small { display: block; margin-top: 2px; font-size: calc(12px * var(--font-scale, 1)); letter-spacing: 2px; color: #8A7966; }
+.welcome-brand small { display: block; margin-top: 2px; font-size: calc(12px * var(--font-scale, 1)); letter-spacing: 2px; color: var(--muted); }
 
 .welcome-intro h1 {
   margin: 2px 0 0;
@@ -59,7 +59,7 @@
 
 .welcome-proof {
   display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; padding: 0;
-  list-style: none; font-size: calc(12px * var(--font-scale, 1)); color: #8A7A66;
+  list-style: none; font-size: calc(12px * var(--font-scale, 1)); color: var(--muted);
 }
 
 .welcome-proof li { display: flex; align-items: center; gap: 6px; }
@@ -83,7 +83,7 @@
 
 .welcome-card h2 { font-size: calc(26px * var(--font-scale, 1)); }
 
-.welcome-card-lead { margin-bottom: 4px; font-size: calc(13px * var(--font-scale, 1)); line-height: 1.8; color: #8A7A66; }
+.welcome-card-lead { margin-bottom: 4px; font-size: calc(13px * var(--font-scale, 1)); line-height: 1.8; color: var(--muted); }
 
 .welcome-card .button { width: 100%; }
 
@@ -97,18 +97,18 @@
 
 .welcome-login strong { font-size: calc(14px * var(--font-scale, 1)); color: #2D2521; }
 
-.welcome-login-safe { color: #8A7A66; }
+.welcome-login-safe { color: var(--muted); }
 
 .welcome-login-link {
   align-self: flex-start; font-weight: 600; color: var(--primary);
   text-decoration: underline; text-underline-offset: 3px;
 }
 
-.welcome-note { font-size: calc(12px * var(--font-scale, 1)); line-height: 1.8; color: #9A8A76; }
+.welcome-note { font-size: calc(12px * var(--font-scale, 1)); line-height: 1.8; color: var(--muted); }
 
 .welcome-foot {
   position: relative; z-index: 1; padding: 14px 24px 22px;
-  text-align: center; font-size: calc(12px * var(--font-scale, 1)); letter-spacing: 1px; color: #A79783;
+  text-align: center; font-size: calc(12px * var(--font-scale, 1)); letter-spacing: 1px; color: var(--muted);
 }
 
 /* 场景微动效 */
@@ -136,13 +136,13 @@
   .scene-steam { opacity: .4; }
 }
 
-/* 入场：品牌 → 标题 → 说明 → 场景 → 证据 → 卡片 */
-.welcome-brand { animation: rise-in .7s cubic-bezier(.22, .61, .36, 1) backwards; }
-.welcome-intro h1 { animation: rise-in .7s cubic-bezier(.22, .61, .36, 1) .06s backwards; }
-.welcome-lead { animation: rise-in .7s cubic-bezier(.22, .61, .36, 1) .12s backwards; }
-.welcome-scene-wrap { animation: rise-in .7s cubic-bezier(.22, .61, .36, 1) .2s backwards; }
-.welcome-proof { animation: rise-in .7s cubic-bezier(.22, .61, .36, 1) .28s backwards; }
-.welcome-card { animation: rise-in .7s cubic-bezier(.22, .61, .36, 1) .36s backwards; }
+/* 入场：品牌 → 标题 → 说明 → 场景 → 证据 → 卡片（令牌在 design-tokens，keyframes 在 motion/base.css） */
+.welcome-brand { animation: mf-rise var(--motion-4) var(--motion-ease) backwards; }
+.welcome-intro h1 { animation: mf-rise var(--motion-4) var(--motion-ease) calc(var(--motion-stagger) * 1) backwards; }
+.welcome-lead { animation: mf-rise var(--motion-4) var(--motion-ease) calc(var(--motion-stagger) * 2) backwards; }
+.welcome-scene-wrap { animation: mf-rise var(--motion-4) var(--motion-ease) calc(var(--motion-stagger) * 3) backwards; }
+.welcome-proof { animation: mf-rise var(--motion-4) var(--motion-ease) calc(var(--motion-stagger) * 4) backwards; }
+.welcome-card { animation: mf-rise var(--motion-4) var(--motion-ease) calc(var(--motion-stagger) * 5) backwards; }
 
 @media (max-width: 1100px) {
   .welcome-main { grid-template-columns: minmax(0, 1fr) 380px; gap: 32px; }

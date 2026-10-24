@@ -1,0 +1,112 @@
+/* 微光指引 · 页面级动效（一）：首页、聊天、笔记、待办与复习的入场编排 */
+
+/* ---------- 首页 ---------- */
+.home-start {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.home-card {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.home-card:nth-child(1) { animation-delay: calc(var(--motion-stagger) * 1); }
+.home-card:nth-child(2) { animation-delay: calc(var(--motion-stagger) * 2); }
+.home-card:nth-child(3) { animation-delay: calc(var(--motion-stagger) * 3); }
+
+.home-lower > * {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.home-lower > *:nth-child(1) { animation-delay: calc(var(--motion-stagger) * 4); }
+.home-lower > *:nth-child(2) { animation-delay: calc(var(--motion-stagger) * 5); }
+
+.home-stat dd {
+  animation: mf-pop var(--motion-2) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+
+.home-card-foot svg {
+  transition: transform var(--motion-1) var(--motion-ease);
+}
+
+/* ---------- 聊天 ---------- */
+.message {
+  animation: mf-slide-left var(--motion-2) var(--motion-ease) backwards;
+}
+
+.message.user {
+  animation-name: mf-slide-right;
+}
+
+/* 真实「正在回答」状态：三点脉冲，不是假进度 */
+.message[data-state='streaming'] p::after {
+  content: '⋯';
+  margin-left: 6px;
+  display: inline-block;
+  animation: mf-dots 1.2s var(--motion-ease-in-out) infinite;
+}
+
+.chat-welcome {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.suggestions button {
+  animation: mf-rise var(--motion-2) var(--motion-ease) backwards;
+  animation-delay: calc(var(--i, 0) * var(--motion-stagger));
+}
+
+.media-preview img {
+  animation: mf-pop var(--motion-2) var(--motion-ease) backwards;
+}
+
+.chat-panel-head .online-dot {
+  animation: mf-breathe 3.2s var(--motion-ease-in-out) infinite;
+}
+
+/* ---------- 笔记 ---------- */
+.note-card {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+  animation-delay: calc(var(--i, 0) * var(--motion-stagger));
+}
+
+.note-detail {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.note-detail .summary-text {
+  animation: mf-fade var(--motion-3) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-stagger) * 1);
+}
+
+/* ---------- 待办与复习 ---------- */
+.todo-row {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+  animation-delay: calc(var(--i, 0) * var(--motion-stagger));
+}
+
+.todo-check {
+  transition: background var(--motion-1) var(--motion-ease), border-color var(--motion-1) var(--motion-ease);
+}
+
+.todo-row.completed h2 {
+  transition: color var(--motion-2) var(--motion-ease);
+}
+
+.review-card {
+  animation: mf-rise var(--motion-3) var(--motion-ease) backwards;
+}
+
+.review-card .stack > * {
+  animation: mf-rise var(--motion-2) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+
+.segmented button {
+  transition: background var(--motion-1) var(--motion-ease), color var(--motion-1) var(--motion-ease);
+}
+
+.segmented button.selected {
+  animation: mf-pop var(--motion-1) var(--motion-ease);
+}
+
+/* 新增的笔记 / 待办本身走 mf-rise，位置补偿由 useFlipList 负责 */

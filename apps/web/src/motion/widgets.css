@@ -1,0 +1,60 @@
+/* 微光指引 · 组件级动效：按钮、宠物、空态、徽标、图标按钮 */
+
+/* 按下回弹：覆盖 hover 的位移，保持触感一致 */
+.button {
+  transition: transform var(--motion-1) var(--motion-ease), background var(--motion-1) var(--motion-ease), border-color var(--motion-1) var(--motion-ease);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0) scale(.97);
+}
+
+.icon-button,
+.tool-button,
+.text-button {
+  transition: background var(--motion-1) var(--motion-ease), color var(--motion-1) var(--motion-ease);
+}
+
+/* 宠物：静止时呼吸，眼睛定时眨一下；幅度小，避免透明窗边缘抖动 */
+.pet.action-idle {
+  transform-box: fill-box;
+  transform-origin: 50% 94%;
+  animation: mf-breathe 5.2s var(--motion-ease-in-out) infinite;
+}
+
+.pet-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mf-blink 6.4s var(--motion-ease-in-out) infinite;
+}
+
+.pet.action-celebrating,
+.pet.action-greeting {
+  transform-box: fill-box;
+  transform-origin: 50% 94%;
+  animation: mf-pop var(--motion-2) var(--motion-spring) backwards;
+}
+
+/* 空态与徽标 */
+.empty-flower {
+  animation: mf-pop var(--motion-3) var(--motion-ease) backwards;
+}
+
+.badge {
+  transition: background var(--motion-1) var(--motion-ease), color var(--motion-1) var(--motion-ease);
+}
+
+/* 卡片统一抬升量与缓动，避免各页面各写一套 */
+.panel,
+.home-card,
+.note-card,
+.companion-card,
+.pet-option {
+  transition: transform var(--motion-2) var(--motion-ease), border-color var(--motion-2) var(--motion-ease), box-shadow var(--motion-2) var(--motion-ease);
+}
+
+.home-card:hover,
+.note-card:hover,
+.companion-card:hover {
+  transform: translateY(var(--motion-lift));
+}

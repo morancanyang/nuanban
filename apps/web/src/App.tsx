@@ -9,7 +9,14 @@ import { BrandMark } from './brand-mark';
 import { FontScaleControls } from './font-controls';
 import { Ambient } from './ambient';
 import { readEntry } from './entry';
-import './motion.css';
+import './motion/index.css';
+import { useMotionPreference } from './motion/use-motion-preference';
+import { useMotionPause } from './motion/use-motion-pause';
+import { useRouteMotion } from './motion/use-route-motion';
+import { usePresence } from './motion/use-presence';
+import { pageKey } from './motion/page-key';
+import { useCompactLayout } from './use-compact-layout';
+import { useDocumentTitle } from './document-title';
 import { WelcomePage } from './pages/welcome';
 import { DesktopPetButton } from './desktop-pet-button';
 import { BrowserCompanionOverlay } from './browser-companion';
@@ -31,6 +38,32 @@ export function App(){
   const petTool = workspace.mode === 'pet-tool';
   const state=useApp(); const location=useLocation(); const navigate=useNavigate(); const [menu,setMenu]=useState(false);
   const previousRoute = useRef<string | null>(null);
+  const compactLayout = useCompactLayout();
+  const drawerOpen = compactLayout && menu;
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const drawerWasOpen = useRef(false);
+  useDocumentTitle(location.pathname, state.ready);
+  const reducedMotion = useMotionPreference();
+  useMotionPause();
+  const attachMain = useRouteMotion(location.pathname, reducedMotion);
+  const backdrop = usePresence<HTMLButtonElement>(menu, reducedMotion);
+  const toast = usePresence<HTMLDivElement>(Boolean(state.toast), reducedMotion);
+  const [lastToast, setLastToast] = useState<string | null>(null);
+  useEffect(() => { if (state.toast) setLastToast(state.toast); }, [state.toast]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(false); };
+    document.addEventListener('keydown', onKeyDown);
+    navRef.current?.querySelector<HTMLAnchorElement>('.nav-item')?.focus();
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen]);
+  useEffect(() => {
+    if (drawerOpen) { drawerWasOpen.current = true; return; }
+    if (!drawerWasOpen.current) return;
+    drawerWasOpen.current = false;
+    menuButtonRef.current?.focus();
+  }, [drawerOpen]);
   const reminderRuntime = useMemo(() => new ReminderRuntime(services.ownerId, platform, {
     onDue: ({ todo, request }) => {
       announce('复习时间到了：' + todo.title);
@@ -59,7 +92,7 @@ export function App(){
     coordinator.start(1);
     return coordinator;
   }, []);
-  useEffect(()=>{setMenu(false);if(previousRoute.current === null){previousRoute.current=location.pathname;return;}if(previousRoute.current !== location.pathname){previousRoute.current=location.pathname;const main=document.getElementById('main-content');main?.focus();const reduced=useApp.getState().snapshot?.preferences.reducedMotion === true || window.matchMedia('(prefers-reduced-motion: reduce)').matches;if(main && !reduced)main.animate([{opacity:0,transform:'translateY(10px)'},{opacity:1,transform:'translateY(0)'}],{duration:240,easing:'cubic-bezier(.22,.61,.36,1)'});}},[location.pathname]);
+  useEffect(()=>{setMenu(false);if(previousRoute.current === null){previousRoute.current=location.pathname;return;}if(previousRoute.current !== location.pathname){previousRoute.current=location.pathname;const main=document.getElementById('main-content');main?.focus();}},[location.pathname]);
   useEffect(()=>{
     const openReminder=(event: Event)=>{
       const detail=(event as CustomEvent<{deepLink?:unknown}>).detail;
@@ -100,17 +133,17 @@ export function App(){
   if(location.pathname === '/welcome')return <WelcomePage/>;
   if(!petTool && location.pathname === '/' && readEntry() === null)return <Navigate to="/welcome" replace/>;
   const stop=()=>{window.dispatchEvent(new Event('nuanban:stop'));void platform.stopAll().catch(()=>useApp.setState({error:'本页流程已停止，但原生停止未确认。请检查系统权限；不会自动恢复。'}));announce('已停止本页讲解和教学，不会自动恢复。');};
-  return <div className={'app mode-'+preferences.mode+(preferences.reducedMotion?' reduce-motion':'')+(petTool?' pet-tool-workspace':'')} style={{'--font-scale':preferences.fontScale,'--caption-size':preferences.captionSize+'px'} as React.CSSProperties}>
+  return <div className={'app mode-'+preferences.mode+(petTool?' pet-tool-workspace':'')} style={{'--font-scale':preferences.fontScale,'--caption-size':preferences.captionSize+'px'} as React.CSSProperties}>
     <Ambient/>
     <BrowserCompanionOverlay/>
     {petTool&&<PetWorkspaceHeader/>}
     <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>跳到主要内容</a>
-    <aside className={'sidebar'+(menu?' is-open':'')}><Link className="brand" to="/" aria-label="微光指引首页"><BrandMark className="brand-mark"/><div><strong>微光指引</strong><small>陪你慢慢学会</small></div></Link><div className="sidebar-section-label">你的学习小天地</div><nav aria-label="主要导航">{navigation.map(item=><NavLink key={item.to} to={item.to} end={item.to==='/'} className={({isActive})=>'nav-item'+(isActive?' active':'')}><item.icon size={22}/><span>{item.label}</span></NavLink>)}<NavLink className="nav-item" to="/settings"><Settings size={22}/>设置与隐私</NavLink><DesktopPetButton onOpened={()=>setMenu(false)}/></nav><div className="sidebar-bottom"><div className="sidebar-foot"><span className="online-dot"/>本机资料 · 真实模型接口</div></div></aside>
-    {menu&&<button className="sidebar-backdrop" aria-label="收起导航" onClick={()=>setMenu(false)}/>}
-    <div className="workspace"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={()=>setMenu(!menu)}><Menu/></button><span className="status-pill"><ShieldCheck size={17}/>安全陪伴，不替你操作</span></div><div className="topbar-actions"><FontScaleControls/><MuteButton/><Link className="icon-button" to="/todos" aria-label="查看提醒"><Bell size={21}/></Link><button className="stop-button" onClick={stop}><Square size={15} fill="currentColor"/>随时停止</button><Link className="profile-chip" to="/onboarding/mode"><span>暖</span><div>{preferences.mode==='child'?'儿童模式':preferences.mode==='accessible'?'无障碍模式':'长辈模式'}<small>本机用户</small></div></Link></div></header>
+    <aside id="app-sidebar" className={'sidebar'+(menu?' is-open':'')} inert={compactLayout && !menu}>{compactLayout&&<button className="icon-button sidebar-close" type="button" aria-label="收起导航" onClick={()=>setMenu(false)}><X size={22}/></button>}<Link className="brand" to="/" aria-label="微光指引首页"><BrandMark className="brand-mark"/><div><strong>微光指引</strong><small>陪你慢慢学会</small></div></Link><div className="sidebar-section-label">你的学习小天地</div><nav aria-label="主要导航" ref={navRef}>{navigation.map(item=><NavLink key={item.to} to={item.to} end={item.to==='/'} className={({isActive})=>'nav-item'+(isActive?' active':'')}><item.icon size={22}/><span>{item.label}</span></NavLink>)}<NavLink className="nav-item" to="/settings"><Settings size={22}/>设置与隐私</NavLink><DesktopPetButton onOpened={()=>setMenu(false)}/></nav><div className="sidebar-bottom"><div className="sidebar-foot"><span className="online-dot"/>本机资料 · 真实模型接口</div></div></aside>
+    {backdrop.mounted&&<button ref={backdrop.ref} className="sidebar-backdrop" aria-label="收起导航" onClick={()=>setMenu(false)}/>}
+    <div className="workspace" inert={drawerOpen}><header className="topbar"><div className="topbar-left"><button ref={menuButtonRef} className="icon-button mobile-menu" aria-label="展开导航" aria-expanded={menu} aria-controls="app-sidebar" onClick={()=>setMenu(!menu)}><Menu/></button><span className="status-pill"><ShieldCheck size={17}/>安全陪伴，不替你操作</span></div><div className="topbar-actions"><FontScaleControls/><MuteButton/><Link className="icon-button" to="/todos" aria-label="查看提醒"><Bell size={21}/></Link><button className="stop-button" onClick={stop}><Square size={15} fill="currentColor"/>随时停止</button><Link className="profile-chip" to="/onboarding/mode"><span>暖</span><div>{preferences.mode==='child'?'儿童模式':preferences.mode==='accessible'?'无障碍模式':'长辈模式'}<small>本机用户</small></div></Link></div></header>
     <div className="demo-ribbon"><span>本机资料</span>文字按需交给已配置模型；图片与屏幕须先经本机检查。<Link to="/settings/status">查看接口与能力状态 <ArrowUpRight size={14}/></Link></div>
-    {!!state.snapshot?.conflicts?.length&&<div className="conflict-banner" role="status">有 {state.snapshot.conflicts.length} 份修改尚未保存，草稿已保留。<Link to="/sync/conflicts">比较并选择冲突内容</Link></div>}<main id="main-content" tabIndex={-1}><Routes><Route path="/onboarding/login" element={<AccountPage/>}/><Route path="/sync/conflicts" element={<ConflictsPage/>}/><Route path="/" element={<HomePage/>}/><Route path="/chat/:sessionId" element={<ChatPage/>}/><Route path="/overlay/guide" element={<GuidePage/>}/><Route path="/notes" element={<NotesPage/>}/><Route path="/notes/:id" element={<NotePage/>}/><Route path="/review/:id" element={<ReviewPage/>}/><Route path="/todos" element={<TodosPage/>}/><Route path="/todos/edit/:id" element={<TodosPage/>}/><Route path="/pets" element={<PetsPage/>}/><Route path="/pets/lili" element={<CompanionPage companion="lili"/>}/><Route path="/pets/lumi" element={<CompanionPage companion="lumi"/>}/><Route path="/pets/draw" element={<DrawingPage/>}/><Route path="/pets/import-3d" element={<PetsPage/>}/><Route path="/pets/jobs/:id" element={<PetJobPage/>}/><Route path="/settings/*" element={<SettingsPage/>}/><Route path="/onboarding/*" element={<OnboardingPage/>}/><Route path="/overlay/pet" element={<PetsPage/>}/><Route path="/overlay/captions" element={<ChatPage/>}/><Route path="*" element={<div className="empty"><h1>这个页面不在这里</h1><Link className="button primary" to="/">回微光指引首页</Link></div>}/></Routes></main><footer className="page-footer"><span>一份耐心的陪伴，免费，也不催促。</span><span>微光指引公益助手 · 本机真实模型接口</span></footer></div>
+    {!!state.snapshot?.conflicts?.length&&<div className="conflict-banner" role="status">有 {state.snapshot.conflicts.length} 份修改尚未保存，草稿已保留。<Link to="/sync/conflicts">比较并选择冲突内容</Link></div>}<main id="main-content" tabIndex={-1} ref={attachMain} aria-label="主要内容" data-page={pageKey(location.pathname)}><Routes><Route path="/onboarding/login" element={<AccountPage/>}/><Route path="/sync/conflicts" element={<ConflictsPage/>}/><Route path="/" element={<HomePage/>}/><Route path="/chat/:sessionId" element={<ChatPage/>}/><Route path="/overlay/guide" element={<GuidePage/>}/><Route path="/notes" element={<NotesPage/>}/><Route path="/notes/:id" element={<NotePage/>}/><Route path="/review/:id" element={<ReviewPage/>}/><Route path="/todos" element={<TodosPage/>}/><Route path="/todos/edit/:id" element={<TodosPage/>}/><Route path="/pets" element={<PetsPage/>}/><Route path="/pets/lili" element={<CompanionPage companion="lili"/>}/><Route path="/pets/lumi" element={<CompanionPage companion="lumi"/>}/><Route path="/pets/draw" element={<DrawingPage/>}/><Route path="/pets/import-3d" element={<PetsPage/>}/><Route path="/pets/jobs/:id" element={<PetJobPage/>}/><Route path="/settings/*" element={<SettingsPage/>}/><Route path="/onboarding/*" element={<OnboardingPage/>}/><Route path="/overlay/pet" element={<PetsPage/>}/><Route path="/overlay/captions" element={<ChatPage/>}/><Route path="*" element={<div className="empty"><h1>这个页面不在这里</h1><Link className="button primary" to="/">回微光指引首页</Link></div>}/></Routes></main><footer className="page-footer"><span>一份耐心的陪伴，免费，也不催促。</span><span>微光指引公益助手 · 本机真实模型接口</span></footer></div>
     {state.error&&<div className="toast error" role="alert"><span>{state.error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={state.clearError}><X size={18}/></button></div>}
-    {state.toast&&!state.error&&<div className="toast" role="status"><ShieldCheck size={22}/><span>{state.toast}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>useApp.setState({toast:null})}><X size={18}/></button></div>}
+    {toast.mounted&&!state.error&&<div ref={toast.ref} className="toast" role="status"><ShieldCheck size={22}/><span>{lastToast}</span><button className="icon-button" aria-label="关闭提示" onClick={()=>useApp.setState({toast:null})}><X size={18}/></button></div>}
   </div>;
 }
