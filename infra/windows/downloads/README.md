@@ -1,9 +1,19 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-24 r30：** “智能打开软件”从**固定 6 个软件**升级为**打开本机开始菜单里发现的软件**（`8e33057`）。新增 `app-inventory.cjs`：扫描两个开始菜单目录（`.lnk/.url/.exe`），生成不含路径的 `sm:` 标识，去重并**排除危险/管理类条目**（卸载/安装器、命令提示符/PowerShell/终端/Git Bash、注册表/磁盘/设备/任务计划、控制面板与设置面板、虚拟网络编辑器、步骤记录器等），`resolve` 再做一次失败关闭兜底。页面新增“已发现本机 N 个可打开项”和“**从本机列表选择**”：从列表直选**完全不调用模型**；口语目标先本地匹配（完全相同>包含>词元重合），再把前 40 个候选交给模型。动态项经 `shell.openPath` 打开开始菜单快捷方式，**真实路径不出主进程**；首次仍要本人确认，确认过一次且开启“自动执行”后才免确认。本机只读实测：可打开项 **100 条**（Android Studio、Apifox、Blender、Docker Desktop、WPS Office、微信、Chrome、DataGrip…），危险词命中 0；FinalShell/SQL Shell 等正常客户端保留。验证：21 个文件 **1211 passed / 0 failed**（含 inventory 18 例、registry 90 例、launcher 150 例、bridge 18 例、真实注册表+启动器集成 9 例、pet-ui 225 例），`tsc --noEmit` 0；Electron 冒烟（真实 IPC+preload+页面、假启动器）确认清单 2 项、从列表直选、确认前 0 次执行、`Apifox.lnk` 以 `kind:shortcut` 打开、非受信窗口被拒、屏幕/麦克风请求 0 次。构建与变基都在独立干净工作树完成（含对方 r29 提交）。旧的 r28/r29 包已从下载目录移除。
+
+
 > **2026-10-24 r27：** 功能小屋新增“**智能打开软件**”（`3a24f55`）。用户说“打开计算器/浏览器看新闻/打开 VS Code 的项目”，由已配置模型解析成**严格 JSON**，主进程按固定注册表校验后打开：首批 `calculator`、`notepad`、`explorer`（可打开本人选择的目录）、`browser`（仅 http/https）、`vscode`（本机未安装则如实报 EXECUTABLE_MISSING）、`wechat`（只打开主界面；`settings`/`chat`/`moments` 明确不支持，不伪造跳转）。默认**每次都要本人确认**（确认卡片“即将打开：… / 目标界面：… / 是否继续？”）；自动执行默认关闭，仅对低风险且本会话确认过一次的目标免确认，可随时关闭。模型输出出现 `powershell`/`cmd /c`/`start`/`node`/`python`/`.exe`/`.ps1`/盘符路径等即拒绝；参数只接受白名单键，目录必须由本人用系统对话框选择；启动一律固定绝对 exe + 字符串数组、`shell:false`，网址只走 `shell.openExternal`。Renderer 无 `require`/`process`，所有启动经受信 IPC（8 个通道、严格字段白名单）；最近记录只存时间/appId/target/结果；本功能不请求屏幕、麦克风、摄像头或 OCR。验证：相关套件 **517 passed / 0 failed**（7 个文件，含真实注册表+真实启动器的集成测试），现有功能回归 **892 passed / 0 failed**（15 个文件），`tsc --noEmit` 0；Electron 冒烟（真实 ipcMain + preload + 页面、假启动器，不打开真实软件）确认：确认前 0 次执行、确认后 1 次 `calc.exe args:[]`、开启自动执行后免确认、非受信窗口被拒、屏幕/麦克风请求 0 次。构建来自独立干净工作树（HEAD `3a24f55`）。旧 r26 包已从下载目录移除。
 
 
 > **2026-10-24 r24：** 桌宠“智能查询”改回 **AnySearch 实时检索**（`d22fa08`）。2026-10-18 起该入口只复用本机模型、不联网，因而回答不了实时问题。现在新增 `pet-search-client.cjs` 组合供应：**配置密钥就调 `POST https://api.anysearch.com/v1/search`**（Bearer），展示来源标题/摘要与可打开原文的 HTTPS 链接，页面标注“AnySearch 实时检索”；**没有密钥**才回退本机模型并标注“未联网核验”；**AnySearch 已配置但失败时直接报错，不静默改走模型冒充检索结果**。密钥只存本机 DPAPI 加密文件（`%APPDATA%\@nuanban\desktop\nuanban-anysearch-key.bin`，69 字节密文）或环境变量，**不进仓库、不进安装包**，用 `scripts/set-anysearch-key.ps1` 写入；新增 `scripts/check-anysearch-live.cjs` 做真实调用核对，并有防泄漏测试扫描源码/脚本/测试/文档。构建来自独立干净工作树（HEAD `d22fa08`，先变基到最新远端并保留对方提交）：`tsc --noEmit` 0，相关套件 415 passed。真实调用记录：“今天北京天气”7 条、“上海今天天气怎么样”7 条、“人民币 美元 汇率”9 条结果，全部 HTTPS、来源各异，模型调用 0 次。Android 两包未重出（另一会话正在改 Android/Web，当前 Web 构建与其已发布 APK 已不一致），下载页保留此前逐文件核验过的 APK 行；旧 r23 包与页面行已移除。
+
+> **2026-10-24 r29：** 修复"共享整屏时 WeGame 等软件图标无法被指引（没有光标）"。根因：`apps/desktop/observation/windows-shell-controls.ps1` 枚举了桌面/任务栏元素，但**只给 6 项写死白名单打标签**（桌面：微信/此电脑/我的电脑/回收站/控制面板；任务栏：微信/开始/搜索），其余名称直接跳过，因此 WeGame 之类图标**根本不会成为候选**。现在改为**每个合格 shell 元素都用本机 UIA 名称上报**：名称清洗（Trim、去控制字符、折叠空白、≤64 截断、桌面去 `.lnk`、空名/纯符号跳过、同名同位置去重），白名单仅保留用于友好名映射；**既有过滤一条未放宽**（explorer 拥有的 shell 窗口、DPI、IsOffscreen/IsEnabled、必须落在观察范围内、FromPoint 命中、窗口 ≤128 / 元素 ≤1024 / 控件 ≤128）。回包在 `windows-shell-controls.cjs` 按同一规则再校验（NFKC、≤64 截断、>256 硬拒绝），`observation-policy.cjs` 由白名单改为结构校验并**让 shell 名称同样过敏感文本门控**（命中隐私词的候选不上报、不成箭头目标、也不因此停止已授权共享），`policyVersion` v10→v11。**如实说明**：UIA 名为空的图标仍走既有 `visual-controls` 的"未标注图标"图形候选，**OCR 就近匹配兜底未实现**；真机验收 `deviceVerified=false`。r28 按上一版约定**继续保留**（页面同时列出 r28 与 r29），便于旧链接不 404。
+
+> **产物核验（r29）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r29.zip` 215,395,210 字节（205.417 MiB），SHA256 `365c2153a805247bfa1267ea03f940a9ea54555a78eeee6017102f9f07482b19`；主机按字节核验一致，公开 HEAD 200。包内 13 项核对全过：shell helper 随包且**保持纯 ASCII**、泛化标签逻辑在位、无"白名单否则跳过"的旧分支、友好名映射保留、客户端 `isBoundedShellControlLabel` 校验在位、`policyVersion v11` 且 shell 名称过 `isRestrictedText`、星云按模式选类与对话模式 `enable_aec: false`、品牌文案仍是"微光指引"、权限闸门与云听写录音组件仍在。
+
+> **验证范围与诚实边界（r29）**：`pnpm typecheck` 0；`desktop-shell-controls` 10 + `desktop-observation-source` 232 + `desktop-observation-policy` 122 = **364 passed / 0 failed**；观测相关 9 文件 673 项中 663 passed，10 项失败**在 HEAD 上就存在**（`desktop-shell-target-stability`：旧断言要求"单帧丢目标立刻清箭头"，而实现是有意的"连续两帧丢失才判失效"，本轮未擅自改断言）。PowerShell `ParseFile` 0 错误、脚本 0 个非 ASCII 字节，清洗/截断/符号拒绝/友好名映射已在真实 PS 5.1 逐条验证。**未验证**：真机整屏共享下的验收——需要用户点"重新识别当前画面"后确认桌面第二列顶部的 WeGame 出现箭头且位置吻合；另外上游新增的 `relaxedSafety`（最大权限）与"名称级敏感过滤"的一致性尚未接线，默认与遮盖模式为 fail-closed。
+
 
 > **2026-10-24 r28：** 修复"启用花环水獭（仅形象）与实时对话都失败"。现场反馈两种模式都失败后，我们用**真实 Electron 隐藏窗口 + 真实 pet.html/preload/CSP + 真实凭证与会话**做了取证装置（真实会话 4 次，全部 DELETE），确证并修掉两个缺陷：
 > 1. **仅形象被实时通道连坐**（这是"仅形象也坏"的成因）：修复前两种模式都实例化 `XingyunAvatarAgent`，仅形象也会额外建立 `wss://e2emp.xingyun3d.com` E2E 连接，任一 socket/agent 异常直接 `fail('load_failed')`。现在**按模式选类**：`render` → 基类 `@xmov/avatar`（只建 `ttsa-gateway-lite` 一条 WS，不依赖 E2E、不调用 ASR/ask、`setVolume(0)`）；`conversation` → `@xmov/avatar/agent`。
@@ -172,7 +182,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip` | 215,369,016 字节（205.392 MiB） | `c8b096523f9f270f9d4be1ed91af39b1411d98757cd04339246f94ca762197cf` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r30.zip` | 215,369,016 字节（205.392 MiB） | `c8b096523f9f270f9d4be1ed91af39b1411d98757cd04339246f94ca762197cf` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -217,7 +227,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r30.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -281,11 +291,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r30.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r30.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 

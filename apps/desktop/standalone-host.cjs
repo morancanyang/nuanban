@@ -111,6 +111,8 @@ function createStandaloneHost(options) {
   const regionSelector = (options.createRegionSelector ?? createObservationRegionSelector)({ BrowserWindow, ipcMain });
   const privacySettings = options.privacySettings;
   const unredactedUpload = () => privacySettings?.read?.().unredactedUpload === true;
+  const relaxedSafety = () => privacySettings?.read?.().relaxedSafety === true;
+  const maxPermissions = () => unredactedUpload() && relaxedSafety();
   const source = options.source ?? createWindowsObservationSource({ desktopCapturer, screen, nativeImage, BrowserWindow, ipcMain, session,
     detectorOptions: { unredactedUpload },
     canCapture: ({ sourceId }) => consentedSourceId === sourceId && runtime?.snapshot().observation.state === 'observing',
@@ -151,6 +153,7 @@ function createStandaloneHost(options) {
 
   function snapshot() {
     const state = runtime.snapshot();
+    state.observation = { ...state.observation, relaxedSafety: relaxedSafety(), maxPermissions: maxPermissions() };
     state.pet = { collapsed, ballSize, idleHideMs, hidden: ballEdge !== null, edge: ballEdge };
     state.voice = voiceHost?.snapshot() ?? { state: 'off', active: false, microphoneActive: false, configured: false, message: '面对面语音未开启。' };
     state.voice = { ...state.voice, presentation: 'pet', ...(faceVoiceVisible ? { bubble: { ...voiceBubble } } : {}) };
@@ -892,6 +895,23 @@ function createStandaloneHost(options) {
     return Object.freeze({ unredactedUpload: enabled });
   }
 
+  // 本机最高权限：一次打开“不遮盖原始画面”与“不因敏感词/未分类画面暂停”。
+  // 只在本机自用场景由本人显式确认后生效；画面过期、坐标不一致等正确性校验仍然保留。
+  async function setMaxPermissions(enabled) {
+    if (typeof enabled !== 'boolean') throw new Error('最大权限设置参数无效');
+    if (typeof privacySettings?.write !== 'function') throw new Error('当前客户端不支持修改本机隐私设置');
+    if (enabled) {
+      const confirmation = await showDialog({ type: 'warning', title: '开启最大权限模式',
+        message: '将同时关闭本机文字/人脸遮盖，并跳过敏感词与未分类画面的暂停；屏幕原始画面会直接上传给已配置的模型网关。是否确认？',
+        detail: '只建议在你自己的电脑、自己的屏幕上临时使用：聊天、文件名、账号信息等屏幕内容都会离开本机，并受模型网关的数据政策约束。仍保留“画面过期、坐标不一致”校验，避免指错位置。关闭此开关立即恢复本机遮盖与敏感词过滤。',
+        buttons: ['确认开启最大权限', '取消'], defaultId: 1, cancelId: 1, noLink: true });
+      if (confirmation.response !== 0) return Object.freeze({ maxPermissions: maxPermissions() });
+    }
+    privacySettings.write({ unredactedUpload: enabled, relaxedSafety: enabled });
+    publish();
+    return Object.freeze({ maxPermissions: enabled, unredactedUpload: enabled, relaxedSafety: enabled });
+  }
+
   function menu() {
     const current = runtime.snapshot();
     return Menu.buildFromTemplate([
@@ -932,6 +952,9 @@ function createStandaloneHost(options) {
       { label: unredactedUpload() ? '本机遮盖：已关闭（原始画面上传）' : '本机遮盖：已开启（推荐）', type: 'checkbox', checked: unredactedUpload(),
         enabled: typeof privacySettings?.write === 'function',
         click: () => runAction(() => setUnredactedUpload(!unredactedUpload())) },
+      { label: maxPermissions() ? '最大权限：已开启（不遮盖、不拦敏感词）' : '最大权限：仅本机自用（关闭遮盖与敏感词拦截）', type: 'checkbox', checked: maxPermissions(),
+        enabled: typeof privacySettings?.write === 'function',
+        click: () => runAction(() => setMaxPermissions(!maxPermissions())) },
       { type: 'separator' }, { label: '停止观察、语音和发送', click: () => runAction(() => stop('user')) },
       { label: '关闭桌宠（停止所有采集）', click: () => runAction(closePetWindow) },
     ]);
@@ -1353,7 +1376,7 @@ function createStandaloneHost(options) {
   }
 
   return { initialize, dispose, stop, snapshot, showPetPanel, showLocalModel, setPetDisplayCompatibility, selectLili, lili, requestObservation: resume => chooseObservation(resume === true),
-    cloudDictationStatus, setCloudDictation, setUnredactedUpload, unredactedUpload,
+    cloudDictationStatus, setCloudDictation, setUnredactedUpload, unredactedUpload, setMaxPermissions, maxPermissions,
     requestLocalVoice: enableWake, stopLocalVoice: disableWake, requestVoiceDictation,
     hasPetWindow: () => live(petWindow), getPetWindow: () => live(petWindow) ? petWindow : null };
 }
