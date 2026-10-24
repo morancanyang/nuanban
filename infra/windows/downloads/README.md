@@ -5,6 +5,13 @@
 
 > **2026-10-24 r21：** 合并上游前端仓库 [101274017/mobiwusi](https://github.com/101274017/mobiwusi) 的界面更新并重出 Windows 客户端。
 
+> **2026-10-24 r26：** 修掉另一会话 `3f0946c` 留在 `apps/desktop/main.cjs` 两处配置对话框里的旧产品名"暖伴"（品牌名回归，`b1ffc61`）：`请从仓库源码目录启动暖伴…` → `…启动微光指引…`，`现在重启暖伴以启用吗？` → `现在重启微光指引以启用吗？`。这是相对 r25 的**唯一代码变化**：r25→r26 条目 87→87、新增 0、删除 0、**变化条目只有 `resources/app.asar`（77,011,911 → 77,011,923 字节，+12 = 两处各 +6）**。功能与 r25 完全一致（星云原生实时对话、云端听写修复、AnySearch 检索、栗栗/露米等均沿用 r25）。旧 r25 包已从下载目录撤下。
+
+> **产物核验（r26）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r26.zip` 215,346,699 字节（205.37 MiB），SHA256 `b36e662c3b6b2101682356ffd6e140a50002878c917349d24f56aac80d3448c7`；主机按字节核验一致，公开 HEAD 200。包内 12 项逐项核对全部通过：`main.cjs` 已无"暖伴"且含"微光指引"、`xingyun-avatar.cjs` 两模式与对话字段、`xingyun-permission-guard.cjs` 只放行 `media`、`main.cjs` 无任何 `callback(true)` 字面量、桌宠页面含"实时对话"入口、`avatar-runtime/xingyun-renderer.js` 含 Agent/`startASR`/`stopASR`、解包目录含 `voice/windows-cloud-dictation.ps1` 与 `NAudio.dll`、`voice/cloud-recorder.cjs` 含 `tempDir` 修复。
+
+> **验证范围（r26）**：`pnpm typecheck` 0；`tests/platform/product-branding.test.ts` **188/188 通过**（修复前为红）；发布版（b1ffc61 系）全量非 acceptance 为 **3041 passed / 14 failed**，其中品牌 1 项已由本版修复，其余 13 项为既有红测（`android-3d-assets`、`android-3d-render-policy`、`desktop-shell-target-stability`，均为其他会话在途工作）。**未验证**：仍没有真机开麦与真实星云会话验收，实时链路/口型/延迟/计费口径未实测（同 r25）。
+
+
 > **2026-10-24 r25：** 接入**星云原生实时对话**（所有者选择"模式 A"：星云 ASR + 星云 Brain + 星云 TTS + 口型），默认仍是"仅形象渲染"，对话必须由本人在原生窗口逐次开启。平台侧由 lead 先实测确认：对话模式会话 POST（`features:{auto_send_asr_to_llm:true, speech_frontend:{enabled:true, enable_aec:true}}`）返回 `error_code 0`、`resource_pack` 与 **`e2e_resp.{ws_url:'wss://e2emp.xingyun3d.com/...', e2e_token, features}`**，探测会话随后关闭（重复 DELETE 返回"无效的 session"，未留下计费会话）。实现要点：`begin(consent, mode)` 只接受 `render|conversation`；对话模式的会话体由**主进程白名单重建**（页面传入的 features/ids/config 一律丢弃，`raw_audio` 仍须布尔）；新增 `xingyun-permission-guard.cjs`——默认会话仍全拒，只有"本人已开启对话的那一次会话/那个桌宠窗口/那个页面/仅 media 音频"放行，停止、窗口关闭、销毁或退出立即撤销且对迟到撤销免疫；渲染端对话模式才实例化 `XingyunAvatarAgent`（`setVolume(1)`、`startASR/stopASR/interrupt`、回调按代次丢弃、销毁先 `stopASR` 再 `destroy`），render 模式与旧版一致（`setVolume(0)`、不调用 ASR/ask）；桌宠页面新增"实时对话"入口与原生确认框（写明音频上传、由星云模型回答、按其平台计费、停止即结束），对话中显示聆听/思考/说话与识别文字。旧 r24 包已从下载目录撤下。
 
 > **产物核验（r25）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip` 215,346,710 字节（205.37 MiB），SHA256 `ed0e9e7b55619a479fcf077549058f2019c924020802ca4e8a8d350bbef6e406`；主机按字节核验一致，公开 HEAD 200。包内逐项核对（解包 ASAR 读取）：`xingyun-avatar.cjs` 含 `SESSION_MODES=['render','conversation']` 与两套会话体、`xingyun-permission-guard.cjs` 只放行 `media`、`main.cjs` 安装闸门且**无任何 `callback(true)` 字面量**、`standalone-host.cjs` 具备 arm/disarm、桌宠页面含"实时对话"入口、`avatar-runtime/xingyun-renderer.js`（1,217,205 字节）内含 Agent/startASR/stopASR/destroy/对话事件/代次守卫；`PET_AVATAR_CSP` 未放宽（仍只允许 `https://*.xingyun3d.com`、`wss://*.xingyun3d.com` 与既有 OSS 域）。
@@ -144,7 +151,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip` | 215,346,710 字节（205.37 MiB） | `ed0e9e7b55619a479fcf077549058f2019c924020802ca4e8a8d350bbef6e406` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r26.zip` | 215,346,699 字节（205.37 MiB） | `b36e662c3b6b2101682356ffd6e140a50002878c917349d24f56aac80d3448c7` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -189,7 +196,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r26.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -253,11 +260,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r26.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r26.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
