@@ -209,6 +209,9 @@ async function main() {
       <customHeaders>
         <remove name="X-Content-Type-Options" /><add name="X-Content-Type-Options" value="nosniff" />
         <remove name="Referrer-Policy" /><add name="Referrer-Policy" value="strict-origin-when-cross-origin" />
+        <!-- 下载页每次发布都会重写；浏览器若缓存旧页面，用户会点到已撤下的文件名而得到 IIS 404。
+             因此整站禁止缓存：页面始终是当前列表，历史包不会再被旧页面引用。 -->
+        <remove name="Cache-Control" /><add name="Cache-Control" value="no-store, must-revalidate" />
       </customHeaders>
     </httpProtocol>
     <defaultDocument><files><clear /><add value="index.html" /></files></defaultDocument>
