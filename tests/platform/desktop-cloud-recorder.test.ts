@@ -108,6 +108,49 @@ describe('云端听写录音器（助手只录音，绝不联网）', () => {
   });
 });
 
+describe('录音文件的落点（正式环境脚本在 app.asar 内，asar 是文件不是目录）', () => {
+  const archivedScript = 'C:\\Program Files\\NuanbanDemo\\resources\\app.asar\\voice\\windows-cloud-dictation.ps1';
+
+  it('默认把录音写到临时目录，绝不写到 app.asar 内部', async () => {
+    const tempDir = join(scratch, 'temp');
+    mkdirSync(tempDir, { recursive: true });
+    const spawn = vi.fn((...callArguments: unknown[]) => {
+      const args = (callArguments[1] ?? []) as string[];
+      const outIndex = args.indexOf('-OutFile');
+      const outFile = args[outIndex + 1];
+      expect(outFile.startsWith(tempDir)).toBe(true);
+      expect(outFile).not.toContain('app.asar');
+      const child = new FakeChild(() => {});
+      queueMicrotask(() => { child.stdout.write('{"kind":"error","reason":"cloud_dictation_no_speech"}\n'); child.emit('close', 2); });
+      return child;
+    });
+    const recorder = createCloudRecorder({ spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      scriptPath: archivedScript, platform: 'win32', tempDir });
+    await expect(recorder.record()).rejects.toMatchObject({ code: 'cloud_dictation_no_speech' });
+    // the helper is still launched from the unpacked copy of the archived script
+    const args = spawn.mock.calls[0][1] as string[];
+    expect(args[args.indexOf('-File') + 1]).toContain('app.asar.unpacked');
+  });
+
+  it('显式给出的 asar 内路径在派生进程前就被拒绝', async () => {
+    const fixture = recorderFixture(() => {});
+    await expect(fixture.recorder.record({ outFile: 'C:\\x\\resources\\app.asar\\voice\\out.wav' }))
+      .rejects.toMatchObject({ code: 'cloud_dictation_request_invalid' });
+    expect(fixture.spawn).not.toHaveBeenCalled();
+  });
+
+  it('把助手的标准错误随错误一起带出，便于定位（不进用户提示）', async () => {
+    const fixture = recorderFixture((child) => {
+      child.stderr.write('Exception calling "Record": 对路径的访问被拒绝。\n');
+      child.stdout.write('{"kind":"error","reason":"cloud_dictation_failed"}\n');
+      child.emit('close', 2);
+    });
+    const error = await fixture.recorder.record({ outFile: join(scratch, 'denied.wav') }).then(() => null, (failure) => failure);
+    expect(error).toMatchObject({ code: 'cloud_dictation_failed' });
+    expect(String(error.detail)).toContain('访问被拒绝');
+  });
+});
+
 describe('云端听写开关（默认关闭，不保存音频）', () => {
   it('缺省关闭，写入后可读回', () => {
     const store = createCloudDictationSettings({ userDataPath: scratch });

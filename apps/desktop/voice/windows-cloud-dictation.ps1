@@ -90,7 +90,9 @@ public static class NuanbanCloudRecorder
                 rms = total > 0 ? Math.Sqrt(sumSq / total) : 0;
             }
         }
-        if (seconds < 0.3 || peak <= 0) throw new InvalidOperationException("cloud_dictation_no_speech");
+        // Near-silence would only buy a hallucinated transcript from the recogniser, so stop here and let
+        // the host say "no sound reached the microphone" instead of uploading a pointless request.
+        if (seconds < 0.3 || peak < 0.015) throw new InvalidOperationException("cloud_dictation_no_speech");
         // Normalise to about -3 dBFS so weak laptop-array audio still reaches the recogniser.
         string normalised = path + ".normalised.wav";
         Normalise(path, normalised, peak);
@@ -134,6 +136,8 @@ public static class NuanbanCloudRecorder
   $message = $_.Exception.Message
   if ($message -match '^cloud_dictation_[a-z_]{1,40}$') { $reason = $message }
   elseif ($message -match 'cloud_dictation_no_speech') { $reason = 'cloud_dictation_no_speech' }
-  try { Write-ProtocolEvent @{ kind = 'error'; reason = $reason } } catch {}
+  $detail = ($message -replace '\s+', ' ').Trim()
+  if ($detail.Length -gt 200) { $detail = $detail.Substring(0, 200) }
+  try { Write-ProtocolEvent @{ kind = 'error'; reason = $reason; detail = $detail } } catch {}
   exit 2
 }

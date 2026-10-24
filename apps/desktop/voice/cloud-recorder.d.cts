@@ -8,6 +8,7 @@ export interface CloudRecorderOptions {
   silenceMs?: number;
   timeoutMs?: number;
   maxBufferBytes?: number;
+  tempDir?: string;
 }
 export type CloudRecorder =
   | { available: false; reason: string; record(): Promise<never> }

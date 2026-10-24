@@ -201,7 +201,7 @@ if (ownsInstance) app.whenReady().then(async () => {
   try { cloudDictation = await loadConfiguredCloudDictation({ fetch: desktopFetch }); } catch { cloudDictation = undefined; }
   try {
     cloudSettings = createCloudDictationSettings({ userDataPath: app.getPath('userData') });
-    cloudRecorder = createCloudRecorder({ scriptPath: path.join(__dirname, 'voice', 'windows-cloud-dictation.ps1') });
+    cloudRecorder = createCloudRecorder({ scriptPath: path.join(__dirname, 'voice', 'windows-cloud-dictation.ps1'), tempDir: app.getPath('temp') });
   } catch { cloudSettings = undefined; cloudRecorder = undefined; }
   registerBridge();
   standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow,

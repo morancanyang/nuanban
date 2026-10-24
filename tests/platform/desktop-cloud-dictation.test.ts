@@ -109,6 +109,15 @@ describe('云端听写客户端（音频仅在本次请求内存留，由宿主�
 
     const helper = readFileSync('apps/desktop/voice/windows-cloud-dictation.ps1', 'utf8');
     expect(helper).toContain('NuanbanCloudRecorder');
+    // A near-silent recording must not be uploaded: the recogniser would only hallucinate.
+    expect(helper).toContain('peak < 0.015');
+    expect(helper).toContain('cloud_dictation_no_speech');
+    expect(/^[\x00-\x7F]*$/u.test(helper)).toBe(true);
+    // The host turns silence into an actionable message and skips the pointless offline fallback.
+    const host = readFileSync('apps/desktop/standalone-host.cjs', 'utf8');
+    expect(host).toContain("cloudFailure === 'cloud_dictation_no_speech'");
+    expect(host).toContain('这次几乎没有收到声音');
+    expect(host).toContain('本次未上传音频');
     expect(helper).toContain('Assembly]::Load([IO.File]::ReadAllBytes');
     expect(helper).toContain('Normalise');
     expect(helper).toContain("kind = 'recorded'");

@@ -716,6 +716,8 @@ function createStandaloneHost(options) {
         } catch (error) {
           if (!current()) return cancelled();
           cloudFailure = typeof error?.code === 'string' ? error.code : 'cloud_dictation_failed';
+          // Nothing reached the microphone: the offline engine cannot do better on a silent recording.
+          if (cloudFailure === 'cloud_dictation_no_speech') throw Object.assign(new Error('cloud_dictation_no_speech'), { code: 'cloud_dictation_no_speech' });
         } finally {
           cloudRecording = false;
           publish();
@@ -729,7 +731,8 @@ function createStandaloneHost(options) {
       return result?.status === 'complete' ? Object.freeze({ ...result, recognition: 'local' }) : result;
     } catch (error) {
       if (!current()) return cancelled();
-      wakeFailure = cloudFailure ? '云端识别失败（' + cloudFailure + '），已回退本机离线识别但仍未得到结果；请检查网络与麦克风后重试。'
+      wakeFailure = cloudFailure === 'cloud_dictation_no_speech' ? '这次几乎没有收到声音：请靠近麦克风（约 10~15 厘米）、在系统声音设置里提高输入音量或麦克风加强后再说一次；本次未上传音频。'
+        : cloudFailure ? '云端识别失败（' + cloudFailure + '），已回退本机离线识别但仍未得到结果；请检查网络与麦克风后重试。'
         : error?.code === 'wake_dictation_timeout' ? '20 秒内未识别到完整语句，请靠近默认麦克风说话，再试一次。'
         : error?.code === 'wake_dictation_unavailable' ? '本机离线中文听写引擎不可用；未改用云端，请检查中文语音组件。'
           : error?.code === 'wake_microphone_access_denied' ? 'Windows 拒绝麦克风访问，请检查麦克风访问和桌面应用访问开关。'
