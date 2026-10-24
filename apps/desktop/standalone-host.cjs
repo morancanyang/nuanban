@@ -1027,6 +1027,7 @@ function createStandaloneHost(options) {
       }
       case 'observation.resume': return chooseObservation(true);
       case 'observation.stop': await stop(); break;
+      case 'guidance.auto-start': await runtime.startAutoStep(typeof payload.goal === 'string' ? payload.goal : undefined); break;
       case 'guidance.verify': await runtime.verify(); break;
       case 'guidance.finish': await runtime.finishTeaching(); break;
       case 'guidance.repeat': runtime.repeat(); break;
