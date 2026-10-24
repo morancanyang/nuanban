@@ -25,6 +25,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-ai-provide
 
 自动部署可通过受信进程环境提供完整的 `NUANBAN_AI_BASE_URL`、`NUANBAN_AI_MODEL`、`NUANBAN_AI_API_KEY` 三项，优先于加密文件。不要把这些值写入 `VITE_*`。部分环境配置、损坏文件或解密失败都会关闭模型功能，而非回退演示。更新配置后需要正常退出并重启桌面客户端；使用 `pnpm desktop` 会先构建管理端。
 
+## 零配置的本机模型与一键云端配置
+
+- **本机模型自动检测**：没有环境变量也没有 `ai-provider.json` 时，主进程会依次探测 `http://127.0.0.1:11434/v1`（Ollama）与 `http://127.0.0.1:1234/v1`（LM Studio）的 `/models`，选中第一个可用模型后直接使用。装好本机模型运行时即可文字问答与本地语音对话，不需要账号、密钥或额外配置；未检测到运行时保持关闭，不会伪造回答。明文 HTTP 只对回环地址放行，云端网关仍必须 HTTPS。
+- **一键云端配置**：桌宠右键菜单“配置云端智能服务（一键填 key）…”会打开一个输入窗口，默认网关 `https://api.openai-next.com/v1`、模型 `gpt-6.1-sol`，在 `API key (hidden)` 提示后粘贴本人密钥。保存成功后菜单会提示立即重启以加载新配置。密钥仍由 Windows DPAPI 加密在仓库外保存，不写入项目；此入口不替用户购买额度，也不会在未保存时启用任何模型。
+
 密钥曾直接贴入聊天时，应到供应商控制台轮换，再通过上述隐藏输入更新本机配置。
 
 ## 输入与回答故障排查

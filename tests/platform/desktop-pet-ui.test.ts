@@ -2687,4 +2687,21 @@ describe('桌宠自动收起为悬浮球的界面状态', () => {
     expect(harness.element('pet-window').classList.toggle).toHaveBeenCalledWith('is-ball', false);
     expect(harness.element('pet-ball').hidden).toBe(true);
   });
+
+  it('半隐藏状态标记独立类名，拖动悬浮球转发坐标且不误触取回', async () => {
+    const harness = petHarness({ ...snapshot(), pet: { collapsed: true, ballSize: 64, idleHideMs: 5000, hidden: true, edge: 'right' } });
+    await settle();
+    expect(harness.element('pet-window').classList.toggle).toHaveBeenCalledWith('is-ball-hidden', true);
+    const ball = harness.element('pet-ball');
+    dispatch(ball, 'pointerdown', { pointerId: 3, button: 0, isPrimary: true, screenX: 1400, screenY: 690 });
+    dispatch(ball, 'pointermove', { pointerId: 3, buttons: 1, screenX: 1370, screenY: 680 });
+    dispatch(ball, 'pointerup', { pointerId: 3, button: 0, screenX: 1370, screenY: 680 });
+    await settle();
+    expect(harness.bridge.drag).toHaveBeenCalledWith('start', { x: 1400, y: 690 });
+    expect(harness.bridge.drag).toHaveBeenCalledWith('move', { x: 1370, y: 680 });
+    expect(harness.bridge.drag).toHaveBeenCalledWith('end', { x: 1370, y: 680 });
+    harness.click('pet-ball');
+    await settle();
+    expect(harness.bridge.expand).not.toHaveBeenCalled();
+  });
 });

@@ -1317,25 +1317,56 @@ describe('桌宠自动收起为悬浮球且不置顶', () => {
     expect(pet.bounds.height).toBe(64);
     const area = current.screen.getPrimaryDisplay().workArea;
     expect(pet.bounds.x + pet.bounds.width).toBe(area.x + area.width - 8);
-    expect(pet.alwaysOnTop).toBe(false);
+    expect(pet.alwaysOnTop).toBe(true);
     expect(await current.invoke('nuanban:pet:expand')).toBe(true);
     expect(current.host.snapshot().pet?.collapsed).toBe(false);
     expect(pet.bounds.width).toBeGreaterThan(64);
     expect(pet.alwaysOnTop).toBe(false);
   });
 
-  it('打开其他窗口导致失焦时立即收起，语音唤醒会取回桌宠', async () => {
+  it('打开其他窗口导致失焦时以边缘半隐藏悬浮球出现，语音唤醒会取回桌宠', async () => {
     const current = fixture({ autoHideMs: 60_000 });
     await current.host.initialize();
     const pet = current.windows[0];
+    const area = current.screen.getPrimaryDisplay().workArea;
     pet.emit('blur');
     await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
     expect(pet.bounds.width).toBe(64);
+    expect(current.host.snapshot().pet?.hidden).toBe(true);
+    expect(current.host.snapshot().pet?.edge).toBe('right');
+    expect(pet.bounds.x + pet.bounds.width / 2).toBe(area.x + area.width);
+    expect(pet.alwaysOnTop).toBe(true);
     current.setWakeState({ state: 'listening', enabled: true, microphoneActive: true });
     current.wakeUp();
     await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(false));
     expect(pet.bounds.width).toBeGreaterThan(64);
     expect(pet.webContents.send).toHaveBeenCalledWith('nuanban:pet:panel', expect.objectContaining({ expanded: true }));
+  });
+
+  it('悬浮球可以拖动，拖到边上吸附为半隐藏，拖到中间保持完整可见', async () => {
+    const current = fixture({ autoHideMs: 20 });
+    await current.host.initialize();
+    const pet = current.windows[0];
+    const area = current.screen.getPrimaryDisplay().workArea;
+    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    const dragEvent = { sender: pet.webContents, senderFrame: pet.webContents.mainFrame };
+    const dragCall = (action: string, point: { x: number; y: number }) => current.handlers.get('nuanban:pet:drag')!(dragEvent, action, point);
+    const start = { x: pet.bounds.x + 32, y: pet.bounds.y + 32 };
+    await dragCall('start', start);
+    await dragCall('move', { x: area.x + 40, y: area.y + 160 });
+    await dragCall('end', { x: area.x + 40, y: area.y + 160 });
+    expect(current.host.snapshot().pet?.hidden).toBe(true);
+    expect(current.host.snapshot().pet?.edge).toBe('left');
+    expect(pet.bounds.x).toBe(area.x - 32);
+    await current.invoke('nuanban:pet:expand');
+    await current.invoke('nuanban:pet:collapse');
+    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    const middle = { x: pet.bounds.x + 32, y: pet.bounds.y + 32 };
+    await dragCall('start', middle);
+    await dragCall('move', { x: area.x + 400, y: area.y + 300 });
+    await dragCall('end', { x: area.x + 400, y: area.y + 300 });
+    expect(current.host.snapshot().pet?.hidden).toBe(false);
+    expect(pet.bounds.x).toBeGreaterThan(area.x + 100);
   });
 
   it('持续活动会把自动收起推迟到空闲时间之后', async () => {
@@ -1346,5 +1377,17 @@ describe('桌宠自动收起为悬浮球且不置顶', () => {
     await new Promise(resolve => setTimeout(resolve, 600));
     expect(current.host.snapshot().pet?.collapsed).toBe(false);
     await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true), { timeout: 2_000 });
+  });
+
+  it('桌宠菜单提供一键配置云端智能服务入口', async () => {
+    const configureAiProvider = vi.fn(async () => ({ configured: false }));
+    const current = fixture({ autoHideMs: 60_000, configureAiProvider });
+    await current.host.initialize();
+    await current.invoke('nuanban:pet:context-menu');
+    const template = current.menus.at(-1)!;
+    const entry = template.find(item => typeof item.label === 'string' && item.label.includes('配置云端智能服务'));
+    expect(entry).toBeTruthy();
+    entry!.click?.();
+    await vi.waitFor(() => expect(configureAiProvider).toHaveBeenCalledTimes(1));
   });
 });

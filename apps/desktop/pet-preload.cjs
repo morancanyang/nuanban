@@ -142,7 +142,7 @@ function projectSnapshot(value) {
     analysis: { state: 'string', message: 'string' },
     captions: { enabled: 'boolean', text: 'string' },
     wake: { state: 'string', reason: 'string', phase: 'string', microphoneActive: 'boolean', dictationAvailable: 'boolean' },
-    pet: { collapsed: 'boolean', ballSize: 'number', idleHideMs: 'number' },
+    pet: { collapsed: 'boolean', ballSize: 'number', idleHideMs: 'number', hidden: 'boolean', edge: 'string' },
     voice: { state: 'string', active: 'boolean', microphoneActive: 'boolean', configured: 'boolean', message: 'string', mode: 'string', presentation: 'string' },
   };
   for (const [name, fields] of Object.entries(sections)) {

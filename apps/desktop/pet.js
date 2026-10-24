@@ -428,6 +428,7 @@
     const { observation, task, analysis } = state;
     const ballMode = record(runtime.pet).collapsed === true;
     element('pet-window').classList.toggle('is-ball', ballMode);
+    element('pet-window').classList.toggle('is-ball-hidden', ballMode && record(runtime.pet).hidden === true);
     element('pet-ball').hidden = !ballMode;
     const captions = record(runtime.captions);
     const wake = record(runtime.wake);
@@ -1193,9 +1194,42 @@
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); showMenu(); }
   });
   bind(element('pet-menu'), 'click', showMenu);
+  let ballDrag = null;
+  let suppressBallClick = false;
+  const sendBallDrag = (action, point) => {
+    if (typeof bridge?.drag !== 'function') return;
+    void Promise.resolve(bridge.drag(action, point)).catch(() => {});
+  };
+  bind(element('pet-ball'), 'pointerdown', event => {
+    if (event.button !== 0 || event.isPrimary === false || typeof bridge?.drag !== 'function') return;
+    suppressBallClick = false;
+    ballDrag = { pointerId: event.pointerId, x: event.screenX, y: event.screenY, moved: false };
+    try { element('pet-ball').setPointerCapture?.(event.pointerId); } catch {}
+    sendBallDrag('start', { x: event.screenX, y: event.screenY });
+  }, true);
+  bind(element('pet-ball'), 'pointermove', event => {
+    if (!ballDrag || event.pointerId !== ballDrag.pointerId) return;
+    if (!ballDrag.moved && Math.hypot(event.screenX - ballDrag.x, event.screenY - ballDrag.y) > 2) {
+      ballDrag.moved = true;
+      element('pet-ball').classList.toggle('is-dragging', true);
+    }
+    if (ballDrag.moved) sendBallDrag('move', { x: event.screenX, y: event.screenY });
+  }, true);
+  const endBallDrag = event => {
+    if (!ballDrag || (event && event.pointerId !== ballDrag.pointerId)) return;
+    const moved = ballDrag.moved;
+    ballDrag = null;
+    element('pet-ball').classList.toggle('is-dragging', false);
+    sendBallDrag('end', event ? { x: event.screenX, y: event.screenY } : undefined);
+    if (moved) suppressBallClick = true;
+  };
+  bind(element('pet-ball'), 'pointerup', endBallDrag, true);
+  bind(element('pet-ball'), 'pointercancel', endBallDrag, true);
+  bind(element('pet-ball'), 'lostpointercapture', () => endBallDrag(undefined));
   bind(element('pet-ball'), 'click', event => {
     event.preventDefault();
     event.stopPropagation();
+    if (suppressBallClick) { suppressBallClick = false; return; }
     if (typeof bridge?.expand !== 'function') return;
     void Promise.resolve(bridge.expand()).catch(error => showError('无法取回桌宠', error, () => { void bridge.expand().catch(() => {}); }));
   });

@@ -1,5 +1,6 @@
 const electron = require('electron');
 const { app, BrowserWindow, ipcMain, safeStorage, session, Notification, dialog } = electron;
+const { spawn } = require('node:child_process');
 const { createLifecycleController } = require('./lifecycle.cjs');
 const { createStandaloneHost } = require('./standalone-host.cjs');
 const { createPetWorkspace } = require('./pet-workspace.cjs');
@@ -51,6 +52,43 @@ const petTools = createPetToolWindow({ BrowserWindow, getIndexPath: managementIn
     if (name !== 'nuanban:host-window-moved') { imageQuestionBridge?.stop(); textQuestionBridge?.stop(); }
     notifyLifecycle(name, window);
   }, onClosed: quitIfNoVisibleWindows });
+const PROVIDER_DEFAULTS = Object.freeze({ baseUrl: 'https://api.openai-next.com/v1', model: 'gpt-6.1-sol' });
+function providerConfigurationPath() { return path.join(process.env.LOCALAPPDATA ?? '', 'Nuanban', 'ai-provider.json'); }
+function providerConfigurationStamp() { try { return fs.statSync(providerConfigurationPath()).mtimeMs; } catch { return 0; } }
+// One-click cloud setup: open the existing hidden-input script in its own console, then offer a restart
+// so the freshly saved DPAPI credential is loaded. Nothing is saved or enabled unless the owner types it.
+async function configureAiProvider() {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'configure-ai-provider.ps1');
+  if (!fs.existsSync(script)) {
+    await dialog.showMessageBox({ type: 'warning', title: '无法打开配置窗口', message: '当前运行方式没有包含配置脚本。',
+      detail: '请从仓库源码目录启动暖伴，或手动运行 scripts/configure-ai-provider.ps1。未保存任何密钥。', buttons: ['知道了'] });
+    return { configured: false };
+  }
+  await dialog.showMessageBox({ type: 'info', title: '配置云端智能服务', message: '接下来会打开一个输入窗口。',
+    detail: `网关默认 ${PROVIDER_DEFAULTS.baseUrl}，模型默认 ${PROVIDER_DEFAULTS.model}；在“API key (hidden)”提示后粘贴你自己的密钥（不会显示）。密钥由 Windows DPAPI 加密保存到仓库外，不会写入项目。`,
+    buttons: ['继续'] });
+  const stamp = providerConfigurationStamp();
+  try {
+    spawn('cmd.exe', ['/c', 'start', '""', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-BaseUrl', PROVIDER_DEFAULTS.baseUrl, '-Model', PROVIDER_DEFAULTS.model], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+  } catch {
+    await dialog.showMessageBox({ type: 'warning', title: '无法打开配置窗口', message: '输入窗口没有启动。', detail: '请手动运行 scripts/configure-ai-provider.ps1。', buttons: ['知道了'] });
+    return { configured: false };
+  }
+  const deadline = Date.now() + 300_000;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (providerConfigurationStamp() > stamp) {
+      const answer = await dialog.showMessageBox({ type: 'question', title: '智能服务配置已保存', message: '现在重启暖伴以启用吗？',
+        detail: '重启不会自动开启屏幕观察或麦克风；语音与问答仍需本人每次确认。', buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1, noLink: true });
+      if (answer.response === 0) { app.relaunch(); app.exit(0); }
+      return { configured: true };
+    }
+  }
+  await dialog.showMessageBox({ type: 'warning', title: '未检测到保存', message: '没有检测到新的智能服务配置。',
+    detail: '可能取消了输入。可以再从桌宠菜单打开一次；没有保存就不会启用任何模型，也不会用模拟回答代替。', buttons: ['知道了'] });
+  return { configured: false };
+}
 function notifyLifecycle(name, origin) {
   for (const window of origin ? [origin] : [mainWindow, petTools.getWindow()]) {
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('nuanban:lifecycle', name);
@@ -212,6 +250,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     onObservationState: observation => managementVisibility.updateObservation(observation, mainWindow),
     analyzer: aiProvider ? createProviderAnalysisClient({ provider: aiProvider }) : undefined,
     questioner: aiProvider,
+    configureAiProvider,
     reminderStore, reminderNotifications, isQuitting: () => quitAfterLifecycle, hasManagementWindow: hasVisibleClientWindow, onExit: () => app.quit() });
   await Promise.all([standaloneHost.initialize(), process.argv.includes('--management') ? showMainWindow('/') : Promise.resolve()]);
 }).catch(() => {
