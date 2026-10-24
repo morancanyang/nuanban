@@ -1,5 +1,8 @@
 # 微光指引 · Windows 桌面客户端下载产物（未签名开发包）
 
+> **2026-10-24 r24：** 桌宠“智能查询”改回 **AnySearch 实时检索**（`d22fa08`）。2026-10-18 起该入口只复用本机模型、不联网，因而回答不了实时问题。现在新增 `pet-search-client.cjs` 组合供应：**配置密钥就调 `POST https://api.anysearch.com/v1/search`**（Bearer），展示来源标题/摘要与可打开原文的 HTTPS 链接，页面标注“AnySearch 实时检索”；**没有密钥**才回退本机模型并标注“未联网核验”；**AnySearch 已配置但失败时直接报错，不静默改走模型冒充检索结果**。密钥只存本机 DPAPI 加密文件（`%APPDATA%\@nuanban\desktop\nuanban-anysearch-key.bin`，69 字节密文）或环境变量，**不进仓库、不进安装包**，用 `scripts/set-anysearch-key.ps1` 写入；新增 `scripts/check-anysearch-live.cjs` 做真实调用核对，并有防泄漏测试扫描源码/脚本/测试/文档。构建来自独立干净工作树（HEAD `d22fa08`，先变基到最新远端并保留对方提交）：`tsc --noEmit` 0，相关套件 415 passed。真实调用记录：“今天北京天气”7 条、“上海今天天气怎么样”7 条、“人民币 美元 汇率”9 条结果，全部 HTTPS、来源各异，模型调用 0 次。Android 两包未重出（另一会话正在改 Android/Web，当前 Web 构建与其已发布 APK 已不一致），下载页保留此前逐文件核验过的 APK 行；旧 r23 包与页面行已移除。
+
+
 > **2026-10-24 r21：** 合并上游前端仓库 [101274017/mobiwusi](https://github.com/101274017/mobiwusi) 的界面更新并重出 Windows 客户端。
 >
 > **并入的提交**：`af987fd`（为 Web 管理端补齐全站动效层：CSS + 轻量 WAAPI）、`bd17a5d`（修复 Web 端必修无障碍缺陷：对比度、抽屉焦点、渲染兜底、页面标题）。合并基点是我们自己的 `48c3121`，即对方分支只比我们多这 2 个提交；合并提交为 `2753a0c`（`git merge mobiwusi/main`，35 个本地提交保留）。
@@ -7,7 +10,7 @@
 
 > **2026-10-24 r23：** 修复 r22 里"云端听写必定失败（`cloud_dictation_failed`）"——**根因是我自己的 bug**：录音器把 WAV 默认写到脚本所在目录，而正式环境脚本位于 `app.asar` **内部**（asar 是文件、不是目录），助手写不出文件即抛错。现在录音落到临时目录（Electron 传 `app.getPath('temp')`），asar 内路径在派生进程前就被拒绝，助手 stderr 随错误带出便于定位。同时新增：**近静音（峰值 < 0.015）不再上传**（避免识别器幻觉），并给出可操作提示且不再白跑一次本机离线识别。另外把语音弹窗标题从"本地语音输入"改为"语音输入"（里面有上传开关，原名不准确）。r22 已从下载目录撤下。
 
-> **产物核验（r23）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r23.zip` 197,338,502 字节（188.2 MiB），SHA256 `610350ac6160d90ad4c619bd5a131b946c826e19d4e3b67a2d240f86569de056`；上传后按字节核验一致，公开 HEAD 200。包内核对（解包 ASAR 后逐项读取）：解包脚本含 `peak < 0.015` 静音门限且保持纯 ASCII；`cloud-recorder.cjs` 含 `tempDir`/`os.tmpdir()`、`insideArchive(target)` 拒绝与 `detail: stderrTail`；`main.cjs` 传 `tempDir: app.getPath('temp')`；宿主含"这次几乎没有收到声音"提示并跳过离线回退；前端弹窗标题已是"语音输入"。
+> **产物核验（r23）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip` 197,342,127 字节（188.2 MiB），SHA256 `8b50b68b53d00d4b993e8ef8f1eb607ed834a3931f30fa8d15ed50bf3aba2c5a`；上传后按字节核验一致，公开 HEAD 200。包内核对（解包 ASAR 后逐项读取）：解包脚本含 `peak < 0.015` 静音门限且保持纯 ASCII；`cloud-recorder.cjs` 含 `tempDir`/`os.tmpdir()`、`insideArchive(target)` 拒绝与 `detail: stderrTail`；`main.cjs` 传 `tempDir: app.getPath('temp')`；宿主含"这次几乎没有收到声音"提示并跳过离线回退；前端弹窗标题已是"语音输入"。
 
 > **验证范围（r23）**：`pnpm typecheck` 0；本次触及套件（云听写上传/录音器/宿主/管理端/语音桥）**142 passed**；生产同构端到端：脚本经 `app.asar` 路径交给录音器（实际执行 `app.asar.unpacked` 副本）→ **14.7 秒录音、437 KB WAV、增益 ×13、临时文件自动清理**。诚实边界：**仍未做真人语音验收**；用系统 TTS 对喇叭朗读做闭环时识别成"东方的广场。"（空气传播后峰值仅 0.069），因此**不能声称识别准确**，需要用户靠近麦克风（约 10~15 厘米）实测。
 
@@ -134,7 +137,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r23.zip` | 197,338,502 字节（188.2 MiB） | `610350ac6160d90ad4c619bd5a131b946c826e19d4e3b67a2d240f86569de056` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip` | 197,342,127 字节（188.2 MiB） | `8b50b68b53d00d4b993e8ef8f1eb607ed834a3931f30fa8d15ed50bf3aba2c5a` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -179,7 +182,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r23.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -243,11 +246,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r23.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r23.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
