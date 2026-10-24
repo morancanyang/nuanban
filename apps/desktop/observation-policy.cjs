@@ -43,6 +43,16 @@ function normalizeLabel(value) {
   return typeof value === 'string' ? value.normalize('NFKC').replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F]/g, '').trim().replace(/\s+/g, ' ').toLowerCase() : '';
 }
 
+// 图形候选与文字/人脸区域只有“明显重叠”才视为被遮盖污染；像素级贴边不算，
+// 否则栅格取样与取整会让正常候选偶发触发 invalid_local_regions 并停止观察。
+function overlapsRedactedRegion(control, region) {
+  const width = Math.min(control.rect.x + control.rect.width, region.rect.x + region.rect.width) - Math.max(control.rect.x, region.rect.x);
+  const height = Math.min(control.rect.y + control.rect.height, region.rect.y + region.rect.height) - Math.max(control.rect.y, region.rect.y);
+  if (width <= 0 || height <= 0) return false;
+  const overlap = width * height;
+  return overlap > 64 && overlap > control.rect.width * control.rect.height * 0.25;
+}
+
 function recognizedControls(words) {
   const controls = [];
   let matchedCount = 0;
@@ -148,12 +158,12 @@ function evaluateFrame(frame, detection, options, selected) {
   if (detection.words.some(word => typeof word?.text !== 'string' || !word.text.length || word.text.length > 512 || !validRect(word.rect, frame.width, frame.height))
     || detection.faces.some(face => !validRect(face?.rect, frame.width, frame.height))) return deny('invalid_local_regions');
   const visualControls = detection.visualControls ?? [];
+  // 遮盖模式下，图形候选与文字/人脸区域重叠说明候选被遮盖污染，必须拒绝；
+  // 本人已关闭本机遮盖时没有遮盖区域，图标与旁边的标签天然相邻甚至重叠，不能再据此停止观察。
   if (!Array.isArray(visualControls) || visualControls.length > 48 || visualControls.some(control =>
     control?.label !== '未标注图标' || control.surface !== 'visual' || !/^[a-f0-9]{64}$/.test(control.appearance ?? '')
     || !validRect(control.rect, frame.width, frame.height)
-    || [...detection.words, ...detection.faces].some(region => control.rect.x < region.rect.x + region.rect.width
-      && region.rect.x < control.rect.x + control.rect.width && control.rect.y < region.rect.y + region.rect.height
-      && region.rect.y < control.rect.y + control.rect.height))) return deny('invalid_local_regions');
+    || (!unredactedUpload && [...detection.words, ...detection.faces].some(region => overlapsRedactedRegion(control, region))))) return deny('invalid_local_regions');
   const text = detection.words.map(word => word.text).join(' ');
   if (text.length > 20000) return deny('local_text_limit');
   if (!authorizedSharing && (isRestrictedText(text) || isRestrictedText(detection.words.map(word => word.text).join('')))) return deny('sensitive_screen', 'private');

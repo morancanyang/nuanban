@@ -102,8 +102,12 @@ function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBy
         checkAborted(signal);
         for (let row = rect.top; row < rect.bottom; row += 1) bitmap.fill(BLACK_PIXEL, (row * snapshot.width + rect.left) * 4, (row * snapshot.width + rect.right) * 4);
       }
-      const visualControls = extractVisualControls({ bitmap, width: snapshot.width, height: snapshot.height, signal,
-        exclusions: masks.map(rect => ({ x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top })) });
+      // 关闭遮盖时没有黑色遮盖块，但仍要把文字/人脸区域排除在图形候选之外，
+      // 避免把“图标+标题”整块当成一个未标注图标候选。
+      const exclusions = redacted
+        ? masks.map(rect => ({ x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top }))
+        : [...words.map(word => word.rect), ...faces.map(face => face.rect)];
+      const visualControls = extractVisualControls({ bitmap, width: snapshot.width, height: snapshot.height, signal, exclusions });
       if (!redacted) {
         // Owner-approved raw upload: the captured frame itself is what will be sent, so no masking and
         // no PNG re-encode happen here.

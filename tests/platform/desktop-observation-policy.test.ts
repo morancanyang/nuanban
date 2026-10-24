@@ -123,6 +123,24 @@ describe('独立桌宠本地帧门控（合成单测，不是真实外部软件�
     expect(evaluateLocalFrame(frame, detection)).toMatchObject({ decision: 'pause', reason: 'invalid_local_regions' });
   });
 
+  it('遮盖模式下图形候选与文字区域重叠仍然停止观察，不放宽默认门控', () => {
+    const frame = syntheticFrame();
+    const detection = syntheticDetection(frame, ['设置']);
+    const word = detection.words[0];
+    Object.assign(detection, { visualControls: [{ label: '未标注图标', surface: 'visual', appearance: 'b'.repeat(64),
+      rect: { x: word.rect.x, y: word.rect.y, width: word.rect.width, height: word.rect.height } }] });
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'pause', reason: 'invalid_local_regions' });
+  });
+
+  it('遮盖模式下像素级贴边不算污染，不会因此停止观察', () => {
+    const frame = syntheticFrame();
+    const detection = syntheticDetection(frame, ['设置']);
+    const word = detection.words[0];
+    Object.assign(detection, { visualControls: [{ label: '未标注图标', surface: 'visual', appearance: 'c'.repeat(64),
+      rect: { x: word.rect.x + word.rect.width - 2, y: word.rect.y, width: 40, height: 40 } }] });
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'allow' });
+  });
+
   it('无关正文或 OCR 抖动不使同一安全控件布局失效，控件移动或敏感内容仍被核验', () => {
     const frame = syntheticFrame();
     const detection = syntheticDetection(frame, ['文件', '编辑', '查看', '普通正文']);
@@ -563,6 +581,15 @@ describe('本人确认关闭本机遮盖后的原始帧放行（合成单测，�
     const frame = syntheticFrame();
     const detection = rawDetection(frame);
     expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'pause', reason: 'incomplete_local_detection' });
+  });
+
+  it('原始模式下与文字重叠的图形候选不再触发 invalid_local_regions', () => {
+    const frame = syntheticFrame();
+    const detection = rawDetection(frame);
+    const word = detection.words[0];
+    Object.assign(detection, { visualControls: [{ label: '未标注图标', surface: 'visual', appearance: 'a'.repeat(64),
+      rect: { x: word.rect.x, y: word.rect.y, width: word.rect.width, height: word.rect.height } }] });
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true, unredactedUpload: true })).toMatchObject({ decision: 'allow', scene: 'owner_approved_unredacted' });
   });
 
   it('原始模式仍执行检测完整性、年龄检查', () => {
