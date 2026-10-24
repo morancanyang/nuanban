@@ -206,6 +206,14 @@ textarea::placeholder { color: #8b7362; }
 .avatar-actions { display: grid; gap: 9px; }
 .avatar-motion-title { margin: 20px 0 0; font-size: 14px; }
 .avatar-motion-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.avatar-conversation { margin-top: 21px; padding-top: 14px; border-top: 1px dashed #ccb495; }
+.avatar-conversation h3 { margin: 0 0 8px; }
+.avatar-conversation .avatar-actions { margin-top: 9px; }
+.avatar-conversation-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+.avatar-conversation-controls button[hidden] { display: none; }
+.avatar-status[data-state="listening"] { border-color: var(--sage); color: var(--sage); }
+.avatar-status[data-state="thinking"], .avatar-status[data-state="speaking"] { border-color: #8b4a2a; }
+.avatar-status[data-state="error"] { border-color: var(--danger); color: var(--danger); }
 .avatar-boundaries { margin-top: 21px; padding-top: 14px; border-top: 1px dashed #ccb495; color: var(--muted); font-size: 12px; line-height: 1.8; }
 .avatar-boundaries h3 { margin: 0 0 8px; color: #66513e; font-size: 13px; }
 .avatar-boundaries p { margin: 8px 0; }

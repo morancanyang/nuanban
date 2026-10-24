@@ -61,7 +61,11 @@ function subscribeLili(channel, listener) {
 }
 contextBridge.exposeInMainWorld('nuanbanAvatar', Object.freeze({
   status: () => ipcRenderer.invoke('nuanban:avatar:status'),
-  begin: consent => ipcRenderer.invoke('nuanban:avatar:begin', consent === true),
+  begin: (consent, mode) => {
+    if (mode !== 'render' && mode !== 'conversation') throw new TypeError('形象会话模式无效');
+    return ipcRenderer.invoke('nuanban:avatar:begin', consent === true, mode);
+  },
+  confirmConversation: () => ipcRenderer.invoke('nuanban:avatar:confirm-conversation'),
   exchange: (lease, input) => {
     if (typeof lease !== 'string' || lease.length > 64 || !['POST', 'DELETE'].includes(input?.method)) throw new TypeError('形象会话请求无效');
     return ipcRenderer.invoke('nuanban:avatar:exchange', lease, { method: input.method, body: input.body });
@@ -71,7 +75,10 @@ contextBridge.exposeInMainWorld('nuanbanAvatar', Object.freeze({
   stop: () => ipcRenderer.invoke('nuanban:avatar:stop'),
   onState: listener => {
     if (typeof listener !== 'function') throw new TypeError('形象状态监听器必须是函数');
-    const handler = (_event, state) => listener({ configured: state.configured === true, phase: state.phase, message: state.message, appId: state.appId, defaultAvatarId: state.defaultAvatarId, defaultAvatarName: state.defaultAvatarName, autoReconnect: false, microphoneActive: false });
+    const handler = (_event, state) => listener({ configured: state.configured === true, phase: state.phase, message: state.message, appId: state.appId, defaultAvatarId: state.defaultAvatarId, defaultAvatarName: state.defaultAvatarName,
+      mode: state.mode === 'conversation' ? 'conversation' : 'render',
+      conversation: { enabled: state.conversation?.enabled === true, phase: typeof state.conversation?.phase === 'string' ? state.conversation.phase : 'idle' },
+      autoReconnect: false, microphoneActive: false });
     ipcRenderer.on('nuanban:avatar:state', handler);
     return () => ipcRenderer.removeListener('nuanban:avatar:state', handler);
   },
@@ -84,6 +91,25 @@ contextBridge.exposeInMainWorld('nuanbanModel', Object.freeze({
     ipcRenderer.on('nuanban:model:changed', handler);
     return () => ipcRenderer.removeListener('nuanban:model:changed', handler);
   },
+}));
+contextBridge.exposeInMainWorld('nuanbanLumi', Object.freeze({
+  describe: () => ipcRenderer.invoke('nuanban:lumi:describe'),
+  play: action => ipcRenderer.invoke('nuanban:lumi:play', typeof action === 'string' && action.length <= 40 ? action : null),
+  semantic: name => ipcRenderer.invoke('nuanban:lumi:semantic', typeof name === 'string' && name.length <= 30 ? name : null),
+  stop: () => ipcRenderer.invoke('nuanban:lumi:stop'),
+  onAction: listener => {
+    if (typeof listener !== 'function') throw new TypeError('露米动作监听器必须是函数');
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('nuanban:lumi:played', handler);
+    return () => ipcRenderer.removeListener('nuanban:lumi:played', handler);
+  },
+  onRequest: listener => {
+    if (typeof listener !== 'function') throw new TypeError('露米动作监听器必须是函数');
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('nuanban:lumi:action', handler);
+    return () => ipcRenderer.removeListener('nuanban:lumi:action', handler);
+  },
+  complete: (id, ok) => ipcRenderer.invoke('nuanban:lumi:complete', { id: typeof id === 'string' ? id : '', ok: ok === true }),
 }));
 contextBridge.exposeInMainWorld('nuanbanSearch', Object.freeze({
   status: () => ipcRenderer.invoke('nuanban:pet-search:status'),

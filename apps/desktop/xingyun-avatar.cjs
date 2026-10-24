@@ -3,6 +3,9 @@ const defaultPet = require('./default-pet.json');
 
 const GATEWAY = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session';
 const MARKER_GATEWAY = 'https://nuanban-xingyun.invalid/session';
+// 形象会话只有两种模式：render 只渲染形象（默认，今天的行为），conversation 使用星云原生实时对话
+// （星云 ASR + 星云 Brain + 星云 TTS + 口型）。非法模式在联网前拒绝，避免页面用未知模式试探网关。
+const SESSION_MODES = ['render', 'conversation'];
 const PET_AVATAR_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.xingyun3d.com https://public-xmov.oss-cn-hangzhou.aliyuncs.com; connect-src blob: data: https://*.xingyun3d.com wss://*.xingyun3d.com https://public-xmov.oss-cn-hangzhou.aliyuncs.com; worker-src 'self' blob:; media-src blob: data: https://*.xingyun3d.com https://public-xmov.oss-cn-hangzhou.aliyuncs.com; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 
 function compareCodePoints(left, right) {
@@ -36,8 +39,16 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
     : configurationMismatch ? '默认桌宠已更换为' + defaultPet.name + '；本机仍配置其他星云应用。请更新为应用 ' + defaultPet.application.editorId + ' 的完整凭证，当前不会连接旧形象。'
       : '默认' + defaultPet.name + '正在以本地静态预览显示；连接实时 3D 需要先在本机加密配置星云应用。';
   let active;
+  let lastMode = 'render';
   let disposed = false;
-  const status = () => ({ configured, configurationMismatch, phase, message, appId: credentials?.appId ?? '', defaultAvatarId: defaultPet.id, defaultAvatarName: defaultPet.name, autoReconnect: false, microphoneActive: false });
+  const conversationState = () => {
+    if (!active || active.mode !== 'conversation') return { enabled: false, phase: 'idle' };
+    if (phase === 'cleanup_failed') return { enabled: false, phase: 'cleanup_failed' };
+    if (active.stopRequested) return { enabled: false, phase: 'stopping' };
+    if (phase === 'error') return { enabled: false, phase: 'error' };
+    return { enabled: true, phase: active.sessionId ? 'active' : 'connecting' };
+  };
+  const status = () => ({ configured, configurationMismatch, phase, message, appId: credentials?.appId ?? '', defaultAvatarId: defaultPet.id, defaultAvatarName: defaultPet.name, mode: active?.mode ?? lastMode, conversation: conversationState(), autoReconnect: false, microphoneActive: false });
   function publish(next, text) { phase = next; message = text; onState(status()); }
 
   async function send(method, data) {
@@ -61,13 +72,17 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
     return body;
   }
 
-  function begin(consent) {
+  function begin(consent, mode = 'render') {
     if (disposed || !configured) throw new Error(configurationMismatch ? '本机仍是其他星云应用，请先更新为应用 ' + defaultPet.application.editorId + ' 的完整凭证。' : '星云应用尚未配置。');
     if (consent !== true) throw new Error('请本人确认联网形象服务后再启用。');
+    if (!SESSION_MODES.includes(mode)) throw new Error('形象会话模式无效，已拒绝创建会话。');
     if (active) throw new Error('已有形象会话，停止确认前不会创建第二个会话。');
-    active = { lease: randomUUID(), requestId: undefined, sessionId: undefined, postStarted: false, stopRequested: false, starting: undefined, stopping: undefined };
-    publish('connecting', '正在连接' + defaultPet.name + '；本次只尝试一个会话，不自动重连。');
-    return { lease: active.lease, appId: credentials.appId, gatewayServer: MARKER_GATEWAY };
+    lastMode = mode;
+    active = { lease: randomUUID(), mode, requestId: undefined, sessionId: undefined, postStarted: false, stopRequested: false, starting: undefined, stopping: undefined };
+    publish('connecting', mode === 'conversation'
+      ? '正在连接' + defaultPet.name + '实时对话；本模式会把麦克风音频与提问交给星云，按其平台规则计费。本次只尝试一个会话，不自动重连。'
+      : '正在连接' + defaultPet.name + '；本次只尝试一个会话，不自动重连。');
+    return { lease: active.lease, mode, appId: credentials.appId, gatewayServer: MARKER_GATEWAY };
   }
 
   function stop(reason = 'user') {
@@ -109,9 +124,16 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
     if (typeof rawAudio !== 'boolean') throw new Error('形象音频格式参数无效，请更新桌宠形象运行资源后重试。');
     attempt.postStarted = true;
     attempt.requestId = requestId;
-    attempt.starting = send('POST', { request_id: requestId, gateway_type: 'default',
-      features: { auto_send_asr_to_llm: false, speech_frontend: { enabled: false } }, session_speak_req_id: 1,
-      config: { framedata_proto_version: 2, walk_version: 3, raw_audio: rawAudio } }).then(body => {
+    // 白名单重建：页面传入的 features/ids/config 一律丢弃，只保留页面唯一有权决定的 raw_audio。
+    // conversation 模式才启用星云 ASR→Brain 与语音前端；render 模式与今天完全一致。
+    const sessionRequest = attempt.mode === 'conversation'
+      ? { request_id: requestId, gateway_type: 'default', session_speak_req_id: 1,
+        features: { auto_send_asr_to_llm: true, speech_frontend: { enabled: true, enable_aec: true } },
+        config: { framedata_proto_version: 2, walk_version: 3, raw_audio: rawAudio } }
+      : { request_id: requestId, gateway_type: 'default',
+        features: { auto_send_asr_to_llm: false, speech_frontend: { enabled: false } }, session_speak_req_id: 1,
+        config: { framedata_proto_version: 2, walk_version: 3, raw_audio: rawAudio } };
+    attempt.starting = send('POST', sessionRequest).then(body => {
       if (typeof body.data?.session_id === 'string' && body.data.session_id.length <= 256) attempt.sessionId = body.data.session_id;
       return body;
     });
@@ -131,7 +153,9 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
 
   function ready(lease) {
     if (!active || lease !== active.lease || active.stopRequested || !active.sessionId) return false;
-    publish('ready', defaultPet.name + '已启用。只接入形象，不向星云发送问答、屏幕或麦克风。');
+    publish('ready', active.mode === 'conversation'
+      ? defaultPet.name + '实时对话已就绪。麦克风音频会上传星云做识别，提问由星云模型回答，语音由星云合成，按其平台规则计费；停止即结束本次会话。'
+      : defaultPet.name + '已启用。只接入形象，不向星云发送问答、屏幕或麦克风。');
     return true;
   }
 
@@ -145,9 +169,13 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
   return Object.freeze({ status, begin, exchange, ready, fail, stop, async dispose() { disposed = true; return stop('app_exit'); } });
 }
 
-function registerXingyunAvatarBridge({ ipcMain, service, isTrusted }) {
-  const actions = { status: () => service.status(), begin: consent => service.begin(consent), exchange: (lease, input) => service.exchange(lease, input),
-    ready: lease => service.ready(lease), fail: (lease, kind) => service.fail(lease, kind), stop: () => service.stop() };
+function registerXingyunAvatarBridge({ ipcMain, service, isTrusted, confirmConversation }) {
+  const actions = { status: () => service.status(), begin: (consent, mode) => service.begin(consent, mode), exchange: (lease, input) => service.exchange(lease, input),
+    ready: lease => service.ready(lease), fail: (lease, kind) => service.fail(lease, kind), stop: () => service.stop(),
+    'confirm-conversation': async () => {
+      if (typeof confirmConversation !== 'function') return false;
+      return (await confirmConversation()) === true;
+    } };
   for (const [name, action] of Object.entries(actions)) ipcMain.handle('nuanban:avatar:' + name, (event, ...parameters) => {
     if (!isTrusted(event)) throw new Error('不可信桌宠来源');
     return action(...parameters);

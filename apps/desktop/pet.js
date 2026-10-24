@@ -1215,6 +1215,10 @@
     if (typeof section === 'string' && Object.hasOwn(sectionViews, section)) setExpanded(true, { section, focusInput: false });
   });
   bind(element('feature-avatar'), 'click', () => setExpanded(true, { section: 'avatar', focusInput: false }));
+  bind(element('feature-avatar-conversation'), 'click', () => {
+    setExpanded(true, { section: 'avatar', focusInput: false });
+    element('avatar-conversation-start')?.focus({ preventScroll: true });
+  });
   bind(document, 'keydown', event => {
     if (event.key === 'Escape' && expanded && !event.isComposing) { event.preventDefault(); setExpanded(false); }
   });

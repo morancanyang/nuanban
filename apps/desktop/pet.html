@@ -62,6 +62,7 @@
             <button class="feature-button" type="button" data-tool="/pets/draw"><strong>画一画</strong><small>亲手画，应用为桌宠原画</small></button>
             <button class="feature-button" type="button" data-tool="/pets/import-3d"><strong>本地 3D 桌宠</strong><small>导入并验证本机模型</small></button>
             <button id="feature-avatar" class="feature-button avatar-feature" type="button" aria-controls="avatar-view"><strong>默认花环水獭 · 3D</strong><small>默认形象，授权后连接实时 3D</small></button>
+            <button id="feature-avatar-conversation" class="feature-button avatar-feature" type="button" aria-controls="avatar-view"><strong>实时对话 · 星云原生</strong><small>本人确认后才开麦，音频与提问交给星云</small></button>
             <button class="feature-button" type="button" disabled><strong>AI 生成桌宠</strong><small>生成服务未接通，不提供假结果</small></button>
           </div>
           <h3 class="feature-group-title">按你的习惯陪伴</h3>
@@ -89,6 +90,15 @@
           <progress id="avatar-progress" max="100" value="0" aria-label="花环水獭资源加载进度" hidden></progress><p id="avatar-download" class="fine-print" aria-live="polite"></p>
           <label class="avatar-consent"><input id="avatar-consent" type="checkbox"><span>我同意连接星云形象服务，连接期间可能按星云平台规则计费。</span></label>
           <div class="avatar-actions"><button id="avatar-start" class="primary-button" type="button" disabled>启用花环水獭</button><button id="avatar-stop" type="button" disabled>停止并恢复原桌宠</button></div>
+          <div class="avatar-conversation" id="avatar-conversation">
+            <h3 class="avatar-motion-title">实时对话（星云 ASR + 星云模型 + 星云 TTS）</h3>
+            <p id="avatar-conversation-boundaries" class="avatar-display-state">这是单独的显式模式，默认关闭。点击“开启实时对话”后会先弹出原生确认框：确认后麦克风音频会上传星云做识别，提问由星云模型回答、语音由星云合成，按其平台规则计费；停止即结束会话，不自动重连。</p>
+            <div class="avatar-actions"><button id="avatar-conversation-start" class="primary-button" type="button" disabled>开启实时对话</button><button id="avatar-conversation-stop" type="button" disabled>停止实时对话</button></div>
+            <div class="avatar-conversation-controls"><button id="avatar-conversation-listen" type="button" hidden>暂停聆听</button><button id="avatar-conversation-interrupt" type="button" hidden>打断说话</button></div>
+            <p id="avatar-conversation-state" class="avatar-status" role="status" data-state="idle" data-asr="off">实时对话未开启。未开启时不会使用麦克风，也不会把提问交给星云。</p>
+            <p id="avatar-conversation-transcript" class="avatar-display-state" aria-live="polite"></p>
+            <p id="avatar-conversation-reply" class="avatar-display-state" aria-live="polite"></p>
+          </div>
           <h3 class="avatar-motion-title">角色动作</h3>
           <p id="avatar-motion-status" class="avatar-display-state" role="status">本地预览不包含星云动作。启用实时 3D 后，播放当前应用已发布的角色动作。</p>
           <div class="avatar-motion-grid" role="group" aria-label="星云角色动作">
@@ -97,7 +107,7 @@
             <button id="avatar-motion-listen" type="button" disabled>聆听动作</button>
             <button id="avatar-motion-think" type="button" disabled>思考动作</button>
           </div>
-          <div class="avatar-boundaries"><h3>默认形象，不默认开启采集或计费连接</h3><p>未联网时，显示从你提供的截图中裁出的同款花环水獭静态预览；它不是可离线旋转或说话的 3D 模型。本人授权后才请求星云实时形象服务。</p><p>只向星云建立形象会话、下载形象资源和发送 SDK 必需的设备/性能信息。不自动开麦、不采集屏幕，也不把已有问答发给星云。</p><p>断网或加载失败会恢复本机形象；不自动重连。已有原画和本地模型不删除。收起面板不等于停止服务，请点击“停止”结束云端会话。</p><p>App Secret 仅由本机主进程解密和代签，不进入页面。默认角色对应星云应用 188337；本机仍是其他应用时禁止连接，避免重新显示旧猴子。实时造型以该应用后台的有效配置为准。</p></div>
+          <div class="avatar-boundaries"><h3>默认形象，不默认开启采集或计费连接</h3><p>未联网时，显示从你提供的截图中裁出的同款花环水獭静态预览；它不是可离线旋转或说话的 3D 模型。本人授权后才请求星云实时形象服务。</p><p>只向星云建立形象会话、下载形象资源和发送 SDK 必需的设备/性能信息。不自动开麦、不采集屏幕，也不把已有问答发给星云。实时对话是另一个必须本人显式开启的模式：只有确认后才会开麦，并把麦克风音频与提问交给星云。</p><p>断网或加载失败会恢复本机形象；不自动重连。已有原画和本地模型不删除。收起面板不等于停止服务，请点击“停止”结束云端会话。</p><p>App Secret 仅由本机主进程解密和代签，不进入页面。默认角色对应星云应用 188337；本机仍是其他应用时禁止连接，避免重新显示旧猴子。实时造型以该应用后台的有效配置为准。</p></div>
         </section>
         <section id="archive-view" class="function-page library-page" aria-labelledby="archive-title" tabindex="-1" hidden>
           <div class="section-heading"><span class="eyebrow">学过的，一起收好</span><span class="feature-tag">桌宠内完成</span></div>

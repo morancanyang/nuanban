@@ -236,9 +236,11 @@ describe('星云桌宠主进程鉴权和会话边界', () => {
     const preload = readFileSync(new URL('../../apps/desktop/preload.cjs', import.meta.url), 'utf8');
     expect(preload).not.toContain('nuanbanAvatar');
     const renderer = readFileSync(new URL('../../apps/desktop/xingyun-renderer.js', import.meta.url), 'utf8');
-    expect(renderer).toContain('inputEnabled: false');
+    expect(renderer).toContain('audio: { inputEnabled: conversationMode }');
+    expect(renderer).toContain('currentInstance.setVolume(conversationMode ? 1 : 0)');
     expect(renderer).toContain('maxAttempts: 0');
-    expect(renderer).not.toMatch(/startASR\(|\.ask\(|getUserMedia\(/);
+    expect(renderer).not.toMatch(/\.ask\(|getUserMedia\(/);
+    expect(renderer).toMatch(/async function startListening\(token, target\) \{\n  if \(!isCurrent\(token, target\) \|\| mode !== 'conversation'\) return;/);
   });
 });
 

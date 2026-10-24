@@ -6,12 +6,36 @@ const sdkFixture = `export default class SyntheticAvatar {
     this.options = options;
     window.avatarAudit.options = { audio: options.audio, reconnect: options.reconnect, sentry: options.sentry };
     window.avatarAudit.dimensions = { width: options.container.offsetWidth, height: options.container.offsetHeight };
+    window.avatarLateCallbacks = options.agentCallbacks;
   }
-  setVolume(value) { window.avatarAudit.volume = value; }
+  setVolume(value) { window.avatarAudit.volume = value; window.avatarAudit.volumes.push(value); }
   idle() { window.avatarAudit.motions.push('idle'); }
   interactiveidle() { window.avatarAudit.motions.push('interactiveidle'); }
   listen() { window.avatarAudit.motions.push('listen'); }
   think() { window.avatarAudit.motions.push('think'); }
+  getAgentState() { return 'running'; }
+  getASRState() { return window.avatarAudit.asr; }
+  async startASR() {
+    window.avatarAudit.asrStarts++;
+    window.avatarAudit.asr = 'listening';
+    this.options.agentCallbacks.onASRStateChange('listening');
+    this.options.agentCallbacks.onASRResult({ text: '合成识别文字', isFinal: true });
+    setTimeout(() => {
+      this.options.agentCallbacks.onLLMResponse({ event: 'chunk', text: '这是合成回答' });
+      this.options.agentCallbacks.onConversationChange({ state: 'speaking', text: '这是合成回答' });
+      this.options.agentCallbacks.onSpeakStateChange({ state: 'speak_start' });
+    }, 0);
+  }
+  async stopASR() {
+    window.avatarAudit.asrStops++;
+    window.avatarAudit.asr = 'idle';
+    this.options.agentCallbacks.onASRStateChange('idle');
+  }
+  interrupt() {
+    window.avatarAudit.interrupts++;
+    this.options.agentCallbacks.onConversationChange({ state: 'interrupted' });
+    return 0;
+  }
   async init({onDownloadProgress}) {
     await fetch(this.options.gatewayServer, { method: 'POST', body: JSON.stringify({ request_id: 'synthetic-request' }) });
     onDownloadProgress(100);
@@ -37,10 +61,11 @@ async function fixture(page: Page, mode = 'ready') {
     return route.fulfill({ body: readFileSync(new URL('../../apps/desktop/' + filename, import.meta.url)), contentType: filename.endsWith('.html') ? 'text/html; charset=utf-8' : filename.endsWith('.css') ? 'text/css' : 'text/javascript' });
   });
   await page.addInitScript(({ mode }) => {
-    const audit = { begins: 0, exchanges: 0, stops: 0, failures: 0, destroyed: 0, management: 0, microphones: 0, menus: 0, drags: [] as string[], motions: [] as string[] };
+    const audit = { begins: 0, exchanges: 0, stops: 0, failures: 0, destroyed: 0, management: 0, microphones: 0, menus: 0, drags: [] as string[], motions: [] as string[],
+      confirms: 0, modes: [] as string[], asrStarts: 0, asrStops: 0, interrupts: 0, volumes: [] as number[], asr: 'idle' };
     let listener: ((value: unknown) => void) | undefined;
     let runtimeListener: ((value: unknown) => void) | undefined;
-    let state = { configured: mode !== 'mismatch', configurationMismatch: mode === 'mismatch', phase: mode === 'mismatch' ? 'unconfigured' : 'idle', message: mode === 'mismatch' ? '本机仍是其他星云应用，请先更新为应用 188337 的完整凭证。' : '本机应用已配置', appId: '031ce3cd-synthetic-application' };
+    let state = { configured: mode !== 'mismatch', configurationMismatch: mode === 'mismatch', phase: mode === 'mismatch' ? 'unconfigured' : 'idle', message: mode === 'mismatch' ? '本机仍是其他星云应用，请先更新为应用 188337 的完整凭证。' : '本机应用已配置', appId: '031ce3cd-synthetic-application', mode: 'render', conversation: { enabled: false, phase: 'idle' } };
     const publish = (phase: string, message: string) => { state = { ...state, phase, message }; listener?.(state); return state; };
     const runtime = { observation: { state: 'off', generation: 1, captureActive: false }, task: { state: 'idle' }, analysis: { state: 'idle' }, captions: { enabled: false }, wake: { state: 'disabled', microphoneActive: false }, voice: { active: false, microphoneActive: false } };
     Object.assign(window, { avatarAudit: audit, avatarMode: mode, nuanbanPet: {
@@ -49,11 +74,19 @@ async function fixture(page: Page, mode = 'ready') {
       openMain: async () => { audit.management++; }, openTool: async () => { audit.management++; }, dictate: async () => { audit.microphones++; }, showMenu: async () => { audit.menus++; return true; },
     }, nuanbanAvatar: {
       status: async () => state, onState: (callback: (value: unknown) => void) => { listener = callback; return () => { listener = undefined; }; },
-      begin: async (consent: boolean) => { if (!state.configured || !consent) throw new Error('matching application and consent required'); audit.begins++; publish('connecting', '正在连接'); return { lease: 'synthetic-lease', appId: state.appId, gatewayServer: 'https://nuanban-xingyun.invalid/session' }; },
+      begin: async (consent: boolean, selected = 'render') => {
+        if (!state.configured || !consent) throw new Error('matching application and consent required');
+        audit.begins++;
+        audit.modes.push(selected);
+        state = { ...state, mode: selected, conversation: { enabled: selected === 'conversation', phase: 'connecting' } };
+        publish('connecting', '正在连接');
+        return { lease: 'synthetic-lease', mode: selected, appId: state.appId, gatewayServer: 'https://nuanban-xingyun.invalid/session' };
+      },
+      confirmConversation: async () => { audit.confirms++; return mode !== 'conversation-cancel'; },
       exchange: async () => { audit.exchanges++; return { status: 200, body: { error_code: 0, data: { resource_pack: {} } } }; },
       ready: async () => { publish('ready', '花环水獭已启用'); return true; },
       fail: async () => { audit.failures++; return publish('error', '加载失败；不会自动重连'); },
-      stop: async () => { audit.stops++; publish('stopping', '正在停止'); return { stopped: true, ...publish('idle', '云端会话已停止，恢复本机桌宠') }; },
+      stop: async () => { audit.stops++; publish('stopping', '正在停止'); state = { ...state, conversation: { enabled: false, phase: 'idle' } }; return { stopped: true, ...publish('idle', '云端会话已停止，恢复本机桌宠') }; },
     } });
     window.addEventListener('test-avatar-messages', event => {
       Object.assign(runtime, { messages: (event as CustomEvent).detail });
@@ -306,4 +339,82 @@ test('加载中停止，迟到的初始化结果不能重新显示或创建会�
   await expect(page.locator('#xingyun-pet')).toBeHidden();
   await expect(page.locator('#builtin-pet')).toBeVisible();
   expect(await audit(page)).toMatchObject({ begins: 1, destroyed: 1, stops: 1 });
+});
+
+async function recordConversationEvents(page: Page) {
+  await page.evaluate(() => {
+    (window as unknown as { avatarConversationLog: string[] }).avatarConversationLog = [];
+    window.addEventListener('nuanban:avatar-conversation', event => {
+      const detail = (event as CustomEvent).detail as { state: string; asr: string };
+      (window as unknown as { avatarConversationLog: string[] }).avatarConversationLog.push(detail.state + ':' + detail.asr);
+    });
+  });
+}
+
+test('实时对话必须本人确认：取消后不开会话、不开麦，也不改变形象会话', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await fixture(page, 'conversation-cancel');
+  await page.locator('#view-features').click();
+  await page.locator('#feature-avatar-conversation').click();
+  await expect(page.locator('#avatar-view')).toBeVisible();
+  await expect(page.locator('#avatar-conversation-start')).toBeFocused();
+  await expect(page.locator('#avatar-conversation-start')).toBeEnabled();
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'idle');
+  await page.locator('#avatar-conversation-start').click();
+  await expect(page.locator('#avatar-conversation-state')).toContainText('已取消');
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'cancelled');
+  expect(await audit(page)).toMatchObject({ confirms: 1, begins: 0, exchanges: 0, asrStarts: 0, asrStops: 0, destroyed: 0, stops: 0 });
+  expect(errors).toEqual([]);
+});
+
+test('实时对话确认后开麦聆听、显示识别与回答，停止确认关闭且不残留 ASR', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await fixture(page, 'conversation');
+  await recordConversationEvents(page);
+  await page.locator('#view-features').click();
+  await page.locator('#feature-avatar-conversation').click();
+  await expect(page.locator('#avatar-conversation-start')).toBeFocused();
+  await page.locator('#avatar-conversation-start').click();
+  await expect(page.locator('#avatar-conversation-transcript')).toContainText('合成识别文字');
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'speaking');
+  await expect(page.locator('#avatar-conversation-reply')).toContainText('这是合成回答');
+  await expect(page.locator('#avatar-motion-idle')).toBeDisabled();
+  await expect.poll(async () => page.evaluate(() => (window as unknown as { avatarConversationLog: string[] }).avatarConversationLog))
+    .toEqual(expect.arrayContaining(['listening:listening', 'speaking:listening']));
+  expect(await audit(page)).toMatchObject({ begins: 1, confirms: 1, modes: ['conversation'], asrStarts: 1, asrStops: 0,
+    volume: 1, volumes: [1], exchanges: 1, destroyed: 0, stops: 0,
+    options: { audio: { inputEnabled: true }, reconnect: { enabled: false, maxAttempts: 0 }, sentry: { enabled: false } } });
+  await page.locator('#avatar-conversation-stop').click();
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'stopped');
+  await expect(page.locator('#xingyun-pet')).toBeHidden();
+  expect(await audit(page)).toMatchObject({ begins: 1, asrStarts: 1, asrStops: 1, destroyed: 1, stops: 1, asr: 'idle' });
+  expect(errors).toEqual([]);
+});
+
+test('实时对话停止后，迟到的 ASR、回答与连接回调被 generation 丢弃', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await fixture(page, 'conversation');
+  await page.locator('#avatar-conversation-start').click();
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'speaking');
+  await page.locator('#avatar-conversation-stop').click();
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'stopped');
+  await page.evaluate(() => {
+    const callbacks = (window as unknown as { avatarLateCallbacks: Record<string, (value: unknown) => void> }).avatarLateCallbacks;
+    callbacks.onASRResult({ text: '迟到的识别', isFinal: true });
+    callbacks.onConversationChange({ state: 'speaking' });
+    callbacks.onLLMResponse({ event: 'chunk', text: '迟到的回答' });
+    callbacks.onASRStateChange('listening');
+    callbacks.onSocketStateChange('closed');
+    callbacks.onError({ code: 'synthetic-late', domain: 'network' });
+  });
+  await expect(page.locator('#avatar-conversation-state')).toHaveAttribute('data-state', 'stopped');
+  await expect(page.locator('#avatar-conversation-transcript')).not.toContainText('迟到的识别');
+  await expect(page.locator('#avatar-conversation-reply')).not.toContainText('迟到的回答');
+  await page.waitForTimeout(300);
+  await expect(page.locator('#avatar-status')).toHaveAttribute('data-phase', 'idle');
+  expect(await audit(page)).toMatchObject({ begins: 1, exchanges: 1, asrStarts: 1, asrStops: 1, destroyed: 1, stops: 1, failures: 0 });
+  expect(errors).toEqual([]);
 });

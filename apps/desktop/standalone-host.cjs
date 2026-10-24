@@ -72,6 +72,9 @@ function createStandaloneHost(options) {
   let dictationBridge = null;
   let avatarService = null;
   let avatarBridge = null;
+  // 实时对话的麦克风放行令牌：只在对话会话运行期间存在，停止、销毁或窗口消失立即撤销。
+  let avatarPermissionToken;
+  const xingyunPermissions = options.xingyunPermissions;
   let expanded = false;
   let collapsed = false;
   let restoreBounds = null;
@@ -994,9 +997,32 @@ function createStandaloneHost(options) {
     listeners.push(() => emitter.removeListener(event, callback));
   }
 
+  function syncConversationPermission(avatarState) {
+    if (!xingyunPermissions) return;
+    const active = avatarState?.mode === 'conversation' && avatarState?.conversation?.enabled === true && live(petWindow);
+    if (active) {
+      if (avatarPermissionToken === undefined) {
+        try { avatarPermissionToken = xingyunPermissions.arm(petWindow.webContents); }
+        catch { avatarPermissionToken = undefined; }
+      }
+      return;
+    }
+    if (avatarPermissionToken !== undefined) {
+      xingyunPermissions.disarm(avatarPermissionToken);
+      avatarPermissionToken = undefined;
+    }
+  }
+
+  function revokeAvatarPermission() {
+    if (avatarPermissionToken === undefined) return;
+    xingyunPermissions?.disarm(avatarPermissionToken);
+    avatarPermissionToken = undefined;
+  }
+
   async function initialize() {
     const avatarCredentials = await (options.loadAvatarCredentials ?? loadXingyunCredentials)().catch(() => undefined);
     avatarService = createXingyunAvatarService({ credentials: avatarCredentials, onState: state => {
+      syncConversationPermission(state);
       if (live(petWindow)) petWindow.webContents.send('nuanban:avatar:state', state);
     } });
     try {
@@ -1021,7 +1047,7 @@ function createStandaloneHost(options) {
     guideWindow.setIgnoreMouseEvents(true, { forward: true });
     captionWindow.setIgnoreMouseEvents(true, { forward: true });
     petWindow.on('close', event => { if (!options.isQuitting()) { event.preventDefault(); runAction(closePetWindow); } });
-    petWindow.on('closed', () => { petWindow = null; if (!options.isQuitting()) options.onExit(); });
+    petWindow.on('closed', () => { revokeAvatarPermission(); petWindow = null; if (!options.isQuitting()) options.onExit(); });
     petWindow.on('focus', () => {
       clearTimeout(blurTimer);
       blurTimer = null;
@@ -1085,7 +1111,14 @@ function createStandaloneHost(options) {
     handle('nuanban:pet:open-main', route => { if (typeof route !== 'string' || !managementRoutes.has(route)) throw new Error('管理页面不存在'); return options.showManagement(route); });
     handle('nuanban:pet:open-tool', openPetTool);
     handle('nuanban:pet:close', closePetWindow);
-    avatarBridge = registerXingyunAvatarBridge({ ipcMain, service: avatarService, isTrusted: event => trusted(event, petWindow, petPath) });
+    avatarBridge = registerXingyunAvatarBridge({ ipcMain, service: avatarService, isTrusted: event => trusted(event, petWindow, petPath),
+      confirmConversation: () => showDialog({
+        type: 'warning',
+        title: '开启星云实时对话',
+        message: '确认开启实时对话？麦克风音频与提问会交给星云。',
+        detail: '开启后，麦克风音频会上传星云做语音识别，你的提问由星云模型回答、语音由星云合成，并会按星云平台规则计费。\n对话期间按“停止实时对话”即结束本次会话；不会自动重连，也不会在下次启动时自动恢复。',
+        buttons: ['开启实时对话', '取消'], defaultId: 1, cancelId: 1, noLink: true,
+      }).then(result => result?.response === 0) });
     dictationBridge = registerDictationBridge({ ipcMain, prefix: 'nuanban:pet:voice', isTrusted: event => trusted(event, petWindow, petPath),
       getHost: () => ({ hasPetWindow: () => live(petWindow), requestVoiceDictation }) });
     searchBridge = registerPetSearchBridge({ ipcMain, isTrusted: event => trusted(event, petWindow, petPath),
@@ -1121,6 +1154,7 @@ function createStandaloneHost(options) {
   }
 
   async function dispose(reason) {
+    revokeAvatarPermission();
     singleFrameEpoch += 1;
     clearTimeout(idleTimer);
     idleTimer = null;

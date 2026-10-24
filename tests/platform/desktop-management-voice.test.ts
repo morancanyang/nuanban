@@ -114,7 +114,7 @@ describe('管理端语音入口：仅桥接独立桌宠，默认不启麦（合�
     expect(current.handlers.size).toBe(0);
   });
 
-  it('preload 不传 renderer 自带的参数，且主进程保持全局拒绝权限', async () => {
+  it('preload 不传 renderer 自带的参数，且主进程权限默认全拒', async () => {
     const exposed = new Map<string, Record<string, (...argumentsList: unknown[]) => Promise<unknown>>>();
     const invoke = vi.fn(async (_channel: string) => disabled);
     runInNewContext(read('preload.cjs'), {
@@ -128,8 +128,10 @@ describe('管理端语音入口：仅桥接独立桌宠，默认不启麦（合�
       expect(invoke).toHaveBeenLastCalledWith(`nuanban:voice:${channel}`);
     }
     const main = read('main.cjs');
-    expect(main).toContain('setPermissionRequestHandler((_contents,_permission,callback)=>callback(false))');
-    expect(main).toContain('setPermissionCheckHandler(()=>false)');
+    expect(main).toContain('createXingyunConversationPermissionGuard');
+    expect(main).toContain('xingyunPermissions.install(session.defaultSession)');
+    expect(main).not.toMatch(/callback\(true\)/);
+    expect(main).not.toMatch(/setPermissionCheckHandler\(\(\)\s*=>\s*true\)/);
     expect(main).toContain("electron.shell.openExternal('ms-settings:privacy-microphone')");
     expect(read('standalone-host.cjs')).toContain('requestLocalVoice: enableWake, stopLocalVoice: disableWake');
   });

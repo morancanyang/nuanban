@@ -22,9 +22,45 @@
 - 需要在本机使用下述脚本录入新应用的完整 App ID，并在隐藏输入中填写密钥；不要把密钥写入代码、日志或聊天。保存后在结束当前工作及会话后重启宿主。
 - 新截图显示工作台应用 188337 处于“已连接”状态，但这不等于本产品已经完成新应用的真实渲染验收。旧猴子应用的 1008 记录不能直接套用于新应用。
 
+## 实时对话模式（星云原生链路，2026-10-24 新增）
+
+所有者已选 A：星云 ASR + 星云 Brain + 星云 TTS + 口型。该模式是独立的显式入口，默认关闭；不开启时与既能行为完全一致（`setVolume(0)`、不调用 ASR/ask、不开麦）。
+
+### 两种模式的差异
+
+| | render（默认） | conversation（实时对话） |
+| --- | --- | --- |
+| 触发 | “启用花环水獭”+ 联网确认勾选 | “开启实时对话”+ 原生确认框 |
+| 网关 request_id | 沿用，一次授权一次 POST | 同左 |
+| `features` | `auto_send_asr_to_llm: false`、`speech_frontend: { enabled: false }` | `auto_send_asr_to_llm: true`、`speech_frontend: { enabled: true, enable_aec: true }` |
+| `session_speak_req_id` / `config` | `1` / 固定版本号 + 页面布尔 `raw_audio` | 同左 |
+| 麦克风 | 不开麦，`audio.inputEnabled: false` | 本人在场确认后开麦，`audio.inputEnabled: true` |
+| 输出音量 | `setVolume(0)` | `setVolume(1)` |
+| 音频与提问去向 | 不出本机 | 交给星云（ASR + Brain + TTS），按其平台规则计费 |
+
+页面传入的 `features`、`asr_id`/`llm_id`/`tts_config`/`brain_config`/`extras`、`gateway_type`、`session_speak_req_id`、任意 URL 与未知键都不透传；主进程仍按白名单重建，`config.raw_audio` 仍必须是布尔值，否则在联网前拒绝。响应中的 `data.e2e_resp`（含 `ws_url`/`e2e_token`）按原样经 `exchange` 回给页面，无需额外代理。
+
+### 用户操作与确认
+
+桌宠功能小屋 →“实时对话 · 星云原生”，或形象页内的“开启实时对话”。点击后先弹出**原生确认框**（主进程 `dialog.showMessageBox`，默认按钮为“取消”），写明：麦克风音频会上传星云做识别、提问由星云模型回答、语音由星云合成、按星云平台规则计费、停止即结束会话、不自动重连。只有本人选择“开启实时对话”后，主进程才创建会话并放行麦克风；取消则麦克风保持关闭。
+
+对话中显示聆听/思考/说话状态、识别文字与回答，并提供“暂停聆听/继续聆听”“打断说话”。点击“停止实时对话”即结束本次会话并确认星云会话关闭；不自动重连，下次启动不会自动恢复。识别文字与回答只通过页面事件 `nuanban:avatar-conversation` 暴露，控制事件为 `nuanban:avatar-conversation-command`（`start-asr`/`stop-asr`/`interrupt`）。
+
+### 麦克风权限边界
+
+- 默认会话仍是默认拒绝：`main.cjs` 安装 `xingyun-permission-guard.cjs` 的闸门，对非桌宠窗口、非 `media` 权限、`media` 中的视频请求一律拒绝，屏幕采集始终拒绝；不存在全局放开。
+- 放行需同时满足：`permission === 'media'`、`webContents` 就是开启对话时的桌宠窗口、页面 URL 与会话开启时一致、主 frame、媒体类型只含音频/未知，且**运行时“本人已开启对话”标志为真**。`setPermissionCheckHandler` 与 `setPermissionRequestHandler` 用同一谓词判定。
+- 该标志与会话代次绑定：停止、失败、销毁、关闭窗口或退出时立即撤销；停止后迟到的权限请求一律拒绝（防“停止后仍被开麦”）。
+- 渲染端销毁路径先 `stopASR()` 再 `destroy()`，所有 SDK 回调按 generation 丢弃迟到结果。
+
+### 未验证
+
+- **没有发起任何真实星云会话**（额度/计费），也没有真机开麦验收；`wss://e2emp.xingyun3d.com` 的实际音频链路、口型同步与计费口径均未在本机验证。
+- 没有验证打包后的 Electron 在 `file://` 页面开麦所需的全部运行时条件，也没有验证系统/驱动层面拒绝麦克风时的表现。
+
 ## 使用与配置
 
-桌宠右键 → “星云花环水獭 · 3D 形象”，或功能小屋 → “默认花环水獭 · 3D”，进入专属页面。本机应用匹配后，确认联网服务说明并点击“启用花环水獭”。使用页面按钮或右键“停止星云形象（恢复本机桌宠）”结束服务。收起面板不代表远端会话停止。
+桌宠右键 → “星云花环水獭 · 3D 形象”，或功能小屋 → “默认花环水獭 · 3D”，进入专属页面。本机应用匹配后，确认联网服务说明并点击“启用花环水獭”。使用页面按钮或右键“停止星云形象（恢复本机桌宠）”结束服务。收起面板不代表远端会话停止。同一页面还提供“开启实时对话”入口，必须经原生确认框同意后才会开麦并把音频与提问交给星云，详见上文“实时对话模式”。
 
 根目录执行以下命令并替换 App ID；App Secret 通过隐藏输入获取，不作为命令行参数：
 
@@ -43,7 +79,7 @@ pnpm desktop:avatar:build
 - 使用 `/user/v1/ttsa_v2/session`，不额外添加 `tag`；只接收 SDK 检测得到的布尔型 `config.raw_audio`，不覆盖为固定格式。该字段只用于输出音频格式协商，不代表麦克风授权；缺失或非布尔值在联网前拒绝，其他配置仍由主进程白名单重建。
 - 签名遵循官方 SDK 的 Unicode 码点递归排序、非 ASCII JSON 转义和 MD5 算法。
 - 每次显式授权最多一次 POST。Agent 重连关闭，旧授权及重复 POST 被主进程拒绝；失败只能重新确认后手动重试。
-- 不调用 `startASR` 或 `ask`；输入音频、自动 ASR→LLM、Sentry 上报关闭，输出音量为零。原有问答与语音使用原来的独立权限和服务。
+- 不调用 `startASR` 或 `ask`；输入音频、自动 ASR→LLM、Sentry 上报关闭，输出音量为零。原有问答与语音使用原来的独立权限和服务。这是默认的 **render 模式**；显式的 **conversation（实时对话）模式**见下文，两种模式互斥，默认仍是 render。
 - 会话会收发 SDK 必需的设备/性能信息、资源及控制数据；不是完全离线服务。
 - 仅桌宠 CSP 允许星云资源及实际会话返回的固定资源域名 `https://public-xmov.oss-cn-hangzhou.aliyuncs.com`；该 OSS 域名只加入图片、连接和媒体白名单，不允许任意 OSS 域名、远程脚本或 `unsafe-eval`。HTML 元策略与主进程响应头策略一致，客户端 CSP 不放宽，客户端 preload 不暴露会话桥接。
 - 关闭、退出、Renderer 故障及全局停止均清理远端会话。在途创建先等待返回，再以 request/session ID 关闭，防止孤儿会话。停止失败如实提示并阻止新会话。
@@ -84,6 +120,14 @@ node scripts/test-xingyun-avatar.mjs --simulate
 - 使用真实 SDK 和本机加密配置完成一次实时动作验证：待机、互动待机、聆听、思考四种状态均发送到实际 WebSocket，收到 7 个动作数据包与 60 个二进制数据包，四次形象截图哈希各不相同。报告位于 `.cache/xingyun-avatar-check-1792402233347/report.json`，透明桌宠截图位于同目录 `live-desktop-pet.png`。这验证了真实状态切换和动态渲染，不等于逐一验收后台所有自定义动作或未发布的编辑器配置。
 - 本次真实验证只有一次 POST、一次 DELETE，均为 HTTP 200、业务码 0，测试会话已正常释放；无自动重连、麦克风或屏幕采集。重开产品仍为本地预览，必须本人在独立 3D 页面确认后启用，不因测试成功而静默恢复计费会话。
 - 桌宠界面两种视口回归共 20 项通过，相关平台测试 248 项通过，类型检查和形象构建通过。动作入口只放在桌宠独立 3D 页面，普通悬浮态和管理客户端界面不增加控制项。
+
+## 实时对话的实现验证（2026-10-24，无真实会话）
+
+- 单测：`pnpm exec vitest run tests/platform/desktop-xingyun-avatar.test.ts tests/platform/desktop-xingyun-conversation.test.ts tests/platform/desktop-management-voice.test.ts` → 31 + 16 + 19 = 66 项通过；相关桌宠宿主与页面回归 `desktop-standalone-host.test.ts`（79）、`desktop-pet-ui.test.ts`（203）一并通过。
+- 页面功能回归（合成 SDK 与假桥，不联网、不启真麦）：`$env:PLAYWRIGHT_CHANNEL='msedge'; pnpm exec playwright test --config tests/helpers/desktop-pet-playwright.config.ts desktop-pet-avatar.spec.ts` → 26 项通过（13 用例 × 400×760 / 330×520 两种视口）。新增 3 项实时对话用例：原生确认取消后不开会话、不开麦；确认后 `setVolume(1)`、`audio.inputEnabled: true`、`startASR` 一次、状态机日志出现 `listening→speaking`、识别文字与回答上屏、停止后 `stopASR` 与 `destroy` 各一次；停止后迟到的 ASR/回答/断线回调被 generation 丢弃。
+- 权限闸门单测覆盖：未开启对话全拒、只放行 `media` 音频、必须同一桌宠窗口与同一页面、`isMainFrame`/`requestingUrl`/视频/子框架被拒、停止后立即失效、迟到撤销不会注销新会话、屏幕采集始终拒绝。
+- `pnpm exec tsc --noEmit` 退出码 0；`pnpm desktop:avatar:build` 成功。
+- **未执行**：任何真实星云会话（额度/计费）、真实麦克风开麦、打包后的 Electron 桌面运行。上述结果全部是合成/本地验证，不构成实时对话的真机验收。
 
 ## 旧猴子应用历史记录
 

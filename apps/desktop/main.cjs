@@ -22,6 +22,7 @@ const { createDesktopReminderStore, createSafeStoragePayloadCodec } = require('.
 const { createDesktopReminderNotificationBridge } = require('./reminder-notification-bridge.cjs');
 const { createWindowsCapabilityPolicy } = require('./native-runtime.cjs');
 const { PET_AVATAR_CSP } = require('./xingyun-avatar.cjs');
+const { createXingyunConversationPermissionGuard } = require('./xingyun-permission-guard.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
@@ -46,6 +47,8 @@ let textQuestionBridge;
 let aiProvider;
 let workspaceBridge;
 const captureVisibility = createCaptureVisibility(process.argv);
+// 默认会话保持默认拒绝：唯一的例外是“本人已开启对话”的桌宠窗口的音频采集，由该闸门按会话代次放行。
+const xingyunPermissions = createXingyunConversationPermissionGuard();
 const managementVisibility = createManagementWindowVisibility({ displayCompatible: captureVisibility.clientVisible });
 const petTools = createPetToolWindow({ BrowserWindow, getIndexPath: managementIndex, preloadPath: path.join(__dirname, 'preload.cjs'),
   onLifecycle: (name, window) => {
@@ -178,8 +181,7 @@ app.on('second-instance', (_event, argumentsList) => {
   else standaloneHost?.showPetPanel();
 });
 if (ownsInstance) app.whenReady().then(async () => {
-  session.defaultSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
-  session.defaultSession.setPermissionCheckHandler(()=>false);
+  xingyunPermissions.install(session.defaultSession);
   session.defaultSession.webRequest.onHeadersReceived((details,callback)=>callback({responseHeaders:{...details.responseHeaders,'Content-Security-Policy':[details.webContentsId === standaloneHost?.getPetWindow()?.webContents.id ? PET_AVATAR_CSP : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src blob: data:; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'"]}}));
   try {
     reminderStore = createDesktopReminderStore({ databasePath: path.join(app.getPath('userData'), 'nuanban-reminders.sqlite'), payloadCodec: createSafeStoragePayloadCodec(safeStorage) });
@@ -205,7 +207,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     cloudRecorder = createCloudRecorder({ scriptPath: path.join(__dirname, 'voice', 'windows-cloud-dictation.ps1'), tempDir: app.getPath('temp') });
   } catch { cloudSettings = undefined; cloudRecorder = undefined; }
   registerBridge();
-  standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow,
+  standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow, xingyunPermissions,
     ...(cloudDictation ? { cloudDictation } : {}), ...(cloudRecorder ? { cloudRecorder } : {}), ...(cloudSettings ? { cloudSettings } : {}),
     liliEnabled: process.argv.includes('--pet-lili') || (!process.argv.includes('--pet-default') && process.env.NUANBAN_DESKTOP_PET === 'lili'),
     petDisplayCompatible: captureVisibility.petVisible || process.argv.includes('--pet-display-compatible'),
