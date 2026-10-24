@@ -54,6 +54,8 @@ function createProviderAnalysisClient({ provider, now = Date.now } = {}) {
     capabilities() { return { configured: typeof provider?.answer === 'function', protocol: 'standalone-guidance-v1' }; },
     async analyze(input) {
       if (typeof provider?.answer !== 'function') throw failure('ANALYSIS_UNAVAILABLE');
+      // 本机纯文字模型看不到图片；直接给出准确原因，而不是让模型解释一张它根本没看到的画面。
+      if (provider.vision === false) throw failure('ANALYSIS_VISION_REQUIRED');
       if (!input || input.signal?.aborted || typeof input.canSend !== 'function' || !input.canSend()
         || !isAdmittedFrame(input.frame, now()) || typeof input.question !== 'string' || !input.question.trim()
         || input.question.length > 1500 || isRestrictedText(input.question)) throw failure('OUTBOUND_CLOSED');
