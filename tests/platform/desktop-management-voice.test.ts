@@ -7,13 +7,15 @@ import { checkedVoiceStatus, localVoiceBridge } from '../../apps/web/src/local-v
 const { registerManagementVoiceBridge } = createRequire(import.meta.url)('../../apps/desktop/management-voice-bridge.cjs');
 type Handler = (event: unknown, ...argumentsList: unknown[]) => unknown;
 const read = (file: string) => readFileSync(new URL(`../../apps/desktop/${file}`, import.meta.url), 'utf8');
-const disabled = { phase: 'disabled' as const, enabled: false, microphoneActive: false, dictationAvailable: true, localOnly: true as const, message: '本地语音未开启' };
+const cloudDictation = { enabled: false, available: false };
+const disabled = { phase: 'disabled' as const, enabled: false, microphoneActive: false, dictationAvailable: true, localOnly: true as const, message: '本地语音未开启', cloudDictation };
 
 function fixture() {
   const event = {};
   const handlers = new Map<string, Handler>();
   let wake = { ...disabled, phase: 'disabled', reason: disabled.message };
   const host = { hasPetWindow: vi.fn(() => true), showPetPanel: vi.fn(), snapshot: () => ({ wake }),
+    cloudDictationStatus: vi.fn(() => cloudDictation), setCloudDictation: vi.fn(async (enabled: boolean) => ({ enabled })),
     requestLocalVoice: vi.fn(async () => { wake = { ...wake, phase: 'listening', enabled: true, microphoneActive: true }; }),
     stopLocalVoice: vi.fn(async () => { wake = { ...wake, phase: 'disabled', enabled: false, microphoneActive: false }; }) };
   const openMicrophoneSettings = vi.fn(async () => undefined);
@@ -26,6 +28,27 @@ function fixture() {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('管理端语音入口：仅桥接独立桌宠，默认不启麦（合成依赖）', () => {
+  it('云端听写开关只按原生返回值刷新，用户取消时保持关闭', async () => {
+    const current = fixture();
+    expect(await current.invoke('status')).toMatchObject({ cloudDictation: { enabled: false, available: false } });
+    current.host.setCloudDictation.mockResolvedValueOnce({ enabled: true });
+    await expect(current.invoke('set-cloud-dictation', true)).resolves.toEqual({ enabled: true });
+    expect(current.host.setCloudDictation).toHaveBeenCalledWith(true);
+    current.host.setCloudDictation.mockResolvedValueOnce({ enabled: false });
+    await expect(current.invoke('set-cloud-dictation', true)).resolves.toEqual({ enabled: false });
+    await expect(current.invoke('set-cloud-dictation', 'yes')).resolves.toEqual({ enabled: false });
+    expect(current.host.setCloudDictation).toHaveBeenLastCalledWith(false);
+  });
+
+  it('未配置网关或宿主未就绪时拒绝开启云端听写', async () => {
+    const current = fixture();
+    current.host.setCloudDictation.mockRejectedValueOnce(new Error('本机尚未配置可用的模型网关，云端听写不可用'));
+    await expect(current.invoke('set-cloud-dictation', true)).rejects.toThrow('模型网关');
+    const missing = fixture();
+    delete (missing.host as { setCloudDictation?: unknown }).setCloudDictation;
+    await expect(missing.invoke('set-cloud-dictation', true)).rejects.toThrow('尚未就绪');
+  });
+
   it('读取状态不探测、不申请权限、不打开系统设置，也不泄露额外运行时字段', () => {
     const current = fixture();
     const status = current.invoke('status');
