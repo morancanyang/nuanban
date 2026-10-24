@@ -185,7 +185,7 @@ node infra/windows/tools/push-downloads.mjs --instance i-2zedkag2x1e9e610v8jh
 
 | 产物 | URL | 大小（字节） | SHA256 |
 | --- | --- | --- | --- |
-| Windows 桌面便携包（未签名） | `http://59.110.19.225/downloads/NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip` | 197342127 | `8b50b68b53d00d4b993e8ef8f1eb607ed834a3931f30fa8d15ed50bf3aba2c5a` |
+| Windows 桌面便携包（未签名） | `http://59.110.19.225/downloads/NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip` | 215346710 | `ed0e9e7b55619a479fcf077549058f2019c924020802ca4e8a8d350bbef6e406` |
 | Android 普通客户端（debug） | `http://59.110.19.225/downloads/nuanban-android-app-debug.apk` | 7,299,930 | `1edbb6b70fa5fe70bd69e41d2565d57af1845116994d773a5a75916424f9517b` |
 | Android 独立桌宠（debug） | `http://59.110.19.225/downloads/nuanban-android-standalone-debug.apk` | 90,449,909 | `0b5b0e3daf440b27a9fb6b4e09a08c3006995555883718ce3e48ab9a0ea3449c` |
 | 下载页 | `http://59.110.19.225/downloads/` | — | 页面内联同样哈希 |

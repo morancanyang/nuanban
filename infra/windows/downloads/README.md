@@ -4,13 +4,20 @@
 
 
 > **2026-10-24 r21：** 合并上游前端仓库 [101274017/mobiwusi](https://github.com/101274017/mobiwusi) 的界面更新并重出 Windows 客户端。
+
+> **2026-10-24 r25：** 接入**星云原生实时对话**（所有者选择"模式 A"：星云 ASR + 星云 Brain + 星云 TTS + 口型），默认仍是"仅形象渲染"，对话必须由本人在原生窗口逐次开启。平台侧由 lead 先实测确认：对话模式会话 POST（`features:{auto_send_asr_to_llm:true, speech_frontend:{enabled:true, enable_aec:true}}`）返回 `error_code 0`、`resource_pack` 与 **`e2e_resp.{ws_url:'wss://e2emp.xingyun3d.com/...', e2e_token, features}`**，探测会话随后关闭（重复 DELETE 返回"无效的 session"，未留下计费会话）。实现要点：`begin(consent, mode)` 只接受 `render|conversation`；对话模式的会话体由**主进程白名单重建**（页面传入的 features/ids/config 一律丢弃，`raw_audio` 仍须布尔）；新增 `xingyun-permission-guard.cjs`——默认会话仍全拒，只有"本人已开启对话的那一次会话/那个桌宠窗口/那个页面/仅 media 音频"放行，停止、窗口关闭、销毁或退出立即撤销且对迟到撤销免疫；渲染端对话模式才实例化 `XingyunAvatarAgent`（`setVolume(1)`、`startASR/stopASR/interrupt`、回调按代次丢弃、销毁先 `stopASR` 再 `destroy`），render 模式与旧版一致（`setVolume(0)`、不调用 ASR/ask）；桌宠页面新增"实时对话"入口与原生确认框（写明音频上传、由星云模型回答、按其平台计费、停止即结束），对话中显示聆听/思考/说话与识别文字。旧 r24 包已从下载目录撤下。
+
+> **产物核验（r25）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip` 215,346,710 字节（205.37 MiB），SHA256 `ed0e9e7b55619a479fcf077549058f2019c924020802ca4e8a8d350bbef6e406`；主机按字节核验一致，公开 HEAD 200。包内逐项核对（解包 ASAR 读取）：`xingyun-avatar.cjs` 含 `SESSION_MODES=['render','conversation']` 与两套会话体、`xingyun-permission-guard.cjs` 只放行 `media`、`main.cjs` 安装闸门且**无任何 `callback(true)` 字面量**、`standalone-host.cjs` 具备 arm/disarm、桌宠页面含"实时对话"入口、`avatar-runtime/xingyun-renderer.js`（1,217,205 字节）内含 Agent/startASR/stopASR/destroy/对话事件/代次守卫；`PET_AVATAR_CSP` 未放宽（仍只允许 `https://*.xingyun3d.com`、`wss://*.xingyun3d.com` 与既有 OSS 域）。
+
+> **验证范围与诚实边界（r25）**：`pnpm typecheck` 0；星云相关 66 passed（xingyun-avatar 31 + conversation 16 + management-voice 19）、`desktop-pet-ui` 204 passed、`desktop-standalone-host` 81 passed；合成 SDK 的 E2E 26 passed（13 用例 × 2 视口，含取消不开麦、确认后开麦与停止后不残留 ASR、迟到回调被丢弃）。**未验证**：没有在应用内发起任何真实星云会话（额度未消耗），因此实时链路 `wss://e2emp.xingyun3d.com`、口型同步、端到端延迟与计费口径均**未实测**；打包后 `file://` 页面开麦的运行时条件也未真机验收（若失败优先排查系统麦克风隐私设置与两个权限处理器）。包体从 r24 的 188.2 MiB 增至 205.37 MiB，含本日累积的已提交工作（r24 检索、栗栗/露米形象、桌宠自动收边球等），非单一改动所致。
+
 >
 > **并入的提交**：`af987fd`（为 Web 管理端补齐全站动效层：CSS + 轻量 WAAPI）、`bd17a5d`（修复 Web 端必修无障碍缺陷：对比度、抽屉焦点、渲染兜底、页面标题）。合并基点是我们自己的 `48c3121`，即对方分支只比我们多这 2 个提交；合并提交为 `2753a0c`（`git merge mobiwusi/main`，35 个本地提交保留）。
 >
 
 > **2026-10-24 r23：** 修复 r22 里"云端听写必定失败（`cloud_dictation_failed`）"——**根因是我自己的 bug**：录音器把 WAV 默认写到脚本所在目录，而正式环境脚本位于 `app.asar` **内部**（asar 是文件、不是目录），助手写不出文件即抛错。现在录音落到临时目录（Electron 传 `app.getPath('temp')`），asar 内路径在派生进程前就被拒绝，助手 stderr 随错误带出便于定位。同时新增：**近静音（峰值 < 0.015）不再上传**（避免识别器幻觉），并给出可操作提示且不再白跑一次本机离线识别。另外把语音弹窗标题从"本地语音输入"改为"语音输入"（里面有上传开关，原名不准确）。r22 已从下载目录撤下。
 
-> **产物核验（r23）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip` 197,342,127 字节（188.2 MiB），SHA256 `8b50b68b53d00d4b993e8ef8f1eb607ed834a3931f30fa8d15ed50bf3aba2c5a`；上传后按字节核验一致，公开 HEAD 200。包内核对（解包 ASAR 后逐项读取）：解包脚本含 `peak < 0.015` 静音门限且保持纯 ASCII；`cloud-recorder.cjs` 含 `tempDir`/`os.tmpdir()`、`insideArchive(target)` 拒绝与 `detail: stderrTail`；`main.cjs` 传 `tempDir: app.getPath('temp')`；宿主含"这次几乎没有收到声音"提示并跳过离线回退；前端弹窗标题已是"语音输入"。
+> **产物核验（r24）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip` 197,342,127 字节（188.2 MiB），SHA256 `8b50b68b53d00d4b993e8ef8f1eb607ed834a3931f30fa8d15ed50bf3aba2c5a`；上传后按字节核验一致，公开 HEAD 200。包内核对（解包 ASAR 后逐项读取）：解包脚本含 `peak < 0.015` 静音门限且保持纯 ASCII；`cloud-recorder.cjs` 含 `tempDir`/`os.tmpdir()`、`insideArchive(target)` 拒绝与 `detail: stderrTail`；`main.cjs` 传 `tempDir: app.getPath('temp')`；宿主含"这次几乎没有收到声音"提示并跳过离线回退；前端弹窗标题已是"语音输入"。
 
 > **验证范围（r23）**：`pnpm typecheck` 0；本次触及套件（云听写上传/录音器/宿主/管理端/语音桥）**142 passed**；生产同构端到端：脚本经 `app.asar` 路径交给录音器（实际执行 `app.asar.unpacked` 副本）→ **14.7 秒录音、437 KB WAV、增益 ×13、临时文件自动清理**。诚实边界：**仍未做真人语音验收**；用系统 TTS 对喇叭朗读做闭环时识别成"东方的广场。"（空气传播后峰值仅 0.069），因此**不能声称识别准确**，需要用户靠近麦克风（约 10~15 厘米）实测。
 
@@ -137,7 +144,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip` | 197,342,127 字节（188.2 MiB） | `8b50b68b53d00d4b993e8ef8f1eb607ed834a3931f30fa8d15ed50bf3aba2c5a` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip` | 215,346,710 字节（205.37 MiB） | `ed0e9e7b55619a479fcf077549058f2019c924020802ca4e8a8d350bbef6e406` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -182,7 +189,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -246,11 +253,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r24.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r25.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
