@@ -21,8 +21,29 @@ export const lumiModel = {
   ],
 } as const;
 
+export const lumiAnimatedModel = {
+  id: 'lumi-animated-v4',
+  name: '露米 Lumi · 自然动作版',
+  version: '4.1.0',
+  fileName: 'Lumi_Natural_v4_Animated.glb',
+  sha256: '14c6ac8e79fb51a1c4c7be44b63a4e78fdbf77599b93b7f90695f4d8fa782ead',
+  modelUrl: `${import.meta.env.BASE_URL}models/lumi-animated-v4/Lumi_Natural_v4_Animated.glb`,
+  posterUrl: `${import.meta.env.BASE_URL}models/lumi-animated-v4/poster.png`,
+  manifestUrl: `${import.meta.env.BASE_URL}models/lumi-animated-v4/character_manifest.json`,
+  capabilities: { static: false, rigged: true, animations: true, mobileTested: false },
+  actions: [
+    { name: 'Idle_Breathe', label: '呼吸陪伴', durationMs: 4000, loop: true },
+    { name: 'Blink_Soft', label: '轻柔眨眼', durationMs: 300, loop: false },
+    { name: 'Listen_Curious', label: '好奇倾听', durationMs: 3000, loop: false },
+    { name: 'Wave_Gentle', label: '轻轻招手', durationMs: 2500, loop: false },
+    { name: 'Nod_Encourage', label: '点头回应', durationMs: 2000, loop: false },
+    { name: 'Guide_Point', label: '温柔指引', durationMs: 3000, loop: false },
+    { name: 'Step_InPlace', label: '原地轻踏', durationMs: 2000, loop: true },
+  ],
+} as const;
+
 export function isBuiltinLumi(id: string): boolean {
-  return id === lumiModel.sha256 || lumiModel.previousSha256s.some(hash => hash === id);
+  return id === lumiModel.sha256 || id === lumiAnimatedModel.sha256 || lumiModel.previousSha256s.some(hash => hash === id);
 }
 
 export const liliModel = {
@@ -80,5 +101,6 @@ async function loadBuiltinModel(model: { id: BuiltinModelId; sha256: string; mod
 }
 
 export const loadLumiModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(lumiModel, signal);
+export const loadLumiAnimatedModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(lumiAnimatedModel, signal);
 export const loadLiliModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(liliModel, signal);
 export const loadLiliNaturalModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(liliNaturalModel, signal);

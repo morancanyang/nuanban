@@ -9,7 +9,8 @@ export function isOriginalLumi(root: Object3D): boolean {
 }
 
 export function createLumiStudio(scene: Scene, renderer: WebGLRenderer, root: Object3D): { dispose(): void } | undefined {
-  if (!isOriginalLumi(root)) return;
+  const natural = root.getObjectByName('Lumi_Natural_v4_Rigged')?.userData.character_id === 'lumi-animated-v4';
+  if (!natural && !isOriginalLumi(root)) return;
   scene.traverse(object => {
     if (object instanceof HemisphereLight) object.intensity = 0.32;
     if (object instanceof DirectionalLight) {
@@ -44,7 +45,7 @@ export function createLumiStudio(scene: Scene, renderer: WebGLRenderer, root: Ob
       }
     }
   });
-  renderer.domElement.dataset.appearanceProfile = 'lumi-original-detail-v2.1';
+  renderer.domElement.dataset.appearanceProfile = natural ? 'lumi-natural-v4-animated' : 'lumi-original-detail-v2.1';
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   let disposed = false;
   return { dispose() {
