@@ -15,12 +15,12 @@ function identity(input: AnalysisInput) {
     task_generation: input.taskGeneration, trigger_id: input.triggerId, frame_id: input.frame.frameId };
 }
 
-function fixture(surface: 'taskbar' | 'desktop' = 'taskbar') {
+function fixture(surface: 'taskbar' | 'desktop' = 'taskbar', label = '微信') {
   vi.useFakeTimers();
   const controls = { time: Date.now(), labels: ['设置', '显示', '文本大小', '返回', '中'],
     geometry: { x: 0, y: 0, width: 800, height: 600, scaleFactor: 1 } as ScreenGeometry,
     sourceId: 'screen:test:0', displayId: 'test-display', delay: 0, status: 'complete' as LocalDetection['status'],
-    shell: [{ label: '微信', surface, rect: { x: 220, y: 540, width: 44, height: 44 } }] as NonNullable<LocalDetection['shellControls']> };
+    shell: [{ label, surface, rect: { x: 220, y: 540, width: 44, height: 44 } }] as NonNullable<LocalDetection['shellControls']> };
   const source = {
     capture: vi.fn(async () => {
       controls.time = Math.max(controls.time + 1, Date.now());
@@ -36,8 +36,8 @@ function fixture(surface: 'taskbar' | 'desktop' = 'taskbar') {
   };
   const analyze = vi.fn<(input: AnalysisInput) => Promise<AnalysisResult>>(async input => input.previousStep
     ? { ...identity(input), kind: 'unsupported', instruction: '当前变化尚未核验。' }
-    : { ...identity(input), kind: 'step', instruction: '请亲手打开微信。', presentation: 'confirmed',
-      target_id: input.frame.elements.find(element => element.surface === surface && element.label === '微信')!.id,
+    : { ...identity(input), kind: 'step', instruction: `请亲手打开${label}。`, presentation: 'confirmed',
+      target_id: input.frame.elements.find(element => element.surface === surface && element.label === label)!.id,
       expected_labels: ['字体大小'] });
   const onTarget = vi.fn();
   const recordTeaching = vi.fn();
@@ -71,6 +71,19 @@ describe('已核验系统入口不被无关画面变化清掉', () => {
     expect(setup.analyze).toHaveBeenCalledOnce();
     expect(setup.onTarget).toHaveBeenCalledTimes(3);
     expect(setup.onTarget.mock.calls.every(([target]) => target?.visible === true)).toBe(true);
+    expect(setup.recordTeaching).not.toHaveBeenCalled();
+  });
+
+  it('任意非白名单桌面入口（WeGame）同样进入候选、被本机核验并续显箭头', async () => {
+    const setup = fixture('desktop', 'WeGame');
+    await setup.begin();
+    expect(setup.runtime.snapshot().task).toMatchObject({ state: 'awaiting_action', targetState: 'visible' });
+    expect(setup.analyze.mock.calls[0]![0].frame.elements.map(element => element.label)).toContain('WeGame');
+    setup.controls.labels.push('帮助');
+    await setup.nextFrame();
+    expect(setup.runtime.snapshot().task).toMatchObject({ state: 'awaiting_action', targetState: 'visible' });
+    expect(setup.onTarget).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, label: 'WeGame', rect: setup.controls.shell[0]!.rect }));
+    expect(setup.analyze).toHaveBeenCalledOnce();
     expect(setup.recordTeaching).not.toHaveBeenCalled();
   });
 
