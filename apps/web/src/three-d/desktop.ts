@@ -1,6 +1,6 @@
 import { createModelView } from './viewer';
 import type { LocalModel } from '../local-model';
-import { isBuiltinLumi, liliModel, liliNaturalModel, loadLiliModel, loadLumiModel, lumiModel } from './builtin-models';
+import { isBuiltinLumi, liliModel, liliNaturalModel, loadLiliModel, loadLumiModel, lumiAnimatedModel, lumiModel } from './builtin-models';
 
 const validationStage = document.getElementById('model-validation-stage');
 if (validationStage && window.nuanbanModelValidator) {
@@ -44,7 +44,7 @@ if (modelStage && window.nuanbanModel) {
     modelStage!.append(stage);
     modelStage!.hidden = false;
     try {
-      const source = isBuiltinLumi(model.id) && model.id !== lumiModel.sha256 ? await loadLumiModel()
+      const source = isBuiltinLumi(model.id) && model.id !== lumiModel.sha256 && model.id !== lumiAnimatedModel.sha256 ? await loadLumiModel()
         : model.id === liliModel.previousSha256 ? await loadLiliModel() : model;
       const view = await createModelView(stage, source, { onError: text => {
         if (disposed || currentRevision !== revision) return;
@@ -67,6 +67,15 @@ if (modelStage && window.nuanbanModel) {
     }
   }
   const unsubscribe = bridge.onChanged(model => { void show(model); });
+  const unsubscribeActions = window.nuanbanLumi?.onRequest?.(request => {
+    let accepted = false;
+    if (!disposed && !cloudVisible && !modelStage.hidden && selectedModel?.kind === 'model'
+      && selectedModel.id === lumiAnimatedModel.sha256 && request.modelId === selectedModel.id && currentView?.lumiActions) {
+      if (request.action === 'stop') { currentView.lumiActions.stop(); accepted = true; }
+      else accepted = currentView.lumiActions.play(request.action).ok;
+    }
+    void window.nuanbanLumi?.complete?.(request.id, accepted).catch(() => {});
+  });
   const initialRevision = revision;
   void bridge.read().then(model => { if (!disposed && (initialRevision === revision || !selectedModel)) return show(model); })
     .catch(() => message('本机 3D 模型读取失败，暂用原画或内置桌宠；请重新导入'));
@@ -88,13 +97,16 @@ if (modelStage && window.nuanbanModel) {
     if (typeof action === 'string') playNaturalAction(action);
   };
   const onInteraction = () => {
-    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) playNaturalAction('wave');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!disposed && !cloudVisible && selectedModel?.kind === 'model' && selectedModel.id === lumiAnimatedModel.sha256) {
+      currentView?.lumiActions?.semantic('greeting');
+    } else playNaturalAction('wave');
   };
   window.addEventListener('nuanban:model-action', onModelAction);
   window.addEventListener('nuanban:avatar-interaction', onInteraction);
   window.addEventListener('nuanban:avatar-visibility', onCloudVisibility);
   window.addEventListener('pagehide', () => {
-    disposed = true; revision++; unsubscribe();
+    disposed = true; revision++; unsubscribe(); unsubscribeActions?.();
     window.removeEventListener('nuanban:avatar-visibility', onCloudVisibility);
     window.removeEventListener('nuanban:model-action', onModelAction);
     window.removeEventListener('nuanban:avatar-interaction', onInteraction);

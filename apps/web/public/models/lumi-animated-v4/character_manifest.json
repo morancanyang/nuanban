@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "1.0.0",
+  "character": {
+    "id": "lumi-animated-v4",
+    "name": "露米 Lumi · 自然动作版",
+    "assetVersion": "4.1.0"
+  },
+  "source": {
+    "file": "lumi-natural-v4.blend",
+    "sha256": "479e90d419ce51621b0354121cb5255a297e5d114a93f58a32d222a67e04a5b3",
+    "riggedFile": "lumi-natural-v4-rigged.blend",
+    "riggedSha256": "47bd2dc0f9079429b805077e8a377a273060db89a8c2a66ae604b39fcf2ab8db",
+    "sourceGroomStrands": 215319
+  },
+  "runtime": {
+    "file": "Lumi_Natural_v4_Animated.glb",
+    "fileBytes": 13171996,
+    "sha256": "14c6ac8e79fb51a1c4c7be44b63a4e78fdbf77599b93b7f90695f4d8fa782ead",
+    "triangleCount": 99496,
+    "meshCount": 186,
+    "frameRate": 30,
+    "skeleton": {
+      "boneCount": 33,
+      "naming": "Anatomical L/R: left paw holds the wand; right paw waves"
+    },
+    "groom": {
+      "cards": 13180,
+      "strandsPerCard": 5,
+      "lossless": false
+    },
+    "animations": [
+      {
+        "name": "Idle_Breathe",
+        "duration": 4.0,
+        "loop": true,
+        "layer": "body"
+      },
+      {
+        "name": "Blink_Soft",
+        "duration": 0.3,
+        "loop": false,
+        "layer": "face"
+      },
+      {
+        "name": "Listen_Curious",
+        "duration": 3.0,
+        "loop": false,
+        "layer": "body"
+      },
+      {
+        "name": "Wave_Gentle",
+        "duration": 2.5,
+        "loop": false,
+        "layer": "body"
+      },
+      {
+        "name": "Nod_Encourage",
+        "duration": 2.0,
+        "loop": false,
+        "layer": "body"
+      },
+      {
+        "name": "Guide_Point",
+        "duration": 3.0,
+        "loop": false,
+        "layer": "body"
+      },
+      {
+        "name": "Step_InPlace",
+        "duration": 2.0,
+        "loop": true,
+        "layer": "body"
+      }
+    ],
+    "morphTargets": [
+      "Blink_L",
+      "Blink_R"
+    ],
+    "textures": [
+      "Microglow five-strand groom alpha atlas",
+      "Microglow short-fur normal",
+      "Microglow baked contact occlusion",
+      "Microglow woven cloak normal",
+      "Microglow original blue iris baked"
+    ],
+    "limitations": [
+      "Runtime meshes and skinned groom cards, not lossless offline curve hair.",
+      "Cape and bag use authored secondary bones, not live cloth simulation.",
+      "No lip sync, full facial expression set or physical-device mobile performance certification."
+    ]
+  }
+}

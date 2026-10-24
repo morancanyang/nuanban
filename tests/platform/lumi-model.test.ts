@@ -17,7 +17,7 @@ describe('露米随包模型与动作', () => {
     const card = readFileSync(join(process.cwd(), 'apps/web/src/three-d/lumi-card.tsx'), 'utf8');
     const desktop = readFileSync(join(process.cwd(), 'apps/web/src/three-d/desktop.ts'), 'utf8');
     expect(card).toContain('await loadLumiModel(controller.signal)');
-    expect(desktop).toContain('isBuiltinLumi(model.id) && model.id !== lumiModel.sha256 ? await loadLumiModel()');
+    expect(desktop).toContain('isBuiltinLumi(model.id) && model.id !== lumiModel.sha256 && model.id !== lumiAnimatedModel.sha256 ? await loadLumiModel()');
     expect(card).not.toContain('createLumiModel');
     expect(desktop).not.toContain('createLumiModel');
     expect(card).not.toContain('9 个动作');

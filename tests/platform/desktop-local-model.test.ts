@@ -117,6 +117,7 @@ describe('模型 IPC 权限与通知', () => {
   }
   it.each([
     { id: 'lumi', bytes: 10887504, fileName: 'Lumi_Magical_Kitten.glb', sha256: '4cee02df06e168eb99612ab5d807a3efe6025d14c7dfec516616ff8825b0e9b3' },
+    { id: 'lumi-animated-v4', bytes: 13171996, fileName: 'Lumi_Natural_v4_Animated.glb', sha256: '14c6ac8e79fb51a1c4c7be44b63a4e78fdbf77599b93b7f90695f4d8fa782ead' },
     { id: 'lili', bytes: 7171212, fileName: 'Lili_Independent_Deer.glb', sha256: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c' },
     { id: 'lili-natural-v4', bytes: 9863528, fileName: 'Lili_Natural_v4.glb', sha256: '331f66f6748bf78a390f60a2092c8ce884113698418087d0881cbe1f6feacd8f' },
   ])('内置 $id 只读预览不暂存、不改当前伙伴；确认后验证并持久化', async builtin => {
@@ -146,7 +147,7 @@ describe('模型 IPC 权限与通知', () => {
       expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, id)).toThrow('未知');
       await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.managementEvent, id)).rejects.toThrow('未知');
     }
-    for (const id of ['lumi', 'lili', 'lili-natural-v4']) {
+    for (const id of ['lumi', 'lumi-animated-v4', 'lili', 'lili-natural-v4']) {
       expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.petEvent, id)).toThrow('只有本人');
       await expect(current.handlers.get('nuanban:model:apply-builtin')!(current.petEvent, id)).rejects.toThrow('只有本人');
       expect(() => current.handlers.get('nuanban:model:read-builtin')!(current.managementEvent, id, 'extra')).toThrow('额外');

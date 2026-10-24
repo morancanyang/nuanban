@@ -1,19 +1,20 @@
 import { LoopOnce, LoopRepeat } from 'three';
 import type { AnimationAction, AnimationClip, AnimationMixer } from 'three';
 
-const loopingActions = new Set(['idle', 'walk', 'think', 'sleep']);
+const loopingActions = new Set(['idle', 'walk', 'think', 'sleep', 'Idle_Breathe', 'Step_InPlace']);
 const blinkIntervalMs = 5000;
 
 export function createModelAnimationController(mixer: AnimationMixer, clips: AnimationClip[], onChange?: (name: string) => void) {
   const available = new Map(clips.map(clip => [clip.name, clip]));
-  const defaultName = available.has('idle') ? 'idle' : clips[0]?.name;
+  const natural = available.has('Idle_Breathe');
+  const defaultName = natural ? 'Idle_Breathe' : available.has('idle') ? 'idle' : clips[0]?.name;
   let body: AnimationAction | undefined;
   let face: AnimationAction | undefined;
   let current = '';
   let disposed = false;
   let blinkEnabled = false;
   let blinkTimer: ReturnType<typeof setTimeout> | undefined;
-  const blinkClip = available.get('blink');
+  const blinkClip = available.get(natural ? 'Blink_Soft' : 'blink');
 
   function clearBlinkTimer() {
     if (blinkTimer !== undefined) clearTimeout(blinkTimer);
@@ -36,16 +37,21 @@ export function createModelAnimationController(mixer: AnimationMixer, clips: Ani
     blinkTimer = setTimeout(() => {
       blinkTimer = undefined;
       if (!disposed && blinkEnabled) face = transition(face, blinkClip, false);
-    }, blinkIntervalMs);
+    }, natural ? 3300 + Math.random() * 3200 : blinkIntervalMs);
   }
 
   function play(name: string) {
     const clip = available.get(name);
     if (disposed || !clip) return false;
+    if (natural && clip === blinkClip) {
+      clearBlinkTimer();
+      face = transition(face, clip, false);
+      return true;
+    }
     const loop = loopingActions.has(name) || name === defaultName;
     body = transition(body, clip, loop);
-    const facialClip = available.get(`face_${name}`) ?? (name !== 'blink' ? available.get('blink') : undefined);
-    blinkEnabled = name !== 'blink' && facialClip?.name === 'blink';
+    const facialClip = available.get(`face_${name}`) ?? (clip !== blinkClip ? blinkClip : undefined);
+    blinkEnabled = clip !== blinkClip && facialClip === blinkClip && !!blinkClip;
     if (blinkEnabled) {
       if (face && face.getClip() !== blinkClip) { face.fadeOut(0.18); face = undefined; }
       scheduleBlink();
@@ -68,11 +74,21 @@ export function createModelAnimationController(mixer: AnimationMixer, clips: Ani
     }
   };
   mixer.addEventListener('finished', finished);
+  function stop() {
+    clearBlinkTimer();
+    blinkEnabled = false;
+    mixer.stopAllAction();
+    body = undefined;
+    face = undefined;
+    current = '';
+    if (!disposed) onChange?.('');
+  }
   return {
     names: [...available.keys()],
     defaultName,
     play,
+    stop,
     get current() { return current; },
-    dispose() { disposed = true; clearBlinkTimer(); mixer.removeEventListener('finished', finished); },
+    dispose() { if (disposed) return; disposed = true; stop(); mixer.removeEventListener('finished', finished); },
   };
 }

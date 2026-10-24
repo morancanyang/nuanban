@@ -56,3 +56,7 @@ node scripts/check-lumi-electron.cjs
 ```
 
 单元测试检查原始来源、单角色结构、嵌入贴图、面数与动画边界；无 DOM 环境下仅移除材质贴图引用以解析几何，真实贴图解码和首帧可见性由浏览器与 Electron 验收覆盖。`scripts/prepare-lumi-model.mjs` 只适用于历史带稀疏表情访问器的旧文件，不能用于把旧简化模型覆盖回当前版本。
+
+## 自然动作版补充
+
+露米自然精修 v4 现有独立的 `lumi-animated-v4` 资源、七个真实绑定动作和跨窗口调用接口，参见[绑定与产品接口说明](./lumi-animated-v4-interface.md)。原版仍保留为默认版本；本文原版资源与动作边界不被该补充覆盖。

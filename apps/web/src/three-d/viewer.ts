@@ -11,6 +11,7 @@ import type { ModelSource, ModelSummary } from '../local-model';
 import { createModelAnimationController } from './animation-controller';
 import { createLumiStudio } from './lumi-studio';
 import type { ProceduralModelSource } from './lumi-model';
+import { createLumiActions } from './lumi-actions';
 
 export type DisplayModelSource = ModelSource | ProceduralModelSource;
 interface LoadedModel { root: Object3D; animations: AnimationClip[]; vrm?: VRM; summary: ModelSummary; urls: Set<string>; }
@@ -144,6 +145,7 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
   const camera = new PerspectiveCamera(32, 1, 0.01, 100);
   const group = new Group();
   const naturalLili = loaded.root.getObjectByName('Lili_Natural_v4_Deer')?.userData.character_id === 'lili-natural-v4';
+  const animatedLumi = loaded.root.getObjectByName('Lumi_Natural_v4_Rigged')?.userData.character_id === 'lumi-animated-v4';
   const originalLili = naturalLili || loaded.root.getObjectByName('Lili_Original_Blender_Deer')?.userData.character_id === 'lili-original-v2';
   let studioEnvironment: ReturnType<PMREMGenerator['fromScene']> | undefined;
   let lumiStudio: ReturnType<typeof createLumiStudio>;
@@ -152,6 +154,8 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
     renderer.domElement.dataset.animation = name;
     options.onAnimationChange?.(name);
   });
+  const lumiActions = animatedLumi ? createLumiActions({ animationNames: animations.names,
+    playAnimation: animations.play, stopAnimation: animations.stop, get currentAnimation() { return animations.current; } }) : undefined;
   let disposed = false;
   let frame = 0;
   let previousTime = 0;
@@ -175,6 +179,7 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
     controls?.dispose();
     animations.dispose();
     mixer.stopAllAction();
+    lumiActions?.dispose();
     mixer.uncacheRoot(loaded.root);
     disposeRoot(loaded.root);
     for (const url of loaded.urls) URL.revokeObjectURL(url);
@@ -257,6 +262,8 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
       catch { options.onError?.('3D 渲染未能继续，已保留原画和本机模型'); dispose(); }
     }
     if (options.animate !== false) frame = requestAnimationFrame(draw);
-    return { summary: loaded.summary, canvas: renderer.domElement, animationNames: animations.names, playAnimation: animations.play, dispose };
+    return { summary: loaded.summary, canvas: renderer.domElement, animationNames: animations.names,
+      playAnimation: animations.play, stopAnimation: animations.stop, get currentAnimation() { return animations.current; },
+      lumiActions, dispose };
   } catch (error) { dispose(); throw error; }
 }

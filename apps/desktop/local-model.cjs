@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { inflateSync } = require('node:zlib');
+const { registerLumiActions } = require('./lumi-actions.cjs');
 const { DatabaseSync } = require('node:sqlite');
 const { pathToFileURL } = require('node:url');
 const maxFileBytes = 50 * 1024 * 1024;
@@ -247,6 +248,7 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
     return window && !window.isDestroyed() && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && event.senderFrame.url.split('#')[0] === petUrl;
   }
   function publish(model) {
+    lumiActions.invalidate();
     for (const window of [getManagementWindow(), getToolWindow(), getPetWindow()]) {
       if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('nuanban:model:changed', model);
     }
@@ -254,9 +256,10 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
   }
   const requireManagement = event => { if (!isManagementTrusted(event)) throw new Error('只有本人管理窗口可以导入或更换 3D 模型'); };
   function readBuiltin(id) {
-    if (id !== 'lumi' && id !== 'lili' && id !== 'lili-natural-v4') throw new Error('未知的内置三维伙伴');
+    if (id !== 'lumi' && id !== 'lumi-animated-v4' && id !== 'lili' && id !== 'lili-natural-v4') throw new Error('未知的内置三维伙伴');
     const builtin = {
       lumi: { fileName: 'Lumi_Magical_Kitten.glb', bytes: 10887504, sha256: '4cee02df06e168eb99612ab5d807a3efe6025d14c7dfec516616ff8825b0e9b3' },
+      'lumi-animated-v4': { fileName: 'Lumi_Natural_v4_Animated.glb', bytes: 13171996, sha256: '14c6ac8e79fb51a1c4c7be44b63a4e78fdbf77599b93b7f90695f4d8fa782ead' },
       lili: { fileName: 'Lili_Independent_Deer.glb', bytes: 7171212, sha256: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c' },
       'lili-natural-v4': { fileName: 'Lili_Natural_v4.glb', bytes: 9863528, sha256: '331f66f6748bf78a390f60a2092c8ce884113698418087d0881cbe1f6feacd8f' },
     }[id];
@@ -306,7 +309,7 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
   ipcMain.handle(channels[4], event => { requireManagement(event); requireAvailable(); store.discard(); return true; });
   ipcMain.handle(channels[5], async (event, id, ...extra) => {
     requireManagement(event);
-    if ((id !== 'lumi' && id !== 'lili' && id !== 'lili-natural-v4') || extra.length) throw new Error('未知的内置三维伙伴');
+    if ((id !== 'lumi' && id !== 'lumi-animated-v4' && id !== 'lili' && id !== 'lili-natural-v4') || extra.length) throw new Error('未知的内置三维伙伴');
     if (choosing) throw new Error('已有模型正在选择或检查，请稍候');
     choosing = true;
     applyingBuiltin = true;
@@ -326,7 +329,8 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
     const { format, bytes } = readBuiltin(id);
     return { format, bytes };
   });
-  return { deactivate: () => publish(store.clear()), dispose: () => { disposed = true; channels.forEach(channel => ipcMain.removeHandler(channel)); store.close(); } };
+  const lumiActions = registerLumiActions({ ipcMain, isManagementTrusted, trustedPet, getPetWindow, getManagementWindow, getToolWindow, readModel: store.read });
+  return { deactivate: () => publish(store.clear()), dispose: () => { disposed = true; lumiActions.dispose(); channels.forEach(channel => ipcMain.removeHandler(channel)); store.close(); } };
 }
 
 module.exports = { inspectModelContainer, validateModelSummary, createLocalModelStore, registerLocalModelBridge };
