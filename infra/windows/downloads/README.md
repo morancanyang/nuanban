@@ -5,6 +5,17 @@
 
 > **2026-10-24 r24：** 桌宠“智能查询”改回 **AnySearch 实时检索**（`d22fa08`）。2026-10-18 起该入口只复用本机模型、不联网，因而回答不了实时问题。现在新增 `pet-search-client.cjs` 组合供应：**配置密钥就调 `POST https://api.anysearch.com/v1/search`**（Bearer），展示来源标题/摘要与可打开原文的 HTTPS 链接，页面标注“AnySearch 实时检索”；**没有密钥**才回退本机模型并标注“未联网核验”；**AnySearch 已配置但失败时直接报错，不静默改走模型冒充检索结果**。密钥只存本机 DPAPI 加密文件（`%APPDATA%\@nuanban\desktop\nuanban-anysearch-key.bin`，69 字节密文）或环境变量，**不进仓库、不进安装包**，用 `scripts/set-anysearch-key.ps1` 写入；新增 `scripts/check-anysearch-live.cjs` 做真实调用核对，并有防泄漏测试扫描源码/脚本/测试/文档。构建来自独立干净工作树（HEAD `d22fa08`，先变基到最新远端并保留对方提交）：`tsc --noEmit` 0，相关套件 415 passed。真实调用记录：“今天北京天气”7 条、“上海今天天气怎么样”7 条、“人民币 美元 汇率”9 条结果，全部 HTTPS、来源各异，模型调用 0 次。Android 两包未重出（另一会话正在改 Android/Web，当前 Web 构建与其已发布 APK 已不一致），下载页保留此前逐文件核验过的 APK 行；旧 r23 包与页面行已移除。
 
+> **2026-10-24 r28：** 修复"启用花环水獭（仅形象）与实时对话都失败"。现场反馈两种模式都失败后，我们用**真实 Electron 隐藏窗口 + 真实 pet.html/preload/CSP + 真实凭证与会话**做了取证装置（真实会话 4 次，全部 DELETE），确证并修掉两个缺陷：
+> 1. **仅形象被实时通道连坐**（这是"仅形象也坏"的成因）：修复前两种模式都实例化 `XingyunAvatarAgent`，仅形象也会额外建立 `wss://e2emp.xingyun3d.com` E2E 连接，任一 socket/agent 异常直接 `fail('load_failed')`。现在**按模式选类**：`render` → 基类 `@xmov/avatar`（只建 `ttsa-gateway-lite` 一条 WS，不依赖 E2E、不调用 ASR/ask、`setVolume(0)`）；`conversation` → `@xmov/avatar/agent`。
+> 2. **对话模式无法加载 AudioWorklet**：真实页面报 `Loading the script 'blob:file:///<id>' violates … "script-src 'self'"`（file:// 不透明源），因对话模式启用 AEC 需要 worklet。现在对话会话体改为 `speech_frontend: { enabled: true, enable_aec: false }`（平台原样接受，`error_code 0`，未放宽 CSP）。**代价**：暂不启用回声消除，桌宠自己的声音可能被麦克风再次拾取；恢复 AEC 需要把桌宠窗口换成自定义协议/本地 http 源，已登记为后续项。
+> 附带修好：修复前仅形象的 `DELETE` 会被平台拒（`error_code 1 无效的session`）导致界面误报"清理未确认"，现在同流程 `error_code 0`。
+> **未能复现**：现场那台机器上 `load_failed` 的真实触发条件（网络/代理/杀软/显卡差异）在装置里没有复现出来——所以本版同时把失败做成**可诊断**：失败阶段（会话/资源/实时通道/渲染/权限/超时）与 SDK 原始 code/message 脱敏后上屏，并写入 `%APPDATA%\@nuanban\desktop\avatar-trace.log`（含 CSP 违规与 render-process-gone，256 KiB 上限、不含密钥/token）。若仍失败，把那份日志发我即可定位。旧 r27 包已撤下。
+
+> **产物核验（r28）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip` 215,374,854 字节（205.4 MiB），SHA256 `505b676411a56fb31314a36b07f20fc69f093aa34cb0f8134f4dcc6ca5ad2810`；主机按字节核验一致，公开 HEAD 200。包内 15 项核对全过：源码 render 用 `import('@xmov/avatar')`、conversation 用 `import('@xmov/avatar/agent')`、会话体含 `enable_aec: false` 且 render 体不变、`createAvatarTraceLog`/`sanitizeReason` 随包、preload 暴露唯一 `nuanban:avatar:trace`、宿主写 `avatar-trace.log` 并捕获 `console-message`、失败 detail 贯通、权限闸门随包、`main.cjs` 无 `callback(true)`、CSP 未放宽、云听写录音组件仍在、品牌文案仍是"微光指引"。构建产物 `avatar-runtime/xingyun-renderer.js` 1,209,900 字节。
+
+> **验证范围（r28）**：`pnpm typecheck` 0；`desktop-xingyun-*` **60 passed**；合并后 `desktop-standalone-host` 81 + `desktop-pet-ui` 220 = **361 passed**；合成 SDK 的 `desktop-pet-avatar.spec.ts`（msedge）**28 passed**（含 render=基类 / conversation=Agent / 失败原因上屏断言）。装置实测：修复后仅形象 `ready` 且只建一条 WS、`DELETE error_code 0`；修复后对话 `ready` + 麦克风权限闸门 `armed` + ASR 启动 + 无 worklet 报错 + `DELETE error_code 0`。**未验证**：现场故障机本身、`avatar-trace.log` 生产接线的真实落盘、真机开麦与无 AEC 的音质/回声、口型同步、计费口径。
+
+
 > **2026-10-24 r27：** 修复"星云实时对话无法点击"（现场反馈）。原因：`avatar-conversation-start` 的禁用条件包含"已有会话或本地实例"，因此**只要仅形象会话在运行（用户已启用花环水獭），对话入口就永久不可点，界面也不说明原因、没有切换路径**。现在：仅形象会话就绪时按钮保持可用并把文案改为 **"切换到实时对话"**，同区说明改为"会先停止这个仅形象会话并确认远端关闭，再建立实时对话会话"；`start('conversation')` 在**本人于原生对话框确认之后**先 `stop()` 结束仅形象会话，再建立对话会话（取消确认则完全不动现有形象）。r26→r27 条目 87→87、新增 0、删除 0，**唯一变化是 `resources/app.asar`（77,011,923 → 77,116,099 字节，+104,176 = 重建后的 `avatar-runtime/xingyun-renderer.js`）**。旧 r26 包已撤下。
 
 > **产物核验（r27）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r27.zip` 215,370,602 字节（205.39 MiB），SHA256 `1e31114902e4ed2849c9a35c318b134e5548385e65669a16d5640f224771beff`；主机按字节核验一致，公开 HEAD 200。包内核对：构建产物含"切换到实时对话"与切换说明文案、源码含 `switchingFromRender`/`await stop()`、render 会话体（`auto_send_asr_to_llm:false`）与对话会话体（`true`）各自完整、权限闸门随包、`main.cjs` 无 `callback(true)`、品牌文案仍是"微光指引"、解包目录含录音助手与 `NAudio.dll`。
@@ -161,7 +172,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r27.zip` | 215,369,016 字节（205.392 MiB） | `c8b096523f9f270f9d4be1ed91af39b1411d98757cd04339246f94ca762197cf` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip` | 215,369,016 字节（205.392 MiB） | `c8b096523f9f270f9d4be1ed91af39b1411d98757cd04339246f94ca762197cf` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -206,7 +217,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r27.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -270,11 +281,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r27.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r27.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r28.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 

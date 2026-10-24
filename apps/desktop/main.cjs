@@ -11,6 +11,7 @@ const { registerManagementCompanionBridge } = require('./management-companion-br
 const { registerManagementVoiceBridge } = require('./management-voice-bridge.cjs');
 const { createImageQuestionService, registerManagementImageQuestionBridge } = require('./image-question.cjs');
 const { loadConfiguredProvider } = require('./ai-provider.cjs');
+const { createPrivacySettings } = require('./privacy-settings.cjs');
 const { loadConfiguredCloudDictation } = require('./voice/cloud-dictation.cjs');
 const { createCloudRecorder } = require('./voice/cloud-recorder.cjs');
 const { createCloudDictationSettings } = require('./voice/cloud-dictation-settings.cjs');
@@ -244,9 +245,13 @@ if (ownsInstance) app.whenReady().then(async () => {
     cloudSettings = createCloudDictationSettings({ userDataPath: app.getPath('userData') });
     cloudRecorder = createCloudRecorder({ scriptPath: path.join(__dirname, 'voice', 'windows-cloud-dictation.ps1'), tempDir: app.getPath('temp') });
   } catch { cloudSettings = undefined; cloudRecorder = undefined; }
+  // Owner-controlled local masking switch (default keeps masking on).
+  let privacySettings;
+  try { privacySettings = createPrivacySettings({ userDataPath: app.getPath('userData') }); } catch { privacySettings = undefined; }
   registerBridge();
   standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow, xingyunPermissions,
     ...(cloudDictation ? { cloudDictation } : {}), ...(cloudRecorder ? { cloudRecorder } : {}), ...(cloudSettings ? { cloudSettings } : {}),
+    ...(privacySettings ? { privacySettings } : {}),
     liliEnabled: process.argv.includes('--pet-lili') || (!process.argv.includes('--pet-default') && process.env.NUANBAN_DESKTOP_PET === 'lili'),
     petDisplayCompatible: captureVisibility.petVisible || process.argv.includes('--pet-display-compatible'),
     showPetTool: route => petTools.show(route),

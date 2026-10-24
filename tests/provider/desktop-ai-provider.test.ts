@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { syntheticPng } from '../helpers/standalone-frame';
 
-const { createOpenAiCompatibleProvider, loadConfiguredProvider } = createRequire(import.meta.url)('../../apps/desktop/ai-provider.cjs') as typeof import('../../apps/desktop/ai-provider.cjs');
+const { createOpenAiCompatibleProvider, loadConfiguredProvider, detectLocalModelProvider } = createRequire(import.meta.url)('../../apps/desktop/ai-provider.cjs') as typeof import('../../apps/desktop/ai-provider.cjs');
 const configuration = { baseUrl: 'https://gateway.example.test/v1/', model: 'gpt-6.1-sol', apiKey: 'synthetic-credential-only' };
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
@@ -164,9 +164,10 @@ describe('桌面密钥配置', () => {
 });
 
 describe('模型超时上限与可配置超时', () => {
-  it('模型超时上限提高到 60 秒，配置文件可下调超时并如实返回 TIMEOUT', async () => {
+  it('云端超时上限 60 秒、本机回环 180 秒，配置文件可下调超时并如实返回 TIMEOUT', async () => {
     const source = await readFile(new URL('../../apps/desktop/ai-provider.cjs', import.meta.url), 'utf8');
-    expect(source).toContain('options.timeoutMs === undefined ? 60000');
+    expect(source).toContain('const maxTimeoutMs = loopback ? 180000 : 60000');
+    expect(source).toContain('loopback ? 180000 : 60000) : options.timeoutMs;');
     const file = await configurationFile({ version: 1, credentialFormat: 'windows-dpapi-v1', encryptedKey: 'A'.repeat(32),
       baseUrl: configuration.baseUrl, model: configuration.model, timeoutMs: 20 });
     const fetchRequest = vi.fn<typeof fetch>((_input, init) => new Promise<Response>((_resolve, reject) => {
@@ -184,7 +185,7 @@ describe('本机模型自动检测（无需账号或密钥）', () => {
   it('未配置时自动使用本机 Ollama 模型，不要求密钥', async () => {
     const fetchRequest = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
-      if (url.endsWith('/v1/models')) return models(['qwen2.5:7b', 'llava:latest']);
+      if (url.endsWith('/v1/models')) return models(['qwen2.5:7b']);
       expect(url).toBe('http://127.0.0.1:11434/v1/chat/completions');
       return completed();
     });
@@ -206,5 +207,21 @@ describe('本机模型自动检测（无需账号或密钥）', () => {
     expect(() => createOpenAiCompatibleProvider({ baseUrl: 'http://192.168.1.9/v1', model: 'gpt-4o-mini', apiKey: 'x'.repeat(12) })).toThrow('PROVIDER_UNAVAILABLE');
     const provider = createOpenAiCompatibleProvider({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b', apiKey: 'local-ollama-runtime' });
     expect(provider.status()).toEqual({ available: true });
+  });
+
+  it('优先选择本机视觉模型并标记能否看图，纯文字模型明确标记 vision=false', async () => {
+    const textOnly = await detectLocalModelProvider({ fetch: vi.fn<typeof fetch>(async () => models(['qwen2.5:3b'])) });
+    expect(textOnly?.vision).toBe(false);
+    expect(textOnly?.modelName).toBe('qwen2.5:3b');
+    const withVision = await detectLocalModelProvider({ fetch: vi.fn<typeof fetch>(async () => models(['qwen2.5:3b', 'qwen2.5vl:3b'])) });
+    expect(withVision?.vision).toBe(true);
+    expect(withVision?.modelName).toBe('qwen2.5vl:3b');
+  });
+
+  it('本机回环模型允许更长的分析超时，云端仍保持 60 秒上限', () => {
+    const local = createOpenAiCompatibleProvider({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5vl:3b', apiKey: 'local-ollama-runtime', timeoutMs: 170000 });
+    expect(local.status()).toEqual({ available: true });
+    expect(() => createOpenAiCompatibleProvider({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5vl:3b', apiKey: 'local-ollama-runtime', timeoutMs: 180001 })).toThrow('PROVIDER_UNAVAILABLE');
+    expect(() => createOpenAiCompatibleProvider({ ...configuration, timeoutMs: 170000 })).toThrow('PROVIDER_UNAVAILABLE');
   });
 });

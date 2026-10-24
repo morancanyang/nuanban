@@ -123,6 +123,24 @@ describe('独立桌宠本地帧门控（合成单测，不是真实外部软件�
     expect(evaluateLocalFrame(frame, detection)).toMatchObject({ decision: 'pause', reason: 'invalid_local_regions' });
   });
 
+  it('遮盖模式下图形候选与文字区域重叠仍然停止观察，不放宽默认门控', () => {
+    const frame = syntheticFrame();
+    const detection = syntheticDetection(frame, ['设置']);
+    const word = detection.words[0];
+    Object.assign(detection, { visualControls: [{ label: '未标注图标', surface: 'visual', appearance: 'b'.repeat(64),
+      rect: { x: word.rect.x, y: word.rect.y, width: word.rect.width, height: word.rect.height } }] });
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'pause', reason: 'invalid_local_regions' });
+  });
+
+  it('遮盖模式下像素级贴边不算污染，不会因此停止观察', () => {
+    const frame = syntheticFrame();
+    const detection = syntheticDetection(frame, ['设置']);
+    const word = detection.words[0];
+    Object.assign(detection, { visualControls: [{ label: '未标注图标', surface: 'visual', appearance: 'c'.repeat(64),
+      rect: { x: word.rect.x + word.rect.width - 2, y: word.rect.y, width: 40, height: 40 } }] });
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'allow' });
+  });
+
   it('无关正文或 OCR 抖动不使同一安全控件布局失效，控件移动或敏感内容仍被核验', () => {
     const frame = syntheticFrame();
     const detection = syntheticDetection(frame, ['文件', '编辑', '查看', '普通正文']);
@@ -540,5 +558,45 @@ describe('多尺度 OCR 控件合并与隐私门控（合成结果）', () => {
     const detection = syntheticDetection(frame, ['私人聊天']);
     detection.words.push({ text: '微信', ocrPass: 1, rect: { x: 20, y: 60, width: 100, height: 30 } });
     expect(evaluateLocalFrame(frame, detection)).toMatchObject({ decision: 'pause', reason: 'sensitive_screen', risk: 'private' });
+  });
+});
+
+describe('本人确认关闭本机遮盖后的原始帧放行（合成单测，不代表真实验收）', () => {
+  function rawDetection(frame: ReturnType<typeof syntheticFrame>) {
+    return { ...syntheticDetection(frame, ['设置', '显示', '文本大小']), redaction: { text: false, faces: false }, sanitizedPng: Buffer.from(frame.png) };
+  }
+
+  it('原始模式接受未遮盖的帧，并标记上传内容为原始画面', () => {
+    const frame = syntheticFrame();
+    const detection = rawDetection(frame);
+    const result = evaluateLocalFrame(frame, detection, { authorizedSharing: true, unredactedUpload: true });
+    expect(result).toMatchObject({ decision: 'allow', scene: 'owner_approved_unredacted', redactionProfile: 'owner_approved_none', unredacted: true });
+    if (result.decision !== 'allow') throw new Error('expected raw allow');
+    expect(result.sanitizedPng).toEqual(frame.png);
+    expect(result.elements.map(element => element.label)).toContain('显示');
+    expect(isAdmittedFrame(result)).toBe(true);
+  });
+
+  it('默认仍然拒绝未遮盖的帧，不会因为新开关放松默认值', () => {
+    const frame = syntheticFrame();
+    const detection = rawDetection(frame);
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true })).toMatchObject({ decision: 'pause', reason: 'incomplete_local_detection' });
+  });
+
+  it('原始模式下与文字重叠的图形候选不再触发 invalid_local_regions', () => {
+    const frame = syntheticFrame();
+    const detection = rawDetection(frame);
+    const word = detection.words[0];
+    Object.assign(detection, { visualControls: [{ label: '未标注图标', surface: 'visual', appearance: 'a'.repeat(64),
+      rect: { x: word.rect.x, y: word.rect.y, width: word.rect.width, height: word.rect.height } }] });
+    expect(evaluateLocalFrame(frame, detection, { authorizedSharing: true, unredactedUpload: true })).toMatchObject({ decision: 'allow', scene: 'owner_approved_unredacted' });
+  });
+
+  it('原始模式仍执行检测完整性、年龄检查', () => {
+    const frame = syntheticFrame();
+    const stale = { ...rawDetection(frame), status: 'unavailable' as const, reason: 'local_detector_unavailable' };
+    expect(evaluateLocalFrame(frame, stale, { authorizedSharing: true, unredactedUpload: true })).toMatchObject({ decision: 'pause', reason: 'local_detector_unavailable' });
+    const aged = { ...frame, capturedAt: frame.capturedAt - 6000 };
+    expect(evaluateLocalFrame(aged, rawDetection(aged), { authorizedSharing: true, unredactedUpload: true, now: frame.capturedAt })).toMatchObject({ decision: 'pause', reason: 'stale_frame' });
   });
 });

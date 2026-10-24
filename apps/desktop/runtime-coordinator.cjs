@@ -37,6 +37,7 @@ function analysisFailureMessage(error, timedOut) {
     ANALYSIS_AUTH_FAILED: '模型认证或权限检查失败，请检查模型凭证和模型权限；未显示箭头。',
     ANALYSIS_RATE_LIMITED: '模型服务暂时限流（已做有界自动重试）；未显示箭头；请稍后手动重新提问。',
     ANALYSIS_IMAGE_TOO_LARGE: '脱敏画面超过分析服务大小上限，本次未发送，未显示箭头；当前本地共享仍保持。可停止共享后重新选择较小区域，再手动提问。',
+    ANALYSIS_VISION_REQUIRED: '当前本机模型是纯文字模型，看不到任何图片，因此无法分析屏幕；未发送画面、未显示箭头。请安装视觉模型（命令示例：ollama pull qwen2.5vl:3b），或在桌宠右键菜单“配置云端智能服务”里换成支持看图的云端模型。',
     ANALYSIS_RESPONSE_INCOMPLETE: '模型结果未完整返回，未显示箭头；请手动重新提问，不会使用残缺结果。',
     ANALYSIS_FAILED: '模型请求失败（网络、图片大小或返回异常），未显示箭头；请稍后手动重新提问，不会使用旧位置。',
     INVALID_ANALYSIS_RESPONSE: '模型返回的格式或目标未通过本机校验，未显示箭头；请重新提问。若反复出现，请检查模型是否支持图片与 JSON 指引。',
@@ -85,9 +86,17 @@ function createDesktopRuntime(options) {
   // admitted frame before any arrow appears, so the send path gets a bounded extra budget.
   const analysisSendMaxAgeMs = Math.min(9000, maxAgeMs + 4000);
   const analysisTimeoutMs = options.analysisTimeoutMs ?? 50000;
-  if (!Number.isSafeInteger(analysisTimeoutMs) || analysisTimeoutMs < 1 || analysisTimeoutMs > 60000) throw new TypeError('屏幕分析超时配置无效');
+  // 云端通常几十秒内返回；本机 CPU 视觉模型分析整屏可能要几分钟，因此允许更长的上限。
+  const analysisTimeoutLimitMs = options.analysisTimeoutLimitMs ?? 60000;
+  if (!Number.isSafeInteger(analysisTimeoutMs) || analysisTimeoutMs < 1 || analysisTimeoutMs > analysisTimeoutLimitMs
+    || !Number.isSafeInteger(analysisTimeoutLimitMs) || analysisTimeoutLimitMs < 1 || analysisTimeoutLimitMs > 180000) throw new TypeError('屏幕分析超时配置无效');
+  // A locally detected runtime reports `vision`; cloud providers leave it undefined (unknown).
+  const localModelProvider = options.questioner?.vision !== undefined;
+  const localModelVision = options.questioner?.vision === true;
   const notify = options.onState ?? (() => undefined);
   const renderTarget = options.onTarget ?? (() => undefined);
+  // Owner-approved raw upload: when enabled, the policy accepts frames that were not masked locally.
+  const isUnredactedUpload = typeof options.isUnredactedUpload === 'function' ? options.isUnredactedUpload : () => options.unredactedUpload === true;
   let observationGeneration = 0;
   let taskGeneration = 0;
   let analysisSequence = 0;
@@ -125,7 +134,7 @@ function createDesktopRuntime(options) {
   };
 
   function snapshot() {
-    return structuredClone({ ...state, observation: { ...state.observation, generation: observationGeneration }, task: { ...state.task, generation: taskGeneration } });
+    return structuredClone({ ...state, observation: { ...state.observation, generation: observationGeneration, unredactedUpload: isUnredactedUpload() }, task: { ...state.task, generation: taskGeneration } });
   }
 
   function publish() {
@@ -664,7 +673,9 @@ function createDesktopRuntime(options) {
         if (!canUseFrame(job.frame, job.observation, job.task)) { analysisFrame = null; release(job.frame); continue; }
         traceGuidance('analysis_request', { pngBytes: job.frame?.sanitizedPng?.length ?? 0, elements: job.frame?.elements?.length ?? 0,
           reason: job.reason, frameAgeMs: job.frame ? now() - job.frame.capturedAt : null, sendMaxAgeMs: analysisSendMaxAgeMs });
-        state.analysis = { state: 'analyzing', message: '仅为本次有效触发发送经过本地检查与脱敏的必要画面。' };
+        state.analysis = { state: 'analyzing', message: localModelProvider && localModelVision
+          ? '仅为本次有效触发发送经过本地检查与脱敏的必要画面。本机视觉模型在 CPU 上分析整屏可能需要 1–2 分钟，请勿重复点击；框选更小的观察区域会明显更快。'
+          : '仅为本次有效触发发送经过本地检查与脱敏的必要画面。' };
         state.task.state = job.reason === 'verification' ? 'verifying' : 'analyzing';
         publish();
         let timedOut = false;
@@ -777,7 +788,7 @@ function createDesktopRuntime(options) {
         detection = await options.source.detect(frame, { signal: controller.signal });
         const detectMs = now() - detectStartedAt;
         if (!sameGeneration(generation)) return;
-        const admitted = evaluateLocalFrame(frame, detection, { now: now(), maxAgeMs, authorizedSharing: true });
+        const admitted = evaluateLocalFrame(frame, detection, { now: now(), maxAgeMs, authorizedSharing: true, unredactedUpload: isUnredactedUpload() });
         traceGuidance('capture_cycle', { captureMs, detectMs, ageMs: now() - (frame?.capturedAt ?? now()), elements: admitted?.elements?.length ?? 0, decision: admitted?.decision });
         if (admitted.decision !== 'allow') {
           if (admitted.reason === 'stale_frame' && detection?.status === 'complete') {
@@ -965,7 +976,7 @@ function createDesktopRuntime(options) {
     observationRegion = input.region ? { ...input.region } : null;
     cloudConsent = input.cloudConsent === true;
     gateOpen = false;
-    state.observation = { state: 'observing', id: randomUUID(), generation: observationGeneration, sourceName: input.sourceName ?? '', reason: null, captureActive: true, cloudConsent };
+    state.observation = { state: 'observing', id: randomUUID(), generation: observationGeneration, sourceName: input.sourceName ?? '', reason: null, captureActive: true, cloudConsent, unredactedUpload: isUnredactedUpload() };
     if (state.task.id && !['completed', 'ended'].includes(state.task.state)) state.task.observationGeneration = observationGeneration;
     state.analysis = { state: 'idle', message: cloudConsent ? '本地观察已开启；没有有效任务触发时不会持续上传。' : '仅本地观察，不向云端发送画面。' };
     message('观察范围由本人开启；随时可以停止。');

@@ -434,6 +434,7 @@
     element('pet-window').classList.toggle('is-ball', ballMode);
     element('pet-window').classList.toggle('is-ball-hidden', ballMode && record(runtime.pet).hidden === true);
     element('pet-ball').hidden = !ballMode;
+    element('unredacted-warning').hidden = record(runtime.observation).unredactedUpload !== true;
     const captions = record(runtime.captions);
     const wake = record(runtime.wake);
     const unsafe = state.captureConflict || state.privacyConflict;

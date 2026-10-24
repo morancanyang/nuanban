@@ -17,6 +17,13 @@ function requestInput(timestamp = Date.now()): AnalysisInput {
 function provider(answer: AiProvider['answer']) { return { answer: vi.fn(answer) }; }
 
 describe('桌宠分析中的电脑来源和追问上下文', () => {
+  it('本机纯文字模型不会假装看到图片，直接给出需要视觉模型的原因', async () => {
+    const input = requestInput();
+    const endpoint = { vision: false, modelName: 'qwen2.5:3b', answer: vi.fn(async () => ({ text: '{}' })) };
+    await expect(createProviderAnalysisClient({ provider: endpoint }).analyze(input)).rejects.toMatchObject({ code: 'ANALYSIS_VISION_REQUIRED' });
+    expect(endpoint.answer).not.toHaveBeenCalled();
+  });
+
   it('任务栏图标保留公共来源和像素位置，模型只选择已经核验的入口', async () => {
     const timestamp = Date.now();
     const raw = syntheticFrame(undefined, timestamp);

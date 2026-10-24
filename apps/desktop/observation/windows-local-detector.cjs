@@ -5,9 +5,12 @@ const { ObservationError, limitsFor, pngDimensions, hashPng, checkGeometry, chec
 
 const BLACK_PIXEL = Buffer.from([0, 0, 0, 255]);
 
-function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBytes, platform, limits: limitOverrides, canReadShellControls = () => false, scaledPass = false, ocrMaxDimension = 1080 } = {}) {
+function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBytes, platform, limits: limitOverrides, canReadShellControls = () => false, scaledPass = false, ocrMaxDimension = 1080, unredactedUpload = false } = {}) {
   const limits = limitsFor(limitOverrides);
   const helper = createWindowsHelperProcess({ spawn, timeoutMs, maxOutputBytes, platform });
+  // Owner-approved raw upload: skip face detection and text masking entirely. OCR still runs because
+  // the guidance needs the on-screen labels to pick a target.
+  const rawUpload = () => (typeof unredactedUpload === 'function' ? unredactedUpload() === true : unredactedUpload === true);
   let busy = false;
   let active = null;
 
@@ -79,7 +82,7 @@ function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBy
     return { left, top, right, bottom };
   }
 
-  function sanitize(snapshot, words, faces, textAngle, signal) {
+  function sanitize(snapshot, words, faces, textAngle, signal, redacted = true) {
     checkAborted(signal);
     const image = nativeImage.createFromBuffer(snapshot.png);
     if (!image || image.isEmpty()) throw new ObservationError('native_image_decode_failed');
@@ -92,15 +95,26 @@ function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBy
     try {
       if (!Buffer.isBuffer(originalBitmap) || originalBitmap.length !== snapshot.width * snapshot.height * 4) throw new ObservationError('bitmap_dimensions_mismatch');
       bitmap = Buffer.from(originalBitmap);
-      const masks = [...words.map(word => maskRect(word.rect, snapshot.width, snapshot.height, 3, word.textAngle ?? textAngle)), ...faces.map(face => maskRect(face.rect, snapshot.width, snapshot.height, Math.max(4, Math.ceil(Math.max(face.rect.width, face.rect.height) * 0.08))))];
+      const masks = redacted ? [...words.map(word => maskRect(word.rect, snapshot.width, snapshot.height, 3, word.textAngle ?? textAngle)), ...faces.map(face => maskRect(face.rect, snapshot.width, snapshot.height, Math.max(4, Math.ceil(Math.max(face.rect.width, face.rect.height) * 0.08))))] : [];
       const work = masks.reduce((total, rect) => total + (rect.right - rect.left) * (rect.bottom - rect.top), 0);
       if (work > limits.maxPixels * 4) throw new ObservationError('redaction_work_limit');
       for (const rect of masks) {
         checkAborted(signal);
         for (let row = rect.top; row < rect.bottom; row += 1) bitmap.fill(BLACK_PIXEL, (row * snapshot.width + rect.left) * 4, (row * snapshot.width + rect.right) * 4);
       }
-      const visualControls = extractVisualControls({ bitmap, width: snapshot.width, height: snapshot.height, signal,
-        exclusions: masks.map(rect => ({ x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top })) });
+      // 关闭遮盖时没有黑色遮盖块，但仍要把文字/人脸区域排除在图形候选之外，
+      // 避免把“图标+标题”整块当成一个未标注图标候选。
+      const exclusions = redacted
+        ? masks.map(rect => ({ x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top }))
+        : [...words.map(word => word.rect), ...faces.map(face => face.rect)];
+      const visualControls = extractVisualControls({ bitmap, width: snapshot.width, height: snapshot.height, signal, exclusions });
+      if (!redacted) {
+        // Owner-approved raw upload: the captured frame itself is what will be sent, so no masking and
+        // no PNG re-encode happen here.
+        sanitizedPng = Buffer.from(snapshot.png);
+        returned = true;
+        return { sanitizedPng, visualControls };
+      }
       const sanitized = nativeImage.createFromBitmap(bitmap, { width: snapshot.width, height: snapshot.height, scaleFactor: 1 });
       if (!sanitized || sanitized.isEmpty()) throw new ObservationError('redaction_encode_failed');
       sanitizedPng = sanitized.toPNG({ scaleFactor: 1 });
@@ -126,13 +140,16 @@ function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBy
       if (typeof nativeImage?.createFromBuffer !== 'function' || typeof nativeImage?.createFromBitmap !== 'function') throw new ObservationError('native_image_unavailable');
       snapshot = snapshotFrame(frame, attachment);
       const shellGeometry = !attachment && snapshot.sourceId.startsWith('screen:') && snapshot.geometry && canReadShellControls(frame) === true ? snapshot.geometry : null;
-      const result = await helper.run({ protocol: 1, operation: 'detect', scaledPass: scaledPass === true, ocrMaxDimension, sourceId: snapshot.sourceId, sourceIdentity: snapshot.sourceIdentity, frameHash: snapshot.frameHash, width: snapshot.width, height: snapshot.height, pngBase64: snapshot.png.toString('base64'), ...(shellGeometry ? { shellGeometry } : {}) }, { signal });
+      const result = await helper.run({ protocol: 1, operation: 'detect', redact: !rawUpload(), scaledPass: scaledPass === true, ocrMaxDimension, sourceId: snapshot.sourceId, sourceIdentity: snapshot.sourceIdentity, frameHash: snapshot.frameHash, width: snapshot.width, height: snapshot.height, pngBase64: snapshot.png.toString('base64'), ...(shellGeometry ? { shellGeometry } : {}) }, { signal });
       checkAborted(signal);
       if (!result || result.protocol !== 1 || !['complete', 'unavailable', 'failed'].includes(result.status)) throw new ObservationError('detector_output_invalid');
       if (result.status !== 'complete') return failure(result.status, typeof result.reason === 'string' && /^[a-zA-Z0-9_:.+-]{1,160}$/.test(result.reason) ? result.reason : 'detector_unavailable', snapshot);
       if (result.frameHash !== snapshot.frameHash || result.sourceId !== snapshot.sourceId || result.sourceIdentity !== snapshot.sourceIdentity) throw new ObservationError('detector_frame_mismatch');
       if (result.width !== snapshot.width || result.height !== snapshot.height) throw new ObservationError('detector_dimensions_mismatch');
-      if (result.ocrStatus !== 'complete' || result.faceStatus !== 'complete' || !Array.isArray(result.words) || !Array.isArray(result.faces)) throw new ObservationError('detector_incomplete');
+      const raw = rawUpload();
+      const faceStatusOk = raw ? ['skipped', 'complete'].includes(result.faceStatus) : result.faceStatus === 'complete';
+      if (result.ocrStatus !== 'complete' || !faceStatusOk || !Array.isArray(result.words) || !Array.isArray(result.faces)) throw new ObservationError('detector_incomplete');
+      if (raw !== (result.masked === false)) throw new ObservationError('detector_redaction_mismatch');
       if (result.words.length > 8192 || result.faces.length > 512) throw new ObservationError('detector_output_limit');
       const shellControls = checkedShellControls(result.shellControls, shellGeometry);
       const textAngle = result.textAngle ?? 0;
@@ -161,9 +178,10 @@ function createWindowsLocalDetector({ nativeImage, spawn, timeoutMs, maxOutputBy
             ...positioned(checkedRect({ x: left, y: top, width: right - left, height: bottom - top }, snapshot.width, snapshot.height), snapshot.geometry) });
         }
       }
-      const faces = result.faces.map(face => positioned(checkedRect(face?.rect, snapshot.width, snapshot.height), snapshot.geometry));
-      const { sanitizedPng, visualControls } = sanitize(snapshot, words, faces, textAngle, signal);
-      return { status: 'complete', sourceId: snapshot.sourceId, sourceIdentity: snapshot.sourceIdentity, frameHash: snapshot.frameHash, width: snapshot.width, height: snapshot.height, words, faces, shellControls, visualControls, sanitizedPng, sanitizedFrameHash: hashPng(sanitizedPng), redaction: { text: true, faces: true }, ocrStatus: 'complete', faceStatus: 'complete' };
+      const faces = rawUpload() ? [] : result.faces.map(face => positioned(checkedRect(face?.rect, snapshot.width, snapshot.height), snapshot.geometry));
+      const redacted = !rawUpload();
+      const { sanitizedPng, visualControls } = sanitize(snapshot, words, faces, textAngle, signal, redacted);
+      return { status: 'complete', sourceId: snapshot.sourceId, sourceIdentity: snapshot.sourceIdentity, frameHash: snapshot.frameHash, width: snapshot.width, height: snapshot.height, words, faces, shellControls, visualControls, sanitizedPng, sanitizedFrameHash: hashPng(sanitizedPng), redaction: { text: redacted, faces: redacted }, ocrStatus: 'complete', faceStatus: redacted ? 'complete' : 'skipped' };
     } catch (error) {
       return failFrom(error, snapshot ?? frame);
     } finally {

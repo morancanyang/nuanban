@@ -43,6 +43,16 @@ function normalizeLabel(value) {
   return typeof value === 'string' ? value.normalize('NFKC').replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F]/g, '').trim().replace(/\s+/g, ' ').toLowerCase() : '';
 }
 
+// 图形候选与文字/人脸区域只有“明显重叠”才视为被遮盖污染；像素级贴边不算，
+// 否则栅格取样与取整会让正常候选偶发触发 invalid_local_regions 并停止观察。
+function overlapsRedactedRegion(control, region) {
+  const width = Math.min(control.rect.x + control.rect.width, region.rect.x + region.rect.width) - Math.max(control.rect.x, region.rect.x);
+  const height = Math.min(control.rect.y + control.rect.height, region.rect.y + region.rect.height) - Math.max(control.rect.y, region.rect.y);
+  if (width <= 0 || height <= 0) return false;
+  const overlap = width * height;
+  return overlap > 64 && overlap > control.rect.width * control.rect.height * 0.25;
+}
+
 function recognizedControls(words) {
   const controls = [];
   let matchedCount = 0;
@@ -124,6 +134,10 @@ function evaluateSelectedFrame(frame, detection, options = {}) {
 function evaluateFrame(frame, detection, options, selected) {
   const now = options.now ?? Date.now();
   const authorizedSharing = !selected && options.authorizedSharing === true;
+  // Owner-approved raw upload: the owner explicitly turned off local masking, so text/face redaction
+  // flags are not required and the uploaded frame is the captured frame itself. Every other check
+  // (frame integrity, detector completeness, limits, freshness) still applies.
+  const unredactedUpload = options.unredactedUpload === true;
   if (!frame || !Buffer.isBuffer(frame.png) || !Number.isInteger(frame.width) || !Number.isInteger(frame.height)
     || frame.width < 1 || frame.height < 1 || frame.width > 16384 || frame.height > 16384
     || !Number.isFinite(frame.capturedAt) || frame.capturedAt > now
@@ -132,7 +146,7 @@ function evaluateFrame(frame, detection, options, selected) {
   if (!detection || detection.status !== 'complete') return deny(detection?.reason ?? 'local_detector_unavailable');
   if (detection.frameHash !== frame.frameHash || detection.width !== frame.width || detection.height !== frame.height) return deny('detector_frame_mismatch');
   if (!Array.isArray(detection.words) || !Array.isArray(detection.faces)
-    || detection.redaction?.text !== true || detection.redaction?.faces !== true) return deny('incomplete_local_detection');
+    || (!unredactedUpload && (detection.redaction?.text !== true || detection.redaction?.faces !== true))) return deny('incomplete_local_detection');
   if (detection.words.length > 8192 || detection.faces.length > 512) return deny('local_detection_limit');
   if (!validPng(detection.sanitizedPng, frame.width, frame.height) || detection.sanitizedPng.length > LIMITS.maxPngBytes) return deny('local_redaction_invalid');
   const shellControls = detection.shellControls ?? [];
@@ -144,12 +158,12 @@ function evaluateFrame(frame, detection, options, selected) {
   if (detection.words.some(word => typeof word?.text !== 'string' || !word.text.length || word.text.length > 512 || !validRect(word.rect, frame.width, frame.height))
     || detection.faces.some(face => !validRect(face?.rect, frame.width, frame.height))) return deny('invalid_local_regions');
   const visualControls = detection.visualControls ?? [];
+  // 遮盖模式下，图形候选与文字/人脸区域重叠说明候选被遮盖污染，必须拒绝；
+  // 本人已关闭本机遮盖时没有遮盖区域，图标与旁边的标签天然相邻甚至重叠，不能再据此停止观察。
   if (!Array.isArray(visualControls) || visualControls.length > 48 || visualControls.some(control =>
     control?.label !== '未标注图标' || control.surface !== 'visual' || !/^[a-f0-9]{64}$/.test(control.appearance ?? '')
     || !validRect(control.rect, frame.width, frame.height)
-    || [...detection.words, ...detection.faces].some(region => control.rect.x < region.rect.x + region.rect.width
-      && region.rect.x < control.rect.x + control.rect.width && control.rect.y < region.rect.y + region.rect.height
-      && region.rect.y < control.rect.y + control.rect.height))) return deny('invalid_local_regions');
+    || (!unredactedUpload && [...detection.words, ...detection.faces].some(region => overlapsRedactedRegion(control, region))))) return deny('invalid_local_regions');
   const text = detection.words.map(word => word.text).join(' ');
   if (text.length > 20000) return deny('local_text_limit');
   if (!authorizedSharing && (isRestrictedText(text) || isRestrictedText(detection.words.map(word => word.text).join('')))) return deny('sensitive_screen', 'private');
@@ -173,10 +187,13 @@ function evaluateFrame(frame, detection, options, selected) {
   else if (positiveMarkers.length >= 2 && allowedWords.length >= 3 && unknownCount <= allowedWords.length * 2) scene = 'settings';
   else if (allowedWords.length >= 3 && unknownCount <= 1 && [...labels].filter(label => browserLabels.has(label)).length >= 2) scene = 'browser_controls';
   else if (allowedWords.length >= 4 && unknownCount <= 1 && [...labels].filter(label => editorLabels.has(label)).length >= 3) scene = 'editor_controls';
-  const requiresRedaction = (!selected && !authorizedSharing) || detection.words.length > 0 || detection.faces.length > 0;
+  const requiresRedaction = !unredactedUpload && ((!selected && !authorizedSharing) || detection.words.length > 0 || detection.faces.length > 0);
   if (requiresRedaction && !shellControls.length && digest(detection.sanitizedPng) === frame.frameHash) return deny('unredacted_frame');
   let sanitizedPng;
-  if (selected || authorizedSharing) {
+  if (unredactedUpload) {
+    sanitizedPng = Buffer.from(detection.sanitizedPng);
+    scene = 'owner_approved_unredacted';
+  } else if (selected || authorizedSharing) {
     sanitizedPng = Buffer.from(detection.sanitizedPng);
     scene = selected ? 'selected_frame' : 'authorized_sharing';
   } else if (shellControls.length || !scene || detection.sanitizedPng.length > 2_000_000) {
@@ -185,12 +202,13 @@ function evaluateFrame(frame, detection, options, selected) {
     catch { return deny('control_layout_unavailable'); }
     scene = 'controls_only';
   } else sanitizedPng = Buffer.from(detection.sanitizedPng);
-  if (!authorizedSharing && sanitizedPng.length > 2_000_000) { sanitizedPng.fill(0); return deny('control_layout_limit'); }
+  if (!authorizedSharing && !unredactedUpload && sanitizedPng.length > 2_000_000) { sanitizedPng.fill(0); return deny('control_layout_limit'); }
+  if (unredactedUpload && sanitizedPng.length > 12 * 1024 * 1024) { sanitizedPng.fill(0); return deny('control_layout_limit'); }
   const sanitizedHash = digest(sanitizedPng);
   if (requiresRedaction && sanitizedHash === frame.frameHash) { sanitizedPng.fill(0); return deny('unredacted_frame'); }
   if (now - frame.capturedAt > (options.maxAgeMs ?? 5000)) { sanitizedPng.fill(0); return deny('stale_frame'); }
   const elements = allowedWords.map((word, index) => ({ id: `element_${frame.frameHash.slice(0, 12)}_${index}`, label: word.text.trim(), rect: { ...word.rect }, ...(word.surface ? { surface: word.surface } : {}) }));
-  if (selected || authorizedSharing) {
+  if (selected || authorizedSharing || unredactedUpload) {
     for (const control of visualControls) {
       if (shellControls.some(shell => control.rect.x >= shell.rect.x && control.rect.y >= shell.rect.y
         && control.rect.x + control.rect.width <= shell.rect.x + shell.rect.width
@@ -212,7 +230,7 @@ function evaluateFrame(frame, detection, options, selected) {
     frameHash: frame.frameHash, sanitizedHash, capturedAt: frame.capturedAt, sourceId: frame.sourceId,
     sourceName: frame.sourceName ?? '', displayId: frame.displayId, width: frame.width, height: frame.height,
     geometry: frame.geometry ? { ...frame.geometry } : null, signature, elements, sanitizedPng,
-    redactionProfile: 'all_text_and_faces_v1', scene,
+    redactionProfile: unredactedUpload ? 'owner_approved_none' : 'all_text_and_faces_v1', unredacted: unredactedUpload, scene,
   };
   admittedFrames.add(admitted);
   return admitted;
