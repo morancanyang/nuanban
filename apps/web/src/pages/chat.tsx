@@ -174,7 +174,7 @@ export function ChatPage() {
       </section>
       <aside className="chat-side"><section className="panel caption-panel"><span className="eyebrow">大字字幕</span><p className="caption" aria-live="polite" aria-atomic="true" style={{ fontSize: preferences.captionSize }}>{caption || '微光指引的讲解，会在这里清楚地显示。'}</p>{speech.status === 'unavailable' && <p className="small-note" role="status">系统没有可用的语音播放，已保留大字字幕。</p>}{speech.status === 'error' && <p className="small-note" role="status">语音播放失败，字幕仍然可读。</p>}<div className="stack"><button className="button secondary" disabled={busy || !lastAnswer || !!failure} onClick={() => { if (lastAnswer) { setCaption(lastAnswer.text); speech.speak(lastAnswer.text); } }}><RotateCcw size={19} />再讲一遍</button><button className="button plain" onClick={stop}><Square size={16} />停止讲解</button></div></section><Link className="guide-invitation" to="/overlay/guide">想亲手试一试？<br /><strong>打开真实桌宠教学 <ArrowRight size={18} /></strong></Link><div className="small-note">图片仅在本次确认且通过本机检查后交给模型接口；未接模型时不会上传。不会代替你操作电脑。</div></aside>
     </div>
-    <Modal open={inputModal !== null} onOpenChange={open => { if (!open) stopMedia(); }} title={inputModal === 'voice' ? '本地语音输入' : '真实屏幕观察'} description="真实采集需本人选择范围并确认；不会自动开始监控。">
+    <Modal open={inputModal !== null} onOpenChange={open => { if (!open) stopMedia(); }} title={inputModal === 'voice' ? '语音输入' : '真实屏幕观察'} description="真实采集需本人选择范围并确认；不会自动开始监控。">
       {inputModal === 'voice' ? <LocalVoicePanel onTranscript={text => {
         const draft = input ? `${input}\n${text}` : text;
         if (draft.length > 1500) throw new Error('voice_draft_limit');
