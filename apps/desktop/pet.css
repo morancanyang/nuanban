@@ -305,3 +305,21 @@ textarea::placeholder { color: #8b7362; }
   .pet-stage:hover .pet { transform: translateY(-3px); }
   .pet { transition: transform .18s ease; }
 }
+
+/* 悬浮球：桌宠空闲或失焦时收起为右侧圆球，点击取回。 */
+.pet-ball { display: none; position: relative; width: 56px; height: 56px; flex: 0 0 auto; align-items: center; justify-content: center;
+  padding: 0; overflow: visible; border: 2px solid #e6cbb0; border-radius: 50%; background: radial-gradient(circle at 32% 28%, #fffaf0, #f0dcc2);
+  box-shadow: 0 6px 18px #503a2340; cursor: pointer; -webkit-app-region: no-drag; }
+.pet-ball img { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; pointer-events: none; }
+.pet-ball:hover:not(:disabled) { border-color: #b9916c; background: radial-gradient(circle at 32% 28%, #fffdf7, #ead3b4); transform: translateY(-2px); }
+.pet-ball-dot { position: absolute; right: 2px; bottom: 4px; width: 11px; height: 11px; border: 2px solid #fffaf0; border-radius: 50%; background: #6b8f5a; }
+.pet-window.is-ball { align-items: center; justify-content: center; gap: 0; padding: 4px; }
+.pet-window.is-ball > :not(.pet-ball) { display: none !important; }
+.pet-window.is-ball .pet-ball { display: flex; }
+@media (prefers-reduced-motion: no-preference) {
+  .pet-window.is-ball .pet-ball { animation: pet-ball-breathe 3.6s ease-in-out infinite; }
+  @keyframes pet-ball-breathe {
+    0%, 100% { transform: translateY(0); box-shadow: 0 6px 18px #503a2340; }
+    50% { transform: translateY(-3px); box-shadow: 0 9px 22px #503a234d; }
+  }
+}

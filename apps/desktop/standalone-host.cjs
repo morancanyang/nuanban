@@ -71,6 +71,15 @@ function createStandaloneHost(options) {
   let avatarService = null;
   let avatarBridge = null;
   let expanded = false;
+  let collapsed = false;
+  let restoreBounds = null;
+  let idleTimer = null;
+  let blurTimer = null;
+  let menuOpen = false;
+  let dialogOpen = 0;
+  let lastActivityAt = 0;
+  const idleHideMs = Number.isFinite(options.autoHideMs) ? Math.max(0, options.autoHideMs) : 5_000;
+  const ballSize = 64;
   let petClosePromise = null;
   let petDrag = null;
   let liliTray = null;
@@ -92,7 +101,10 @@ function createStandaloneHost(options) {
     onState: () => { if (runtime) publish(); },
     onWake: event => {
       const current = wake.snapshot();
-      if (!closing && event.localOnly === true && event.generation === current.generation && current.enabled && current.microphoneActive) showPetPanel();
+      if (!closing && event.localOnly === true && event.generation === current.generation && current.enabled && current.microphoneActive) {
+        expandFromBall({ focus: false });
+        showPetPanel();
+      }
     },
     onQuestion: text => {
       const current = wake.snapshot();
@@ -115,6 +127,7 @@ function createStandaloneHost(options) {
 
   function snapshot() {
     const state = runtime.snapshot();
+    state.pet = { collapsed, ballSize, idleHideMs };
     state.voice = voiceHost?.snapshot() ?? { state: 'off', active: false, microphoneActive: false, configured: false, message: '面对面语音未开启。' };
     state.voice = { ...state.voice, presentation: 'pet', ...(faceVoiceVisible ? { bubble: { ...voiceBubble } } : {}) };
     const localWake = wake.snapshot();
@@ -225,7 +238,7 @@ function createStandaloneHost(options) {
   }
 
   function movePetAwayFrom(rect, workArea) {
-    if (!live(petWindow) || !intersects(petWindow.getBounds(), rect)) return;
+    if (collapsed || !live(petWindow) || !intersects(petWindow.getBounds(), rect)) return;
     const bounds = petWindow.getBounds();
     const candidates = [
       { x: workArea.x + 12, y: workArea.y + 12 },
@@ -277,7 +290,86 @@ function createStandaloneHost(options) {
     return { preload: path.join(__dirname, preload), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true };
   }
 
+  function clampPetBounds(bounds, area) {
+    const width = Math.max(1, Math.min(bounds.width, area.width - 16));
+    const height = Math.max(1, Math.min(bounds.height, area.height - 16));
+    return {
+      x: Math.round(Math.max(area.x + 8, Math.min(bounds.x, area.x + area.width - width - 8))),
+      y: Math.round(Math.max(area.y + 8, Math.min(bounds.y, area.y + area.height - height - 8))),
+      width,
+      height,
+    };
+  }
+
+  function ballBoundsFor(bounds) {
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const centerY = bounds.y + Math.round(bounds.height / 2);
+    return {
+      x: area.x + area.width - ballSize - 8,
+      y: Math.round(Math.max(area.y + 8, Math.min(centerY - ballSize / 2, area.y + area.height - ballSize - 8))),
+      width: ballSize,
+      height: ballSize,
+    };
+  }
+
+  function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    if (closing || collapsed || dialogOpen > 0 || menuOpen || !live(petWindow) || !petWindow.isVisible()) return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      collapseToBall('idle');
+    }, idleHideMs);
+    idleTimer.unref?.();
+  }
+
+  function noteActivity() {
+    const now = Date.now();
+    if (now - lastActivityAt < 800) return;
+    lastActivityAt = now;
+    resetIdleTimer();
+  }
+
+  function expandFromBall({ focus = true } = {}) {
+    if (!collapsed || !live(petWindow)) return false;
+    collapsed = false;
+    clearTimeout(blurTimer);
+    blurTimer = null;
+    const area = screen.getDisplayMatching(restoreBounds ?? petWindow.getBounds()).workArea;
+    const fallback = { x: area.x + area.width - 324, y: area.y + area.height - 414, width: 300, height: Math.min(390, area.height - 24) };
+    petWindow.setBounds(clampPetBounds(restoreBounds ?? fallback, area));
+    petWindow.setAlwaysOnTop(false);
+    if (focus) {
+      petWindow.show();
+      petWindow.focus();
+    } else {
+      petWindow.showInactive();
+    }
+    publish();
+    resetIdleTimer();
+    return true;
+  }
+
+  function collapseToBall(reason = 'idle') {
+    if (closing || collapsed || petClosePromise || dialogOpen > 0 || menuOpen) return false;
+    if (voiceHost?.snapshot().active === true || faceVoiceVisible === true) return false;
+    if (!live(petWindow) || !petWindow.isVisible()) return false;
+    restoreBounds = petWindow.getBounds();
+    collapsed = true;
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    clearTimeout(blurTimer);
+    blurTimer = null;
+    clearPetDrag();
+    petWindow.setAlwaysOnTop(false);
+    petWindow.setBounds(ballBoundsFor(restoreBounds));
+    petWindow.showInactive();
+    publish();
+    return true;
+  }
+
   function setExpanded(value, liliView = lili.snapshot().view) {
+    if (collapsed) expandFromBall({ focus: false });
     clearPetDrag();
     expanded = value && !faceVoiceVisible;
     if (!live(petWindow)) return;
@@ -322,6 +414,8 @@ function createStandaloneHost(options) {
 
   function dragPet(action, point) {
     if (!['start', 'move', 'end'].includes(action)) throw new Error('桌宠移动请求无效');
+    if (collapsed) return false;
+    noteActivity();
     if (point !== undefined && (!point || Object.keys(point).length !== 2 || !['x', 'y'].every(key => Number.isFinite(point[key]) && Math.abs(point[key]) <= 1000000))) throw new Error('桌宠指针坐标无效');
     if (action === 'end') { clearPetDrag(); if (live(petWindow)) lili.rememberPosition(petWindow.getBounds()); return true; }
     if (closing || !live(petWindow) || !petWindow.isVisible()) { clearPetDrag(); return false; }
@@ -352,6 +446,7 @@ function createStandaloneHost(options) {
   function showPetPanel(panel = {}) {
     if (petClosePromise) return petClosePromise.then(() => showPetPanel(panel));
     if (!live(petWindow)) throw new Error('独立桌宠尚未就绪，请重新打开客户端。');
+    noteActivity();
     if (lili.snapshot().enabled && lili.snapshot().view.clickThrough) lili.command({ type: 'display.set', options: { clickThrough: false } });
     if (petWindow.isMinimized()) petWindow.restore();
     setExpanded(true);
@@ -369,6 +464,7 @@ function createStandaloneHost(options) {
   }
 
   async function openFaceVoice() {
+    expandFromBall({ focus: false });
     setExpanded(false);
     if (live(petWindow)) {
       if (petWindow.isMinimized()) petWindow.restore();
@@ -397,7 +493,12 @@ function createStandaloneHost(options) {
   }
 
   function showDialog(configuration) {
-    return live(petWindow) ? dialog.showMessageBox(petWindow, configuration) : dialog.showMessageBox(configuration);
+    dialogOpen += 1;
+    const pending = live(petWindow) ? dialog.showMessageBox(petWindow, configuration) : dialog.showMessageBox(configuration);
+    return Promise.resolve(pending).finally(() => {
+      dialogOpen = Math.max(0, dialogOpen - 1);
+      noteActivity();
+    });
   }
 
   function runAction(operation) {
@@ -660,6 +761,12 @@ function createStandaloneHost(options) {
 
   function closePetWindow() {
     if (petClosePromise) return petClosePromise;
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    clearTimeout(blurTimer);
+    blurTimer = null;
+    collapsed = false;
+    restoreBounds = null;
     if (!options.hasManagementWindow?.()) {
       options.onExit();
       return true;
@@ -686,6 +793,7 @@ function createStandaloneHost(options) {
       ] },
       ...(lili.snapshot().enabled ? liliMenuItems() : []),
       { label: '桌宠全部功能', click: () => showPetPanel({ section: 'features' }) },
+      { label: collapsed ? '取回桌宠' : '收起为悬浮球', click: () => { menuOpen = false; if (collapsed) expandFromBall(); else collapseToBall('menu'); } },
       { label: '远程与录屏可见（观察期间暂停）', type: 'checkbox', checked: petDisplayCompatible,
         click: () => setPetDisplayCompatibility(!petDisplayCompatible) },
       { label: '星云' + defaultPet.name + ' · 3D 形象', click: () => showPetPanel({ section: 'avatar' }) },
@@ -725,7 +833,7 @@ function createStandaloneHost(options) {
         click: () => send({ type: 'display.set', options: { size } }) })) },
       { label: '暂停栗栗动画', type: 'checkbox', checked: state.view.paused, click: () => send({ type: 'animation.configure', options: { paused: !state.view.paused } }) },
       { label: '减少动态效果', type: 'checkbox', checked: state.view.reducedMotion, click: () => send({ type: 'animation.configure', options: { reducedMotion: !state.view.reducedMotion } }) },
-      { label: '栗栗置顶', type: 'checkbox', checked: state.view.alwaysOnTop, click: () => send({ type: 'display.set', options: { alwaysOnTop: !state.view.alwaysOnTop } }) },
+      { label: '桌宠不置顶（置顶已取消）', enabled: false },
       { label: '鼠标穿透（从托盘取消）', type: 'checkbox', checked: state.view.clickThrough, enabled: Boolean(liliTray),
         click: () => send({ type: 'display.set', options: { clickThrough: !state.view.clickThrough } }) },
       { label: '隐藏栗栗（从托盘恢复）', enabled: Boolean(liliTray), click: () => send({ type: 'display.set', options: { visible: false } }) },
@@ -761,7 +869,7 @@ function createStandaloneHost(options) {
     if (view.enabled) ensureLiliTray();
     if ((view.clickThrough || view.visible === false) && !liliTray) return { ok: false, code: 'tray_unavailable' };
     petWindow.setIgnoreMouseEvents(view.enabled && view.clickThrough, { forward: true });
-    petWindow.setAlwaysOnTop(view.enabled ? view.alwaysOnTop : true, 'floating');
+    petWindow.setAlwaysOnTop(false);
     petWindow.setOpacity?.(view.enabled ? view.opacity : 1);
     setExpanded(expanded, view);
     if (view.enabled && Number.isFinite(view.x) && Number.isFinite(view.y)) {
@@ -894,7 +1002,7 @@ function createStandaloneHost(options) {
       suggestReview: proposal => { if (!learningStore) throw new Error('加密教学仓储不可用'); const result = learningStore.suggestReview(proposal); publish(); return result; } });
     const area = screen.getPrimaryDisplay().workArea;
     petWindow = new BrowserWindow({ width: 300, height: Math.min(390, area.height - 24), x: area.x + area.width - 324, y: area.y + area.height - Math.min(414, area.height - 12),
-      title: '微光指引桌宠', icon: PRODUCT_ICON_PATH, show: false, transparent: true, frame: false, hasShadow: false, alwaysOnTop: true, skipTaskbar: true,
+      title: '微光指引桌宠', icon: PRODUCT_ICON_PATH, show: false, transparent: true, frame: false, hasShadow: false, alwaysOnTop: false, skipTaskbar: true,
       focusable: true, resizable: false, movable: true, backgroundColor: '#00000000', webPreferences: windowPreferences('pet-preload.cjs') });
     guideWindow = new BrowserWindow({ width: 400, height: 300, title: '微光指引教学指引', icon: PRODUCT_ICON_PATH, show: false, transparent: true, frame: false,
       hasShadow: false, alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, backgroundColor: '#00000000', webPreferences: windowPreferences('guide-preload.cjs') });
@@ -902,18 +1010,37 @@ function createStandaloneHost(options) {
       hasShadow: false, alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, backgroundColor: '#00000000', webPreferences: windowPreferences('caption-preload.cjs') });
     for (const window of [petWindow, captionWindow]) secureWindow(window);
     secureWindow(guideWindow, false);
-    for (const window of [petWindow, guideWindow, captionWindow]) window.setAlwaysOnTop(true, 'floating');
+    for (const window of [guideWindow, captionWindow]) window.setAlwaysOnTop(true, 'floating');
+    petWindow.setAlwaysOnTop(false);
     syncPetProtection(runtime.snapshot().observation);
     guideWindow.setIgnoreMouseEvents(true, { forward: true });
     captionWindow.setIgnoreMouseEvents(true, { forward: true });
     petWindow.on('close', event => { if (!options.isQuitting()) { event.preventDefault(); runAction(closePetWindow); } });
     petWindow.on('closed', () => { petWindow = null; if (!options.isQuitting()) options.onExit(); });
+    petWindow.on('focus', () => {
+      clearTimeout(blurTimer);
+      blurTimer = null;
+      noteActivity();
+    });
+    petWindow.on('blur', () => {
+      clearPetDrag();
+      clearTimeout(blurTimer);
+      blurTimer = setTimeout(() => {
+        blurTimer = null;
+        collapseToBall('blur');
+      }, 300);
+      blurTimer.unref?.();
+    });
+    petWindow.on('show', () => resetIdleTimer());
     petWindow.webContents.on('render-process-gone', () => { runAction(() => stop('renderer-gone')); });
     petWindow.on('unresponsive', () => { runAction(() => stop('renderer-gone')); });
     guideWindow.webContents.on('render-process-gone', () => { clearGuide(); runAction(() => stop('renderer-gone')); });
     guideWindow.webContents.on('did-finish-load', () => { if (pendingGuide) guideWindow.webContents.send('nuanban:guide:state', pendingGuide); });
     captionWindow.webContents.on('did-finish-load', updateCaptions);
     handle('nuanban:pet:snapshot', snapshot);
+    handle('nuanban:pet:activity', () => { noteActivity(); return true; });
+    handle('nuanban:pet:expand', () => expandFromBall());
+    handle('nuanban:pet:collapse', () => collapseToBall('manual'));
     handle('nuanban:pet:focus-input', input => {
       if (input !== undefined) throw new Error('桌宠聚焦参数无效');
       return focusPetInput();
@@ -945,7 +1072,11 @@ function createStandaloneHost(options) {
       await runtime.ask(input.text, input.observationGeneration);
       return { ok: true, snapshot: snapshot() };
     });
-    handle('nuanban:pet:context-menu', () => { menu().popup({ window: petWindow }); return true; });
+    handle('nuanban:pet:context-menu', () => {
+      menuOpen = true;
+      menu().popup({ window: petWindow, callback: () => { menuOpen = false; noteActivity(); } });
+      return true;
+    });
     handle('nuanban:pet:open-main', route => { if (typeof route !== 'string' || !managementRoutes.has(route)) throw new Error('管理页面不存在'); return options.showManagement(route); });
     handle('nuanban:pet:open-tool', openPetTool);
     handle('nuanban:pet:close', closePetWindow);
@@ -968,12 +1099,13 @@ function createStandaloneHost(options) {
     listen(powerMonitor, 'lock-screen', () => runAction(() => stop('lock')));
     listen(powerMonitor, 'suspend', () => runAction(() => stop('lock')));
     for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) listen(screen, event, () => {
-      clearPetDrag(); clearGuide(); setExpanded(expanded); if (live(petWindow)) lili.rememberPosition(petWindow.getBounds()); runAction(() => stop('window-moved'));
+      clearPetDrag(); clearGuide(); if (!collapsed) setExpanded(expanded); if (live(petWindow)) lili.rememberPosition(petWindow.getBounds()); runAction(() => stop('window-moved'));
     });
     if (options.liliEnabled === true) lili.setEnabled(true);
     lili.start();
     await Promise.all([petWindow.loadFile(petPath), guideWindow.loadFile(guidePath), captionWindow.loadFile(captionPath)]);
     petWindow.showInactive();
+    resetIdleTimer();
     pollReviews();
     reminderTimer = setInterval(pollReviews, 15000);
     reminderTimer.unref?.();
@@ -982,6 +1114,10 @@ function createStandaloneHost(options) {
 
   async function dispose(reason) {
     singleFrameEpoch += 1;
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    clearTimeout(blurTimer);
+    blurTimer = null;
     const singleFrameStopping = singleFrame.cancel().then(() => true, () => false);
     clearPetDrag();
     lili.rememberPosition(live(petWindow) ? petWindow.getBounds() : null);

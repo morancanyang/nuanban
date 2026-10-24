@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $desktop = Join-Path $workspace 'apps\desktop'
 $runtime = Join-Path $desktop 'node_modules\electron\dist\electron.exe'
+if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) { $runtime = Join-Path $workspace 'node_modules\electron\dist\electron.exe' }
 $developmentUi = Join-Path $workspace 'apps\web\dist\index.html'
 $packagedUi = Join-Path $desktop 'ui\index.html'
 if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
