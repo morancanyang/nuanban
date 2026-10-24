@@ -59,14 +59,22 @@ async function readReply(response, signal) {
 function createOpenAiCompatibleProvider(options) {
   const configuration = checkedConfiguration(options);
   const fetchRequest = options.fetch ?? globalThis.fetch;
-  const timeoutMs = options.timeoutMs === undefined ? 60000 : options.timeoutMs;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
+  // Local runtimes answer on CPU and can legitimately need a couple of minutes for one image,
+  // so loopback gets a larger default budget; cloud gateways keep the original 60s ceiling.
+  const loopback = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/)/.test(configuration.endpoint);
+  const maxTimeoutMs = loopback ? 180000 : 60000;
+  const timeoutMs = options.timeoutMs === undefined ? (loopback ? 180000 : 60000) : options.timeoutMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > maxTimeoutMs) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   const retryAttempts = options.retryAttempts === undefined ? 2 : options.retryAttempts;
   const retryDelaysMs = options.retryDelaysMs === undefined ? [600, 1600] : options.retryDelaysMs;
   if (!Number.isSafeInteger(retryAttempts) || retryAttempts < 0 || retryAttempts > 4
     || !Array.isArray(retryDelaysMs) || retryDelaysMs.length < retryAttempts
     || retryDelaysMs.some(delay => !Number.isSafeInteger(delay) || delay < 0 || delay > 10_000)) throw new ProviderFailure('PROVIDER_UNAVAILABLE');
   return Object.freeze({
+    // `vision` is only present for locally detected runtimes: the model name tells whether images
+    // can be understood at all. Cloud gateways leave it undefined, meaning "unknown, assume able".
+    ...(options.vision === true || options.vision === false ? { vision: options.vision } : {}),
+    modelName: configuration.model,
     status() { return { available: true }; },
     async answer(input) {
       if (!input || typeof input.question !== 'string' || !input.question.trim() || input.question.length > 1500) throw new ProviderFailure('INVALID_REQUEST');
@@ -181,6 +189,10 @@ const LOCAL_MODEL_ENDPOINTS = Object.freeze([
 
 // A local model runtime needs no account and no key, so the owner can talk to the pet without
 // configuring anything. Detection is fail-closed: no runtime means no provider, never a fake answer.
+// 本机模型可能是纯文字模型（例如 qwen2.5:3b），它完全看不到图片。识别出型号后标记 vision，
+// 由分析端口决定是直接看图还是明确说明“需要视觉模型”，而不是让模型凭空解释被遮盖的画面。
+const VISION_MODEL_PATTERN = /(?:^|[-_.:/])(vl|vision|llava|bakllava|minicpm-v|moondream|pixtral)(?:[-_.:/]|$)|gemma3|qwen[0-9.]*vl|llama[0-9.]*vision/i;
+
 async function detectLocalModelProvider(options = {}) {
   const fetchRequest = options.fetch ?? globalThis.fetch;
   if (typeof fetchRequest !== 'function') return undefined;
@@ -193,9 +205,12 @@ async function detectLocalModelProvider(options = {}) {
       const identifiers = Array.isArray(parsed?.data) ? parsed.data
         .map(entry => entry?.id)
         .filter(id => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(id)) : [];
-      const model = identifiers.find(id => /qwen|llama|mistral|gemma|phi|deepseek|chat|instruct/i.test(id)) ?? identifiers[0];
+      const visionModel = identifiers.find(id => VISION_MODEL_PATTERN.test(id));
+      const chatModel = identifiers.find(id => /qwen|llama|mistral|gemma|phi|deepseek|chat|instruct/i.test(id));
+      const model = visionModel ?? chatModel ?? identifiers[0];
       if (!model) continue;
-      return createOpenAiCompatibleProvider({ baseUrl: candidate.baseUrl, model, apiKey: candidate.credential, fetch: fetchRequest });
+      return createOpenAiCompatibleProvider({ baseUrl: candidate.baseUrl, model, apiKey: candidate.credential, fetch: fetchRequest,
+        vision: VISION_MODEL_PATTERN.test(model) });
     } catch { /* try the next local runtime */ }
   }
   return undefined;
