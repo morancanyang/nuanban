@@ -29,13 +29,14 @@
 pnpm desktop:lili
 ```
 
-已安装的 Electron 位于 `apps/desktop/node_modules/electron/dist/electron.exe`。此入口不下载依赖，不启动 Blender，不要求先构建管理端页面。若需要重新安装开发依赖，另行执行 `pnpm install --frozen-lockfile`。
+已安装的 Electron 位于 `apps/desktop/node_modules/electron/dist/electron.exe`；本仓库使用 hoisted 安装时位于仓库根 `node_modules/electron/dist/electron.exe`，`scripts/start-lili-desktop.ps1` 会自动选择存在的路径。此入口不下载依赖，不启动 Blender，不要求先构建管理端页面。若需要重新安装开发依赖，另行执行 `pnpm install --frozen-lockfile`。
 
 - 点击栗栗会招手并展开微光指引原有功能面板；拖动后释放不会误开面板。
 - 右键菜单的“角色”可切换栗栗与原有形象。栗栗不冒充 `cat`、`rabbit` 或 `dog`。
 - “栗栗动作”“栗栗表情”“栗栗大小”可手动查看资源；支持暂停和减少动态。
-- 置顶、隐藏、鼠标穿透可从菜单控制。隐藏或穿透后，从栗栗托盘图标恢复；托盘不可用时拒绝隐藏与穿透，返回 `tray_unavailable`。
-- 大小、位置、透明度、置顶和动画偏好写入当前微光指引用户数据目录的 `lili-pet-preferences.json`。鼠标穿透和隐藏不在下次启动自动恢复。
+- 隐藏、鼠标穿透仍可从菜单控制。隐藏或穿透后，从栗栗托盘图标恢复；托盘不可用时拒绝隐藏与穿透，返回 `tray_unavailable`。
+- 桌宠窗口本身不再置顶：打开其他软件或桌宠失焦时立即收起，空闲 5 秒也会自动收起为屏幕右侧的圆形悬浮球；点击悬浮球或本地语音唤醒可立即取回。右键菜单的“取回桌宠 / 收起为悬浮球”可手动切换。
+- 大小、位置、透明度、动画与置顶偏好写入当前微光指引用户数据目录的 `lili-pet-preferences.json`；`alwaysOnTop` 偏好在桌宠侧不再改变窗口层级（桌宠始终不置顶）。鼠标穿透和隐藏不在下次启动自动恢复。
 - 启动参数为 `--pet-lili`；环境变量 `NUANBAN_DESKTOP_PET=lili` 也可启用。`--pet-default` 显式选回原有形象。默认启动路径不强制选栗栗。
 - 已经运行的旧进程不会热加载新的主进程或 preload 文件。保存当前工作并正常退出微光指引后再启动，不能靠第二次启动升级内存中的旧代码；新版进程支持单实例角色切换请求。
 
@@ -69,7 +70,7 @@ pnpm desktop:lili
 | `command({type:'animation.configure', options})` | `paused`、`reducedMotion` 布尔设置 |
 | `command({type:'semantic.send', name, text})` | 语义事件；可带不超过 500 字的纯文本气泡 |
 | `command({type:'ui.bubble', text})` | 显示纯文本，12 秒后消失；空字符串立即隐藏 |
-| `command({type:'display.set', options})` | `x,y`（Windows DIP）、`size`（64..320）、`opacity`（0.2..1）、`alwaysOnTop`、`clickThrough`、`visible`、`facing:'front'` |
+| `command({type:'display.set', options})` | `x,y`（Windows DIP）、`size`（64..320）、`opacity`（0.2..1）、`alwaysOnTop`（桌宠侧不再改变窗口层级，始终不置顶）、`clickThrough`、`visible`、`facing:'front'` |
 | `onState(listener)`、`onResource(listener)`、`onEvent(listener)` | 订阅状态、资源或动作/交互事件，返回取消订阅函数 |
 
 所有命令检查允许字段；未选栗栗的控制请求返回 `lili_not_selected`。未知动作、表情、方向或非法数值不假报成功。首版只支持正面方向，左右转向返回 `unsupported_facing`，不镜像持灯侧。

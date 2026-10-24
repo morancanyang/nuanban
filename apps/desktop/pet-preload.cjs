@@ -142,6 +142,7 @@ function projectSnapshot(value) {
     analysis: { state: 'string', message: 'string' },
     captions: { enabled: 'boolean', text: 'string' },
     wake: { state: 'string', reason: 'string', phase: 'string', microphoneActive: 'boolean', dictationAvailable: 'boolean' },
+    pet: { collapsed: 'boolean', ballSize: 'number', idleHideMs: 'number' },
     voice: { state: 'string', active: 'boolean', microphoneActive: 'boolean', configured: 'boolean', message: 'string', mode: 'string', presentation: 'string' },
   };
   for (const [name, fields] of Object.entries(sections)) {
@@ -180,7 +181,7 @@ function projectSnapshot(value) {
 function projectReply(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return typeof value === 'boolean' ? value : null;
   const result = projectRecord(value, { ok: 'boolean', accepted: 'boolean', success: 'boolean', status: 'string', message: 'string', reason: 'string', error: 'string' });
-  if (['observation', 'task', 'analysis', 'captions', 'wake', 'voice', 'learning', 'learningUnavailable', 'learningError'].some(section => Object.hasOwn(value, section))) Object.assign(result, projectSnapshot(value));
+  if (['observation', 'task', 'analysis', 'captions', 'wake', 'pet', 'voice', 'learning', 'learningUnavailable', 'learningError'].some(section => Object.hasOwn(value, section))) Object.assign(result, projectSnapshot(value));
   if (Object.hasOwn(value, 'snapshot')) result.snapshot = projectSnapshot(value.snapshot);
   return result;
 }
@@ -283,4 +284,7 @@ contextBridge.exposeInMainWorld('nuanbanPet', Object.freeze({
     return ipcRenderer.invoke('nuanban:pet:open-tool', route);
   },
   showMenu: () => ipcRenderer.invoke('nuanban:pet:context-menu'),
+  activity: () => ipcRenderer.invoke('nuanban:pet:activity'),
+  expand: () => ipcRenderer.invoke('nuanban:pet:expand'),
+  collapse: () => ipcRenderer.invoke('nuanban:pet:collapse'),
 }));

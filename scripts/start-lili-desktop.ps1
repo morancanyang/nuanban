@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $desktop = Join-Path $workspace 'apps\desktop'
 $runtime = Join-Path $desktop 'node_modules\electron\dist\electron.exe'
+if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) { $runtime = Join-Path $workspace 'node_modules\electron\dist\electron.exe' }
 foreach ($required in @($runtime, (Join-Path $desktop 'main.cjs'), (Join-Path $desktop 'assets\lili\manifest.json'))) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required local file not found: $required. Run pnpm install --frozen-lockfile if the Electron runtime is missing."

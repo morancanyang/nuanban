@@ -41,11 +41,13 @@ function fixture(overrides: Record<string, unknown> = {}) {
     bounds: Bounds;
     protection = false;
     ignoresMouse = false;
+    alwaysOnTop: boolean;
     webContents = Object.assign(new EventEmitter(), { isDestroyed: () => this.destroyed, mainFrame: { url: '' },
       send: vi.fn(), focus: vi.fn(), setWindowOpenHandler: vi.fn() });
     constructor(public settings: Record<string, unknown>) {
       super();
       this.bounds = { x: Number(settings.x ?? 0), y: Number(settings.y ?? 0), width: Number(settings.width), height: Number(settings.height) };
+      this.alwaysOnTop = Boolean(settings.alwaysOnTop);
       windows.push(this);
     }
     isDestroyed() { return this.destroyed; }
@@ -53,7 +55,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     isVisible() { return this.visible; }
     restore = vi.fn(() => { this.minimized = false; });
     setContentProtection(value: boolean) { this.protection = value; }
-    setAlwaysOnTop() {}
+    setAlwaysOnTop(value: boolean) { this.alwaysOnTop = value; }
     setIgnoreMouseEvents(value: boolean) { this.ignoresMouse = value; }
     getBounds() { return { ...this.bounds }; }
     getContentBounds() { return { ...this.bounds }; }
@@ -1301,5 +1303,48 @@ describe('独立桌宠宿主接线（合成依赖，不代表外部软件或系�
     release();
     expect(await quitting).toMatchObject({ stopped: true, captureActive: false, mediaActive: false, microphoneActive: false });
     expect(current.learning.close).toHaveBeenCalled();
+  });
+});
+
+describe('桌宠自动收起为悬浮球且不置顶', () => {
+  it('启动后桌宠不置顶，空闲超过设定时间缩到右侧悬浮球，可用 IPC 取回', async () => {
+    const current = fixture({ autoHideMs: 20 });
+    await current.host.initialize();
+    const pet = current.windows[0];
+    expect(pet.alwaysOnTop).toBe(false);
+    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    expect(pet.bounds.width).toBe(64);
+    expect(pet.bounds.height).toBe(64);
+    const area = current.screen.getPrimaryDisplay().workArea;
+    expect(pet.bounds.x + pet.bounds.width).toBe(area.x + area.width - 8);
+    expect(pet.alwaysOnTop).toBe(false);
+    expect(await current.invoke('nuanban:pet:expand')).toBe(true);
+    expect(current.host.snapshot().pet?.collapsed).toBe(false);
+    expect(pet.bounds.width).toBeGreaterThan(64);
+    expect(pet.alwaysOnTop).toBe(false);
+  });
+
+  it('打开其他窗口导致失焦时立即收起，语音唤醒会取回桌宠', async () => {
+    const current = fixture({ autoHideMs: 60_000 });
+    await current.host.initialize();
+    const pet = current.windows[0];
+    pet.emit('blur');
+    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true));
+    expect(pet.bounds.width).toBe(64);
+    current.setWakeState({ state: 'listening', enabled: true, microphoneActive: true });
+    current.wakeUp();
+    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(false));
+    expect(pet.bounds.width).toBeGreaterThan(64);
+    expect(pet.webContents.send).toHaveBeenCalledWith('nuanban:pet:panel', expect.objectContaining({ expanded: true }));
+  });
+
+  it('持续活动会把自动收起推迟到空闲时间之后', async () => {
+    const current = fixture({ autoHideMs: 1_000 });
+    await current.host.initialize();
+    await new Promise(resolve => setTimeout(resolve, 600));
+    await current.invoke('nuanban:pet:activity');
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(current.host.snapshot().pet?.collapsed).toBe(false);
+    await vi.waitFor(() => expect(current.host.snapshot().pet?.collapsed).toBe(true), { timeout: 2_000 });
   });
 });

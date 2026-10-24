@@ -426,6 +426,9 @@
     if (disposed) return;
     const state = flags();
     const { observation, task, analysis } = state;
+    const ballMode = record(runtime.pet).collapsed === true;
+    element('pet-window').classList.toggle('is-ball', ballMode);
+    element('pet-ball').hidden = !ballMode;
     const captions = record(runtime.captions);
     const wake = record(runtime.wake);
     const unsafe = state.captureConflict || state.privacyConflict;
@@ -1190,6 +1193,23 @@
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); showMenu(); }
   });
   bind(element('pet-menu'), 'click', showMenu);
+  bind(element('pet-ball'), 'click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof bridge?.expand !== 'function') return;
+    void Promise.resolve(bridge.expand()).catch(error => showError('无法取回桌宠', error, () => { void bridge.expand().catch(() => {}); }));
+  });
+  bind(element('pet-ball'), 'contextmenu', event => { event.preventDefault(); event.stopPropagation(); showMenu(); });
+  bind(element('pet-ball'), 'keydown', event => {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); showMenu(); }
+  });
+  let lastActivityPing = 0;
+  const reportActivity = () => {
+    if (disposed || Date.now() - lastActivityPing < 800) return;
+    lastActivityPing = Date.now();
+    if (typeof bridge?.activity === 'function') void Promise.resolve(bridge.activity()).catch(() => {});
+  };
+  for (const name of ['pointermove', 'pointerdown', 'keydown', 'focus']) window.addEventListener(name, reportActivity, { passive: true });
   bind(window, 'nuanban:pet:navigate', event => {
     const section = record(event.detail).section;
     if (typeof section === 'string' && Object.hasOwn(sectionViews, section)) setExpanded(true, { section, focusInput: false });

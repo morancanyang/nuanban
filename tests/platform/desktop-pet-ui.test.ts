@@ -105,6 +105,9 @@ function petHarness(initial: unknown = snapshot()) {
     openMain: vi.fn(async (_route: string) => true),
     openTool: vi.fn(async (_route: string) => true),
     showMenu: vi.fn(async () => true),
+    activity: vi.fn(async () => true),
+    expand: vi.fn(async () => true),
+    collapse: vi.fn(async () => true),
     close: vi.fn(async () => true),
   };
   const window = Object.assign(new EventTarget(), { nuanbanPet: bridge, setInterval: vi.fn(), setTimeout: vi.fn() });
@@ -769,7 +772,7 @@ describe('桌宠 preload 的最小 IPC 合约', () => {
     const harness = preloadHarness('pet-preload.cjs');
     const api = harness.exposed.nuanbanPet;
     expect(Object.isFrozen(api)).toBe(true);
-    expect(Object.keys(api).sort()).toEqual(['ask', 'cancelDictation', 'close', 'command', 'dictate', 'drag', 'focusInput', 'onPanel', 'onState', 'openMain', 'openTool', 'showMenu', 'snapshot']);
+    expect(Object.keys(api).sort()).toEqual(['activity', 'ask', 'cancelDictation', 'close', 'collapse', 'command', 'dictate', 'drag', 'expand', 'focusInput', 'onPanel', 'onState', 'openMain', 'openTool', 'showMenu', 'snapshot']);
     await api.openMain();
     await api.openMain('/notes');
     await api.ask('如何收藏网页');
@@ -1933,6 +1936,16 @@ describe('主线程受控面板与学习 IPC 白名单', () => {
     expect(await api.snapshot()).toEqual({ learning: { due: [{ id: 'review-1', noteId: 'note-1' }] } });
   });
 
+  it('悬浮球状态只投影收起、球尺寸与空闲时间，丢弃其他字段', async () => {
+    const harness = preloadHarness('pet-preload.cjs');
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ...snapshot(), pet: { collapsed: true, ballSize: 64, idleHideMs: 5000, rawPointer: 'private', secret: 'private' } });
+    const projected = await harness.exposed.nuanbanPet.snapshot() as { pet: unknown };
+    expect(projected.pet).toEqual({ collapsed: true, ballSize: 64, idleHideMs: 5000 });
+    expect(JSON.stringify(projected)).not.toMatch(/private|rawPointer|secret/);
+    harness.ipcRenderer.invoke.mockResolvedValueOnce({ ...snapshot(), pet: { collapsed: 123, ballSize: 'big' } });
+    expect((await harness.exposed.nuanbanPet.snapshot() as { pet?: unknown }).pet).toEqual({});
+  });
+
   it('安全归一仓储标识与 epoch，仅取最近 20 条，保留错误而不透传附件', async () => {
     const harness = preloadHarness('pet-preload.cjs');
     const notes = Array.from({ length: 23 }, (_, index) => ({ noteId: `note-${index}`, question: `问题 ${index}`, summary: '简要总结', result: 'completed', mastery: 'unmastered', rawFrame: 'private', blob: 'private', ocr: 'private', ownerId: 'private' }));
@@ -2654,5 +2667,24 @@ describe('桌宠 UI 源码安全边界', () => {
     }
     expect(source('guide.css')).toContain('pointer-events: none');
     expect(source('guide-preload.cjs')).not.toMatch(/ipcRenderer\.(?:invoke|send)|\bcommand\s*:/);
+  });
+});
+
+describe('桌宠自动收起为悬浮球的界面状态', () => {
+  it('收起时只显示悬浮球，点击悬浮球请求取回桌宠', async () => {
+    const harness = petHarness({ ...snapshot(), pet: { collapsed: true, ballSize: 64, idleHideMs: 5000 } });
+    await settle();
+    expect(harness.element('pet-window').classList.toggle).toHaveBeenCalledWith('is-ball', true);
+    expect(harness.element('pet-ball').hidden).toBe(false);
+    harness.click('pet-ball');
+    await settle();
+    expect(harness.bridge.expand).toHaveBeenCalledTimes(1);
+  });
+
+  it('展开状态隐藏悬浮球', async () => {
+    const harness = petHarness({ ...snapshot(), pet: { collapsed: false, ballSize: 64, idleHideMs: 5000 } });
+    await settle();
+    expect(harness.element('pet-window').classList.toggle).toHaveBeenCalledWith('is-ball', false);
+    expect(harness.element('pet-ball').hidden).toBe(true);
   });
 });
