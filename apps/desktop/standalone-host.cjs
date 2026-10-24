@@ -9,6 +9,8 @@ const { createWindowsLocalWake } = require('./wake/windows-local-wake.cjs');
 const { createRuntimeLearningStore } = require('./runtime-learning-store.cjs');
 const { createSafeStoragePayloadCodec } = require('./reminder-store.cjs');
 const { registerPetSearchBridge } = require('./pet-search-bridge.cjs');
+const { createPetSearchClient } = require('./pet-search-client.cjs');
+const { createAnySearchClient } = require('./anysearch-client.cjs');
 const { createModelSearchClient } = require('./model-search-client.cjs');
 const { createRealtimeVoiceHost } = require('./realtime-voice-host.cjs');
 const { registerDictationBridge } = require('./wake/dictation-bridge.cjs');
@@ -804,7 +806,7 @@ function createStandaloneHost(options) {
       { label: '光标指引 · 教我操作', click: () => showPetPanel({ section: 'guidance' }) },
       { label: '和微光指引说说 / 教我操作', click: showPetPanel },
       { label: '面对面实时语音…', click: () => runAction(openFaceVoice) },
-      { label: '智能查询 · 已配置模型', click: () => searchBridge?.show() },
+      { label: '智能查询', click: () => searchBridge?.show() },
       { label: '开始本地观察…', enabled: !choosingSource && ['off', 'stopped'].includes(current.observation.state), click: () => runAction(() => chooseObservation()) },
       { label: '继续共享（本人确认）…', enabled: !choosingSource && current.observation.state === 'privacy_paused', click: () => runAction(() => chooseObservation(true)) },
       { label: '我点好了 · 重新核验', enabled: current.task.state === 'awaiting_action' && current.observation.state === 'observing', click: () => runAction(() => runtime.verify()) },
@@ -1087,7 +1089,10 @@ function createStandaloneHost(options) {
     dictationBridge = registerDictationBridge({ ipcMain, prefix: 'nuanban:pet:voice', isTrusted: event => trusted(event, petWindow, petPath),
       getHost: () => ({ hasPetWindow: () => live(petWindow), requestVoiceDictation }) });
     searchBridge = registerPetSearchBridge({ ipcMain, isTrusted: event => trusted(event, petWindow, petPath),
-      client: options.searchClient ?? createModelSearchClient({ provider: options.questioner }),
+      client: options.searchClient ?? createPetSearchClient({
+        anySearch: createAnySearchClient({ getApiKey: () => options.anysearchKeyStore?.read() }),
+        model: createModelSearchClient({ provider: options.questioner }),
+      }),
       openExternal: url => options.electron.shell.openExternal(url),
       showSearch: () => {
         showPetPanel({ focusInput: false, section: 'search' });

@@ -112,7 +112,7 @@ describe('桌宠查询复用已配置模型（合成供应，不请求真实网�
   it('IPC 只在本人确认后请求模型，返回回答而不是伪造来源，不自动打开浏览器', async () => {
     const current = modelFixture();
     const bridge = bridgeFixture(current.client);
-    expect(bridge.invoke('status')).toEqual({ provider: 'ConfiguredModel', configured: true });
+    expect(bridge.invoke('status')).toEqual({ provider: 'ConfiguredModel', configured: true, webSearch: false });
     bridge.invoke('show');
     expect(current.provider.answer).not.toHaveBeenCalled();
     await expect(bridge.invoke('run', { query: '怎样保存文件', consent: false })).resolves.toMatchObject({ ok: false, code: 'SEARCH_CONSENT_REQUIRED' });

@@ -7,6 +7,7 @@
   const consent = element('search-consent');
   const removers = [];
   let configured = false;
+  let webSearch = false;
   let busy = false;
   let checking = false;
   let disposed = false;
@@ -49,12 +50,18 @@
       if (typeof api?.status !== 'function') throw new Error('unavailable');
       const status = await api.status();
       if (disposed || current !== statusGeneration) return;
-      if (!status || status.provider !== 'ConfiguredModel' || typeof status.configured !== 'boolean') throw new Error('invalid');
+      if (!status || !['AnySearch', 'ConfiguredModel'].includes(status.provider) || typeof status.configured !== 'boolean') throw new Error('invalid');
       configured = status.configured;
-      element('search-configuration').textContent = configured ? '已复用现有模型 · 无需 AnySearch 密钥；回答不代表已联网核验' : '本机模型尚未就绪 · 请检查已有模型配置，不会展示模拟回答';
+      webSearch = status.webSearch === true;
+      element('search-configuration').textContent = !configured
+        ? (status.provider === 'AnySearch' ? 'AnySearch 实时检索尚未配置密钥 · 请在设置中填入后重启桌宠，不会展示模拟结果' : '实时检索与本机模型都未就绪 · 请检查配置，不会展示模拟回答')
+        : webSearch
+          ? '已接入 AnySearch 实时检索 · 结果来自公开网页，可打开原文核对'
+          : '已复用现有模型 · 未接入实时检索；回答不代表已联网核验';
     } catch {
       if (disposed || current !== statusGeneration) return;
       configured = false;
+      webSearch = false;
       element('search-configuration').textContent = '搜索接口尚未就绪，请更新并重新启动桌宠。';
     } finally {
       if (!disposed && current === statusGeneration) { checking = false; render(); }
@@ -79,6 +86,7 @@
     if (reply.kind === 'model-answer') {
       if (reply.webSearch !== false || reply.results.length || typeof reply.answer !== 'string'
         || !reply.answer.trim() || reply.answer.length > 24000) throw new Error('invalid');
+      element('search-answer-title').textContent = '模型回答 · 未联网核验';
       element('search-answer-content').textContent = reply.answer;
       element('search-answer').hidden = false;
       element('search-results').replaceChildren();
@@ -113,7 +121,7 @@
     }
     element('search-results').replaceChildren(fragment);
     element('search-results').hidden = reply.results.length === 0;
-    element('search-progress').textContent = reply.results.length ? `“${reply.query}” · 找到 ${reply.results.length} 条来源` : '没有找到可展示的安全来源。可以换个说法再搜，不会用模拟内容填充。';
+    element('search-progress').textContent = reply.results.length ? `“${reply.query}” · AnySearch 实时检索到 ${reply.results.length} 条来源（可打开原文核对）` : 'AnySearch 没有返回可展示的安全来源。可以换个说法再搜，不会用模拟内容填充。';
   }
 
   function clearResults() {
@@ -134,7 +142,7 @@
     busy = true;
     error('');
     clearResults();
-    element('search-progress').textContent = '正在请求已配置的模型…';
+    element('search-progress').textContent = webSearch ? '正在请求 AnySearch 实时检索…' : '正在请求已配置的模型…';
     render();
     try {
       const reply = await api.search(query.value.trim(), true);

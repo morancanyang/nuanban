@@ -155,7 +155,7 @@ describe('AnySearch 真实接口适配（仅合成响应，不调用真实供应
 function bridgeFixture() {
   const handlers = new Map<string, (event: unknown, ...argumentsList: unknown[]) => unknown>();
   const trusted = {};
-  const client = { status: () => ({ configured: true }), search: vi.fn(async (_query: string, _options: { signal: AbortSignal }) => [item]) };
+  const client = { status: () => ({ provider: 'AnySearch', configured: true, webSearch: true }), search: vi.fn(async (_query: string, _options: { signal: AbortSignal }) => [item]) };
   const showSearch = vi.fn();
   const openExternal = vi.fn(async (_url: string) => undefined);
   const bridge = registerPetSearchBridge({ ipcMain: { handle: (channel: string, handler: (event: unknown, ...argumentsList: unknown[]) => unknown) => handlers.set(channel, handler),
@@ -176,7 +176,7 @@ describe('桌宠独立搜索桥接', () => {
     const current = bridgeFixture();
     current.invoke('show');
     expect(current.showSearch).toHaveBeenCalledOnce();
-    expect(current.invoke('status')).toEqual({ provider: 'ConfiguredModel', configured: true });
+    expect(current.invoke('status')).toEqual({ provider: 'AnySearch', configured: true, webSearch: true });
     expect(current.client.search).not.toHaveBeenCalled();
   });
 
