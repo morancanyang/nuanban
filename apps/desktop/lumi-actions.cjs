@@ -29,7 +29,7 @@ function registerLumiActions({ ipcMain, isManagementTrusted, trustedPet, getPetW
     if (action !== 'stop' && !definition) return { ok: false, code: 'invalid', message: '未知露米动作' };
     const pet = getPetWindow();
     const model = readModel();
-    if (disposed || model.kind !== 'model' || model.id !== modelHash || !pet || pet.isDestroyed() || pet.webContents.isDestroyed() || pending.size >= 16) return unavailable();
+    if (disposed || model.kind !== 'model' || model.id !== modelHash || !pet || pet.isDestroyed() || !pet.isVisible() || pet.webContents.isDestroyed() || pending.size >= 16) return unavailable();
     const id = randomUUID();
     return new Promise(resolve => {
       const timer = setTimeout(() => { pending.delete(id); resolve(unavailable()); }, timeoutMs);
@@ -61,7 +61,9 @@ function registerLumiActions({ ipcMain, isManagementTrusted, trustedPet, getPetW
     pending.delete(payload.id);
     clearTimeout(request.timer);
     const model = readModel();
-    const result = payload.ok && model.kind === 'model' && model.id === modelHash
+    const pet = getPetWindow();
+    const result = payload.ok && pet && !pet.isDestroyed() && pet.isVisible() && !pet.webContents.isDestroyed()
+      && pet.webContents === event.sender && model.kind === 'model' && model.id === modelHash
       ? { ok: true, action: request.action, ...(request.definition ? { durationMs: request.definition.durationMs, loop: request.definition.loop } : {}) } : unavailable();
     request.resolve(result);
     if (result.ok) {

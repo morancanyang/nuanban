@@ -8,7 +8,7 @@ const { actions, modelHash } = require('../apps/desktop/lumi-actions.cjs');
 const root = path.resolve(__dirname, '..');
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
 const cache = path.join(root, '.cache', `lumi-actions-electron-${Date.now()}`);
-const evidence = { nativeApply: false, actions: [], semantic: false, stop: false, hiddenRejected: false, restart: false, screenRequests: 0, errors: [] };
+const evidence = { nativeApply: false, actions: [], semantic: false, stop: false, hiddenRejected: false, collapsedRejected: false, restart: false, screenRequests: 0, errors: [] };
 mkdirSync(cache, { recursive: true });
 
 async function launch() {
@@ -36,6 +36,16 @@ async function launch() {
   } catch (error) { await application.close(); throw error; }
 }
 
+async function showCompanion({ application, pet }) {
+  await application.evaluate(() => {
+    const window = global.__lumiSmoke.host.getPetWindow();
+    window.show();
+    window.focus();
+  });
+  await pet.evaluate(() => window.nuanbanPet.expand());
+  await expect(pet.locator('#model-pet canvas')).toBeVisible();
+}
+
 async function run() {
   let context;
   try {
@@ -53,6 +63,7 @@ async function run() {
     await expect(pet.locator('#model-pet')).toHaveAttribute('data-model-id', modelHash, { timeout: 20000 });
     await expect(canvas).toHaveAttribute('data-appearance-profile', 'lumi-natural-v4-animated');
     await expect(canvas).toHaveAttribute('data-animation', 'Idle_Breathe');
+    await showCompanion(context);
     evidence.nativeApply = true;
     await management.evaluate(() => {
       window.__lumiActionEvents = [];
@@ -78,6 +89,12 @@ async function run() {
     await expect(canvas).toHaveAttribute('data-animation', 'Idle_Breathe', { timeout: 10000 });
     evidence.semantic = true;
     await expect.poll(() => management.evaluate(() => window.__lumiActionEvents.length)).toBeGreaterThanOrEqual(9);
+    await pet.evaluate(() => window.nuanbanPet.collapse());
+    await expect(canvas).toBeHidden();
+    const collapsed = await management.evaluate(() => window.nuanbanLumi.play('Wave_Gentle'));
+    assert.equal(collapsed.ok, false); assert.equal(collapsed.code, 'unavailable');
+    evidence.collapsedRejected = true;
+    await showCompanion(context);
     await pet.evaluate(() => window.dispatchEvent(new CustomEvent('nuanban:avatar-visibility', { detail: { visible: true } })));
     await expect(pet.locator('#model-pet')).toBeHidden();
     const hidden = await management.evaluate(() => window.nuanbanLumi.play('Wave_Gentle'));
@@ -87,12 +104,14 @@ async function run() {
     await expect(canvas).toHaveAttribute('data-animation', 'Idle_Breathe', { timeout: 20000 });
     await management.evaluate(() => window.__lumiActionUnsubscribe());
     await card.screenshot({ path: path.join(cache, 'lumi-animated-card.png') });
+    await showCompanion(context);
     await canvas.screenshot({ path: path.join(cache, 'lumi-animated-pet.png'), omitBackground: true });
     evidence.screenRequests += await application.evaluate(() => global.__lumiSmoke.screenRequests);
     await application.close(); context = undefined;
     context = await launch();
     await expect(context.card.getByRole('button', { name: '再次召唤桌宠' })).toBeVisible();
     await expect(context.pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'Idle_Breathe', { timeout: 20000 });
+    await showCompanion(context);
     const persisted = await context.management.evaluate(async () => { const model = await window.nuanbanModel.read(); return { id: model.id, bytes: model.bytes.byteLength }; });
     assert.deepEqual(persisted, { id: modelHash, bytes: 13171996 });
     const restored = await context.management.evaluate(() => window.nuanbanLumi.semantic('greeting'));

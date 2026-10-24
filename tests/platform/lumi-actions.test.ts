@@ -12,7 +12,7 @@ afterEach(() => { bridges.splice(0).forEach(bridge => bridge.dispose()); vi.useR
 function fixture() {
   const handlers = new Map<string, (...argumentsList: any[]) => any>();
   const management = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: vi.fn() } };
-  const pet = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: vi.fn() } };
+  const pet = { isDestroyed: () => false, isVisible: () => true, webContents: { isDestroyed: () => false, send: vi.fn() } };
   const managementEvent = { sender: management.webContents };
   const petEvent = { sender: pet.webContents };
   let model = { kind: 'model', id: modelHash };
@@ -133,6 +133,19 @@ describe('露米原生 IPC 接口', () => {
     }
     expect(() => current.handlers.get('nuanban:lumi:complete')!(current.managementEvent, { id: 'fake', ok: true })).toThrow('仅桌宠');
     expect(current.pet.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('原生窗口隐藏时拒绝动作，确认途中隐藏也不报告成功', async () => {
+    const current = fixture();
+    const visible = vi.spyOn(current.pet, 'isVisible').mockReturnValue(false);
+    expect(current.call('play', 'Wave_Gentle')).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(current.pet.webContents.send).not.toHaveBeenCalled();
+    visible.mockReturnValue(true);
+    const pending = current.call('play', 'Wave_Gentle');
+    visible.mockReturnValue(false);
+    current.complete(true);
+    await expect(pending).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    expect(current.management.webContents.send).not.toHaveBeenCalled();
   });
 
   it('模型错误、桌宠销毁、拒绝确认、超时均明确失败，不假成功', async () => {

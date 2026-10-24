@@ -70,7 +70,8 @@ if (modelStage && window.nuanbanModel) {
   const unsubscribeActions = window.nuanbanLumi?.onRequest?.(request => {
     let accepted = false;
     if (!disposed && !cloudVisible && !modelStage.hidden && selectedModel?.kind === 'model'
-      && selectedModel.id === lumiAnimatedModel.sha256 && request.modelId === selectedModel.id && currentView?.lumiActions) {
+      && selectedModel.id === lumiAnimatedModel.sha256 && request.modelId === selectedModel.id && currentView?.lumiActions
+      && currentView.canvas.getClientRects().length > 0) {
       if (request.action === 'stop') { currentView.lumiActions.stop(); accepted = true; }
       else accepted = currentView.lumiActions.play(request.action).ok;
     }
