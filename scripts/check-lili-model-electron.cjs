@@ -1,15 +1,19 @@
 const assert = require('node:assert/strict');
-const { mkdirSync, writeFileSync } = require('node:fs');
+const { mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { createRequire } = require('node:module');
 const path = require('node:path');
 const { _electron, expect } = require('@playwright/test');
 
 const root = path.resolve(__dirname, '..');
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
-const cache = path.join(root, '.cache', `lili-model-electron-${Date.now()}`);
+const naturalV4 = process.argv.includes('--natural-v4');
+const modelId = naturalV4 ? 'lili-natural-v4' : 'lili';
+const manifest = JSON.parse(readFileSync(path.join(root, 'apps/web/public/models', modelId, 'character_manifest.json'), 'utf8'));
+const cache = path.join(root, '.cache', `${modelId}-model-electron-${Date.now()}`);
 const userData = path.join(cache, 'profile');
-const hash = '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c';
-const evidence = { nativePreview: false, nativeApply: false, switchedFromLegacy: false, staticModel: false, persistedAfterRestart: false, recalled: false, screenRequests: 0, errors: [] };
+const hash = manifest.sha256;
+const appliedNotice = `${naturalV4 ? '自然精修 v4 候选版' : '原版小鹿'} 3D 模型已保存并调用到桌面`;
+const evidence = { modelId, nativePreview: false, nativeApply: false, switchedFromLegacy: false, staticModel: false, nativeActions: false, persistedAfterRestart: false, recalled: false, restoredOriginal: false, screenRequests: 0, errors: [] };
 mkdirSync(cache, { recursive: true });
 
 async function launch() {
@@ -32,6 +36,7 @@ async function launch() {
     });
     const card = management.getByRole('region', { name: '栗栗 Lili' });
     await expect(card).toBeVisible();
+    if (naturalV4) await card.getByRole('combobox', { name: '模型版本' }).selectOption('natural-v4');
     await expect.poll(() => application.windows().some(page => page.url().endsWith('/pet.html')), { timeout: 20000 }).toBe(true);
     const pet = application.windows().find(page => page.url().endsWith('/pet.html'));
     pet.on('pageerror', error => evidence.errors.push(error.message));
@@ -48,7 +53,8 @@ async function expectDesktopModel(pet) {
   await expect(model).toHaveAttribute('data-render-source', 'glb');
   await expect(model.locator('canvas')).toBeVisible();
   await expect(model.locator('canvas')).toHaveAttribute('data-render-source', 'glb');
-  assert.equal(await model.locator('canvas').getAttribute('data-animation'), null);
+  if (naturalV4) await expect(model.locator('canvas')).toHaveAttribute('data-appearance-profile', 'lili-natural-v4');
+  assert.equal(await model.locator('canvas').getAttribute('data-animation'), naturalV4 ? 'idle' : null);
   await expect(pet.locator('#pet-window')).not.toHaveClass(/is-lili/);
 }
 
@@ -61,28 +67,49 @@ async function run() {
     await card.getByRole('button', { name: '预览小鹿 3D 模型' }).click();
     await expect(card.locator('canvas')).toHaveAttribute('data-render-source', 'glb', { timeout: 20000 });
     await expect(card.locator('.lili-model-poster')).toHaveCount(0);
-    assert.equal(await card.locator('canvas').getAttribute('data-animation'), null);
+    assert.equal(await card.locator('canvas').getAttribute('data-animation'), naturalV4 ? 'idle' : null);
+    if (naturalV4) {
+      await card.getByRole('button', { name: '轻轻招手', exact: true }).click();
+      await expect(card.locator('canvas')).toHaveAttribute('data-animation', 'wave');
+      await expect(card.locator('canvas')).toHaveAttribute('data-animation', 'idle');
+    }
     assert.deepEqual(await management.evaluate(() => window.nuanbanModel.read()), { kind: 'none' });
     evidence.nativePreview = true;
     await application.evaluate(async () => { await global.__liliSmoke.host.selectLili(true); });
     await expect(pet.locator('#pet-window')).toHaveClass(/is-lili/);
     await card.getByRole('button', { name: '请栗栗到桌面' }).click();
     await management.getByRole('button', { name: '确认切换并显示栗栗' }).click();
-    await expect(card.getByRole('status')).toContainText('原版小鹿 3D 模型已保存并调用到桌面', { timeout: 30000 });
+    await expect(card.getByRole('status')).toContainText(appliedNotice, { timeout: 30000 });
     await expectDesktopModel(pet);
     evidence.nativeApply = true;
     const summary = await management.evaluate(async () => {
       const model = await window.nuanbanModel.read();
       return model.kind === 'model' ? model.summary : undefined;
     });
-    assert.equal(summary.triangles, 97992);
-    assert.equal(summary.meshes, 63);
-    assert.equal(summary.bones, 0);
-    assert.equal(summary.animations, 0);
+    assert.equal(summary.triangles, manifest.triangles);
+    assert.equal(summary.meshes, manifest.decodedMeshes);
+    assert.equal(summary.bones, manifest.bones);
+    assert.equal(summary.animations, manifest.animations);
     assert.ok(summary.textures.length >= 6);
     evidence.switchedFromLegacy = true;
-    evidence.staticModel = true;
+    evidence.staticModel = summary.animations === 0;
+    if (naturalV4) {
+      for (const action of ['look', 'wave', 'nod', 'blink']) {
+        await pet.evaluate(action => window.dispatchEvent(new CustomEvent('nuanban:model-action', { detail: { action } })), action);
+        await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', action);
+      }
+      await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'idle');
+      await pet.evaluate(() => window.dispatchEvent(new CustomEvent('nuanban:model-action', { detail: { action: 'not-an-action' } })));
+      await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'idle');
+      await pet.evaluate(() => window.dispatchEvent(new CustomEvent('nuanban:avatar-interaction')));
+      await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'wave');
+      await expect(pet.locator('#model-pet canvas')).toHaveAttribute('data-animation', 'idle');
+      evidence.nativeActions = true;
+    }
     await card.screenshot({ path: path.join(cache, 'lili-native-model.png') });
+    await pet.evaluate(() => window.nuanbanPet.expand());
+    await expect(pet.locator('#pet-window')).not.toHaveClass(/is-ball/);
+    await expect(pet.locator('#model-pet canvas')).toBeVisible();
     await pet.screenshot({ path: path.join(cache, 'lili-desktop-pet.png') });
     evidence.screenRequests += await application.evaluate(() => global.__liliSmoke.screenRequests);
     await application.close();
@@ -95,13 +122,23 @@ async function run() {
       const model = await window.nuanbanModel.read();
       return model.kind === 'model' ? { id: model.id, byteLength: model.bytes.byteLength } : model;
     });
-    assert.deepEqual(persisted, { id: hash, byteLength: 7171212 });
+    assert.deepEqual(persisted, { id: hash, byteLength: manifest.bytes });
     evidence.persistedAfterRestart = true;
     await context.card.getByRole('button', { name: '再次召唤栗栗' }).click();
     await context.management.getByRole('button', { name: '确认切换并显示栗栗' }).click();
-    await expect(context.card.getByRole('status')).toContainText('原版小鹿 3D 模型已保存并调用到桌面', { timeout: 30000 });
+    await expect(context.card.getByRole('status')).toContainText(appliedNotice, { timeout: 30000 });
     await expectDesktopModel(context.pet);
     evidence.recalled = true;
+    if (naturalV4) {
+      await context.card.getByRole('combobox', { name: '模型版本' }).selectOption('original');
+      await context.card.getByRole('button', { name: '请栗栗到桌面' }).click();
+      await context.management.getByRole('button', { name: '确认切换并显示栗栗' }).click();
+      await expect(context.card.getByRole('status')).toContainText('原版小鹿 3D 模型已保存并调用到桌面', { timeout: 30000 });
+      const original = JSON.parse(readFileSync(path.join(root, 'apps/web/public/models/lili/character_manifest.json'), 'utf8'));
+      await expect(context.pet.locator('#model-pet')).toHaveAttribute('data-model-id', original.sha256, { timeout: 30000 });
+      await expect(context.pet.locator('#model-pet canvas')).toBeVisible();
+      evidence.restoredOriginal = true;
+    }
     evidence.screenRequests += await context.application.evaluate(() => global.__liliSmoke.screenRequests);
     assert.equal(evidence.screenRequests, 0);
     assert.deepEqual(evidence.errors, []);

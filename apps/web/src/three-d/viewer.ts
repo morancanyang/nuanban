@@ -143,7 +143,8 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
   const scene = new Scene();
   const camera = new PerspectiveCamera(32, 1, 0.01, 100);
   const group = new Group();
-  const originalLili = loaded.root.getObjectByName('Lili_Original_Blender_Deer')?.userData.character_id === 'lili-original-v2';
+  const naturalLili = loaded.root.getObjectByName('Lili_Natural_v4_Deer')?.userData.character_id === 'lili-natural-v4';
+  const originalLili = naturalLili || loaded.root.getObjectByName('Lili_Original_Blender_Deer')?.userData.character_id === 'lili-original-v2';
   let studioEnvironment: ReturnType<PMREMGenerator['fromScene']> | undefined;
   let lumiStudio: ReturnType<typeof createLumiStudio>;
   const mixer = new AnimationMixer(loaded.root);
@@ -165,6 +166,7 @@ export async function createModelView(container: HTMLElement, source: DisplayMod
   renderer.domElement.setAttribute('aria-label', '本地 3D 模型预览');
   renderer.domElement.setAttribute('role', 'img');
   renderer.domElement.dataset.renderSource = source.format;
+  if (naturalLili) renderer.domElement.dataset.appearanceProfile = 'lili-natural-v4';
   const dispose = () => {
     if (disposed) return;
     disposed = true;

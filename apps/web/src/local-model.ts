@@ -1,5 +1,5 @@
 export type ModelFormat = 'glb' | 'vrm' | 'fbx';
-export type BuiltinModelId = 'lumi' | 'lili';
+export type BuiltinModelId = 'lumi' | 'lili' | 'lili-natural-v4';
 export interface ModelSummary {
   triangles: number;
   meshes: number;

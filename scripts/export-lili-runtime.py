@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import runpy
 import struct
 import sys
 from pathlib import Path
@@ -12,10 +13,17 @@ from mathutils.bvhtree import BVHTree
 
 
 arguments = sys.argv[sys.argv.index("--") + 1:]
+if not arguments or len(arguments) > 2 or len(arguments) == 2 and arguments[1] != "--natural-v4":
+    raise RuntimeError("Usage: export-lili-runtime.py -- OUTPUT [--natural-v4]")
+natural_v4 = len(arguments) == 2
 output = Path(arguments[0]).resolve()
 output.mkdir(parents=True, exist_ok=True)
 source = Path(bpy.data.filepath)
 source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+if natural_v4 and source_hash != "02a69fd97777769544955586eec861396438444e2a17fc89d67ab702d5d3351b":
+    raise RuntimeError("Natural v4 export requires the reviewed Lili v4 source")
+asset_id = "lili-natural-v4" if natural_v4 else "lili"
+asset_version = "4.0.0-preview.2" if natural_v4 else "2.0.0"
 character = next(collection for collection in bpy.context.scene.collection.children if collection.name.startswith("DEER_CHARACTER_ONLY"))
 garment = next(collection for collection in character.children if collection.name.startswith("DEER_SCARF_KNIT"))
 runtime = bpy.data.collections.new("MICROGLOW_DEER_RUNTIME")
@@ -46,7 +54,13 @@ def geometry_budget(name):
         ("HOOF_SPLIT", 80), ("HOOF_", 600),
         ("NOSE", 750), ("TAIL", 650), ("CHEEK_TINT", 600),
     ]
+    if natural_v4 and "LANTERN" in name:
+        return 700 if any(marker in name for marker in ["BASE", "CHIMNEY", "CAP", "HANDLE"]) else 300
     return next((budget for marker, budget in budgets if marker in name), 160)
+
+
+def is_knit(name):
+    return "_KNIT_" in name or natural_v4 and "_TWISTED_WOOL_" in name
 
 
 def ensure_uv(mesh):
@@ -70,7 +84,7 @@ def ensure_uv(mesh):
 
 
 for original in list(character.all_objects):
-    if original.type not in {"MESH", "CURVE"} or "_KNIT_" in original.name:
+    if original.type not in {"MESH", "CURVE"} or is_knit(original.name):
         continue
     if original.type == "CURVE":
         original.data.resolution_u = 3
@@ -93,11 +107,18 @@ for original in list(character.all_objects):
 
 knit_stitches = 0
 for original in garment.objects:
-    if "_KNIT_" not in original.name:
+    if not is_knit(original.name):
         continue
     vertices, faces = [], []
-    for spline in original.data.splines:
-        points = [point.co.copy() for point in spline.bezier_points]
+    splines = list(original.data.splines)
+    stride = 3 if natural_v4 and "_TWISTED_WOOL_" in original.name else 1
+    for spline_index in range(0, len(splines), stride):
+        spline = splines[spline_index]
+        if stride == 3:
+            coordinates = np.mean([[point.co[:3] for point in ply.points] for ply in splines[spline_index:spline_index + 3]], axis=0)
+            points = [Vector(coordinates[index]) for index in np.linspace(0, len(coordinates) - 1, 5, dtype=int)]
+        else:
+            points = [point.co.copy() for point in spline.bezier_points]
         offset = len(vertices)
         for index, point in enumerate(points):
             tangent = (points[min(index + 1, len(points) - 1)] - points[max(index - 1, 0)]).normalized()
@@ -106,12 +127,20 @@ for original in garment.objects:
             outward.normalize()
             sideways = tangent.cross(outward).normalized()
             radius = original.data.bevel_depth
-            vertices.extend([tuple(point - sideways * radius), tuple(point + outward * radius), tuple(point + sideways * radius)])
+            if natural_v4:
+                radius *= 1.8 if stride == 3 else 1.3
+                vertices.extend([tuple(point - sideways * radius), tuple(point + sideways * radius)])
+            else:
+                vertices.extend([tuple(point - sideways * radius), tuple(point + outward * radius), tuple(point + sideways * radius)])
         for index in range(len(points) - 1):
-            start = offset + index * 3
-            for rail in range(2):
-                faces.extend([(start + rail, start + rail + 3, start + rail + 1),
-                              (start + rail + 1, start + rail + 3, start + rail + 4)])
+            if natural_v4:
+                start = offset + index * 2
+                faces.extend([(start, start + 2, start + 1), (start + 1, start + 2, start + 3)])
+            else:
+                start = offset + index * 3
+                for rail in range(2):
+                    faces.extend([(start + rail, start + rail + 3, start + rail + 1),
+                                  (start + rail + 1, start + rail + 3, start + rail + 4)])
         knit_stitches += 1
     mesh = bpy.data.meshes.new(original.name + "_RUNTIME_MESH")
     mesh.from_pydata(vertices, [], faces)
@@ -121,6 +150,7 @@ for original in garment.objects:
         polygon.use_smooth = True
     ensure_uv(mesh)
     duplicate = bpy.data.objects.new(original.name + "_RT", mesh)
+    duplicate.matrix_world = original.matrix_world.copy()
     runtime.objects.link(duplicate)
     duplicate["source_object"] = original.name
     objects.append(duplicate)
@@ -285,47 +315,64 @@ for groom in grooms:
     exported_strands += count
 
 
-root = bpy.data.objects.new("Lili_Original_Blender_Deer", None)
+root = bpy.data.objects.new("Lili_Natural_v4_Deer" if natural_v4 else "Lili_Original_Blender_Deer", None)
 runtime.objects.link(root)
-root["character_id"] = "lili-original-v2"
+root["character_id"] = asset_id if natural_v4 else "lili-original-v2"
 root["source_blend_sha256"] = source_hash
-root["asset_version"] = "2.0.0"
+root["asset_version"] = asset_version
 for obj in objects:
     obj.parent = root
+rig = runpy.run_path(str(Path(__file__).parent / "characters" / "rig-lili-natural.py"))["bind_natural_actions"](runtime, root, objects) if natural_v4 else None
 bpy.ops.object.select_all(action="DESELECT")
 root.select_set(True)
+if rig:
+    rig.select_set(True)
 for obj in objects:
     obj.select_set(True)
 bpy.context.view_layer.objects.active = root
-model_path = output / "Lili_Independent_Deer.glb"
+model_path = output / ("Lili_Natural_v4.glb" if natural_v4 else "Lili_Independent_Deer.glb")
 bpy.ops.export_scene.gltf(
     filepath=str(model_path), export_format="GLB", use_selection=True,
-    export_apply=True, export_yup=True, export_cameras=False, export_lights=False,
-    export_animations=False, export_skins=False, export_morph=False,
+    export_apply=not natural_v4, export_yup=True, export_cameras=False, export_lights=False,
+    export_animations=natural_v4, export_skins=natural_v4, export_morph=natural_v4,
+    export_animation_mode="NLA_TRACKS", export_force_sampling=True, export_anim_slide_to_zero=True,
+    export_try_sparse_sk=False,
     export_extras=True, export_vertex_color="ACTIVE", export_image_format="AUTO",
 )
 data = model_path.read_bytes()
 document = json.loads(data[20:20 + struct.unpack_from("<I", data, 12)[0]])
 triangles = sum(document["accessors"][primitive["indices"]]["count"] // 3 for mesh in document["meshes"] for primitive in mesh["primitives"])
-if triangles > 100000 or document.get("cameras") or document.get("skins") or document.get("animations"):
-    raise RuntimeError("Export violates the static character-only runtime contract")
+if triangles > 100000 or document.get("cameras") or not natural_v4 and (document.get("skins") or document.get("animations")):
+    raise RuntimeError("Export violates the character-only runtime contract")
+actions = [animation["name"] for animation in document.get("animations", [])]
+bone_count = len({joint for skin in document.get("skins", []) for joint in skin["joints"]})
+if natural_v4 and (bone_count != 18 or set(actions) != {"idle", "blink", "look", "wave", "nod"}):
+    raise RuntimeError("Natural v4 skeletal and facial actions were not exported: " + str(actions))
 if any("uri" in resource for resource in document.get("buffers", []) + document.get("images", [])):
     raise RuntimeError("Export contains external resources")
 manifest = {
-    "id": "lili", "name": "栗栗 · Lili", "version": "2.0.0", "format": "glb",
+    "id": asset_id, "name": "栗栗 · Lili", "version": asset_version, "format": "glb",
     "fileName": model_path.name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
     "triangles": triangles, "meshes": len(document["meshes"]),
     "decodedMeshes": sum(len(mesh["primitives"]) for mesh in document["meshes"]),
-    "bones": 0, "animations": 0, "textures": len(document.get("textures", [])),
+    "bones": bone_count, "animations": len(actions), "textures": len(document.get("textures", [])),
     "background": False, "externalResources": False,
     "source": {"file": source.name, "sha256": source_hash, "scene": bpy.context.scene.name},
     "createdVia": "Local Blender source-scene export (scripts/export-lili-runtime.py)",
     "runtime": {"renderer": "glb", "geometrySource": "Original Blender character and scarf, not a procedural replacement",
                 "knitStitches": knit_stitches, "sourceGroomStrands": total_strands, "groomStrands": exported_strands,
                 "posterPurpose": "Original offline reference render; not the 3D display source",
-                "limitations": ["Static model: no skeletal rig or facial animation.",
+                "limitations": ([] if natural_v4 else ["Static model: no skeletal rig or facial animation."]) + [
                                 "Original hair is sampled into mesh fibers; procedural shading is adapted to embedded textures, not exported losslessly."]},
     "parts": [{"name": obj["source_object"], "triangles": triangle_count(obj.data)} for obj in objects],
 }
+if natural_v4:
+    manifest["actions"] = [{"name": animation["name"], "loop": animation["name"] == "idle"} for animation in document["animations"]]
+    manifest["status"] = "candidate"
+    manifest["runtime"]["mobileTested"] = False
+    manifest["runtime"]["limitations"].extend([
+        "Three-ply collar yarn is reduced to stitch ribbons; Cycles lighting is not part of the runtime model.",
+        "Mobile performance and Android floating-pet integration have not been verified.",
+    ])
 (output / "character_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("LILI_RUNTIME_EXPORT_COMPLETE " + json.dumps({key: manifest[key] for key in ["sha256", "bytes", "triangles", "meshes", "decodedMeshes", "textures"]}), flush=True)

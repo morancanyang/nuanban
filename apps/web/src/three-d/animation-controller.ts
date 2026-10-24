@@ -52,7 +52,7 @@ export function createModelAnimationController(mixer: AnimationMixer, clips: Ani
     } else {
       clearBlinkTimer();
       if (facialClip) face = transition(face, facialClip, loop);
-      else { face?.fadeOut(0.18); face = undefined; }
+      else { if (face !== body) face?.fadeOut(0.18); face = undefined; }
     }
     current = name;
     onChange?.(name);

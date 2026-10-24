@@ -254,10 +254,11 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
   }
   const requireManagement = event => { if (!isManagementTrusted(event)) throw new Error('只有本人管理窗口可以导入或更换 3D 模型'); };
   function readBuiltin(id) {
-    if (id !== 'lumi' && id !== 'lili') throw new Error('未知的内置三维伙伴');
+    if (id !== 'lumi' && id !== 'lili' && id !== 'lili-natural-v4') throw new Error('未知的内置三维伙伴');
     const builtin = {
       lumi: { fileName: 'Lumi_Magical_Kitten.glb', bytes: 10887504, sha256: '4cee02df06e168eb99612ab5d807a3efe6025d14c7dfec516616ff8825b0e9b3' },
       lili: { fileName: 'Lili_Independent_Deer.glb', bytes: 7171212, sha256: '8b5b3adce1d8995a0c754aed5d89360ec56fb35f7cf6d570052594de508fb35c' },
+      'lili-natural-v4': { fileName: 'Lili_Natural_v4.glb', bytes: 9863528, sha256: '331f66f6748bf78a390f60a2092c8ce884113698418087d0881cbe1f6feacd8f' },
     }[id];
     const { fileName } = builtin;
     const filePath = path.join(builtinModelsPath, id, fileName);
@@ -305,7 +306,7 @@ function registerLocalModelBridge({ ipcMain, dialog, store, validate, isManageme
   ipcMain.handle(channels[4], event => { requireManagement(event); requireAvailable(); store.discard(); return true; });
   ipcMain.handle(channels[5], async (event, id, ...extra) => {
     requireManagement(event);
-    if ((id !== 'lumi' && id !== 'lili') || extra.length) throw new Error('未知的内置三维伙伴');
+    if ((id !== 'lumi' && id !== 'lili' && id !== 'lili-natural-v4') || extra.length) throw new Error('未知的内置三维伙伴');
     if (choosing) throw new Error('已有模型正在选择或检查，请稍候');
     choosing = true;
     applyingBuiltin = true;

@@ -42,8 +42,8 @@ async function invokeModel(channel, ...argumentsList) {
 contextBridge.exposeInMainWorld('nuanbanModel', Object.freeze({
   read: () => invokeModel('nuanban:model:read'),
   choose: () => invokeModel('nuanban:model:choose'),
-  readBuiltin: id => invokeModel('nuanban:model:read-builtin', ['lumi', 'lili'].includes(id) ? id : null),
-  applyBuiltin: id => invokeModel('nuanban:model:apply-builtin', ['lumi', 'lili'].includes(id) ? id : null),
+  readBuiltin: id => invokeModel('nuanban:model:read-builtin', ['lumi', 'lili', 'lili-natural-v4'].includes(id) ? id : null),
+  applyBuiltin: id => invokeModel('nuanban:model:apply-builtin', ['lumi', 'lili', 'lili-natural-v4'].includes(id) ? id : null),
   apply: token => invokeModel('nuanban:model:apply', typeof token === 'string' ? token : null),
   clear: () => invokeModel('nuanban:model:clear'),
   discard: () => invokeModel('nuanban:model:discard'),

@@ -1,4 +1,4 @@
-import type { ModelSource } from '../local-model';
+import type { BuiltinModelId, ModelSource } from '../local-model';
 import { localModelBridge } from '../local-model';
 
 const root = `${import.meta.env.BASE_URL}models/lumi/`;
@@ -37,10 +37,30 @@ export const liliModel = {
   manifestUrl: `${import.meta.env.BASE_URL}models/lili/character_manifest.json`,
 } as const;
 
-async function loadBuiltinModel(model: typeof lumiModel | typeof liliModel, signal?: AbortSignal): Promise<ModelSource> {
+export const liliNaturalModel = {
+  id: 'lili-natural-v4',
+  name: '栗栗 Lili · 自然精修 v4',
+  version: '4.0.0-preview.2',
+  fileName: 'Lili_Natural_v4.glb',
+  sha256: '331f66f6748bf78a390f60a2092c8ce884113698418087d0881cbe1f6feacd8f',
+  sourceSha256: '02a69fd97777769544955586eec861396438444e2a17fc89d67ab702d5d3351b',
+  modelUrl: `${import.meta.env.BASE_URL}models/lili-natural-v4/Lili_Natural_v4.glb`,
+  posterUrl: `${import.meta.env.BASE_URL}models/lili-natural-v4/poster.png`,
+  manifestUrl: `${import.meta.env.BASE_URL}models/lili-natural-v4/character_manifest.json`,
+  capabilities: { static: false, rigged: true, animations: true, mobileTested: false },
+  actions: [
+    { name: 'idle', label: '自然待机' },
+    { name: 'blink', label: '轻轻眨眼' },
+    { name: 'look', label: '左右看看' },
+    { name: 'wave', label: '轻轻招手' },
+    { name: 'nod', label: '点头回应' },
+  ],
+} as const;
+
+async function loadBuiltinModel(model: { id: BuiltinModelId; sha256: string; modelUrl: string }, signal?: AbortSignal): Promise<ModelSource> {
   signal?.throwIfAborted();
   const bridge = localModelBridge();
-  const label = model.id === 'lili' ? '小鹿' : '小猫';
+  const label = model.id.startsWith('lumi') ? '小猫' : '小鹿';
   let bytes: Uint8Array<ArrayBuffer>;
   if (bridge?.readBuiltin) {
     const source = await bridge.readBuiltin(model.id);
@@ -53,6 +73,7 @@ async function loadBuiltinModel(model: typeof lumiModel | typeof liliModel, sign
   }
   signal?.throwIfAborted();
   const digest = await crypto.subtle.digest('SHA-256', bytes);
+  signal?.throwIfAborted();
   const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
   if (hash !== model.sha256) throw new Error(`${label}资源校验失败，请重新构建或安装客户端。`);
   return { format: 'glb', bytes };
@@ -60,3 +81,4 @@ async function loadBuiltinModel(model: typeof lumiModel | typeof liliModel, sign
 
 export const loadLumiModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(lumiModel, signal);
 export const loadLiliModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(liliModel, signal);
+export const loadLiliNaturalModel = (signal?: AbortSignal): Promise<ModelSource> => loadBuiltinModel(liliNaturalModel, signal);

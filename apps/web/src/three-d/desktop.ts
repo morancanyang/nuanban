@@ -1,6 +1,6 @@
 import { createModelView } from './viewer';
 import type { LocalModel } from '../local-model';
-import { isBuiltinLumi, liliModel, loadLiliModel, loadLumiModel, lumiModel } from './builtin-models';
+import { isBuiltinLumi, liliModel, liliNaturalModel, loadLiliModel, loadLumiModel, lumiModel } from './builtin-models';
 
 const validationStage = document.getElementById('model-validation-stage');
 if (validationStage && window.nuanbanModelValidator) {
@@ -78,6 +78,26 @@ if (modelStage && window.nuanbanModel) {
     if (cloudVisible) reset();
     else if (selectedModel) void show(selectedModel);
   };
+  const playNaturalAction = (action: string) => {
+    if (disposed || cloudVisible || selectedModel?.kind !== 'model' || selectedModel.id !== liliNaturalModel.sha256
+      || modelStage.hidden || !liliNaturalModel.actions.some(item => item.name === action)) return false;
+    return currentView?.playAnimation(action) ?? false;
+  };
+  const onModelAction = (event: Event) => {
+    const action = (event as CustomEvent<{ action?: unknown }>).detail?.action;
+    if (typeof action === 'string') playNaturalAction(action);
+  };
+  const onInteraction = () => {
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) playNaturalAction('wave');
+  };
+  window.addEventListener('nuanban:model-action', onModelAction);
+  window.addEventListener('nuanban:avatar-interaction', onInteraction);
   window.addEventListener('nuanban:avatar-visibility', onCloudVisibility);
-  window.addEventListener('pagehide', () => { disposed = true; revision++; unsubscribe(); window.removeEventListener('nuanban:avatar-visibility', onCloudVisibility); reset(); }, { once: true });
+  window.addEventListener('pagehide', () => {
+    disposed = true; revision++; unsubscribe();
+    window.removeEventListener('nuanban:avatar-visibility', onCloudVisibility);
+    window.removeEventListener('nuanban:model-action', onModelAction);
+    window.removeEventListener('nuanban:avatar-interaction', onInteraction);
+    reset();
+  }, { once: true });
 }
