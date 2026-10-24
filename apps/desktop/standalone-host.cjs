@@ -16,6 +16,7 @@ const { createAppLauncherRegistry } = require('./app-launcher-registry.cjs');
 const { createAppLauncher } = require('./app-launcher.cjs');
 const { createAppLauncherIntent } = require('./app-launcher-intent.cjs');
 const { createAppLauncherHistory } = require('./app-launcher-history.cjs');
+const { createAppInventory } = require('./app-inventory.cjs');
 const { registerAppLauncherBridge } = require('./app-launcher-bridge.cjs');
 const { createRealtimeVoiceHost } = require('./realtime-voice-host.cjs');
 const { registerDictationBridge } = require('./wake/dictation-bridge.cjs');
@@ -1253,10 +1254,13 @@ function createStandaloneHost(options) {
         showPetPanel({ focusInput: false, section: 'search' });
         petWindow.webContents.send('nuanban:pet-search:opened');
       } });
-    const launcherRegistry = options.appLauncherRegistry ?? createAppLauncherRegistry();
+    const appInventory = options.appInventory ?? (process.platform === 'win32' ? createAppInventory() : undefined);
+    const launcherRegistry = options.appLauncherRegistry ?? createAppLauncherRegistry({ inventory: appInventory });
     appLauncherBridge = registerAppLauncherBridge({ ipcMain, isTrusted: event => trusted(event, petWindow, petPath),
       registry: launcherRegistry,
-      launcher: options.appLauncher ?? createAppLauncher({ spawn: options.spawnProcess ?? require('node:child_process').spawn, shell: options.electron.shell }),
+      inventory: appInventory,
+      launcher: options.appLauncher ?? createAppLauncher({ spawn: options.spawnProcess ?? require('node:child_process').spawn, shell: options.electron.shell,
+        registry: launcherRegistry, inventory: appInventory }),
       intent: createAppLauncherIntent({ provider: options.questioner, registry: launcherRegistry }),
       history: createAppLauncherHistory({ filePath: path.join(options.userDataPath, 'nuanban-app-launcher.json') }),
       pickFolder: async () => {

@@ -1386,6 +1386,10 @@
   let openAppBusy = false;
   let openAppNeedsFolder = false;
   let openAppRequest = 0;
+  let openAppInventory;
+  let openAppListOpen = false;
+  let openAppListLoading = false;
+  let openAppInventoryRequest = 0;
 
   const openAppApi = () => {
     const api = window.nuanbanOpenApp;
@@ -1403,6 +1407,12 @@
       : '自动执行已关闭：每次打开都需要你确认';
   }
 
+  function openAppInventoryCount(value) {
+    element('open-app-inventory-count').textContent = Number.isSafeInteger(value) && value >= 0
+      ? `已发现本机 ${value} 个可打开项`
+      : '本机可打开项待运行核心报告';
+  }
+
   function renderOpenApp() {
     const api = openAppApi();
     const available = Boolean(api) && typeof api.status === 'function' && typeof api.parse === 'function';
@@ -1417,6 +1427,9 @@
     element('open-app-confirm-cancel').disabled = openAppBusy || !openAppPlan;
     element('open-app-folder-row').hidden = !openAppNeedsFolder;
     element('open-app-folder').disabled = openAppBusy;
+    element('open-app-list-toggle').disabled = !available || typeof api?.inventory !== 'function' || openAppListLoading || openAppBusy;
+    element('open-app-list-toggle').setAttribute('aria-expanded', String(openAppListOpen));
+    element('open-app-list').hidden = !openAppListOpen;
   }
 
   function openAppTime(value) {
@@ -1467,6 +1480,7 @@
       openAppStatus = undefined;
       element('open-app-auto').checked = false;
       openAppAutoStatus(false);
+      openAppInventoryCount(undefined);
       element('open-app-progress').textContent = '智能打开软件的桌宠接口尚未接入本页面：不会显示模拟清单，也不会打开任何软件。';
       renderOpenApp();
       return;
@@ -1478,6 +1492,7 @@
       openAppStatus = status;
       element('open-app-auto').checked = status.autoExecute === true;
       openAppAutoStatus(status.autoExecute === true);
+      openAppInventoryCount(status.inventoryTotal);
       element('open-app-progress').textContent = status.modelReady === true
         ? `已就绪：本机登记了 ${status.catalog.length} 个可打开的软件；说出名字后先解析，再由你确认。`
         : '解析模型尚未就绪：暂时无法解析自然语言，也不会用固定答案代替；请先检查“接口与能力状态”。';
@@ -1486,6 +1501,7 @@
       openAppStatus = undefined;
       element('open-app-auto').checked = false;
       openAppAutoStatus(false);
+      openAppInventoryCount(undefined);
       element('open-app-progress').textContent = '';
       openAppNotice('读取智能打开软件的状态失败：未执行任何打开动作，可离开本页后重新进入再试。');
     }
@@ -1500,6 +1516,123 @@
     if (plan.risk === 'confirm') parts.push('这一步需要你本人确认。');
     parts.push('只发送打开请求，不代你在软件里点击或输入；打开后由你亲手操作。');
     return parts.join(' ');
+  }
+
+  function openAppRenderInventory(entries) {
+    const list = element('open-app-list');
+    const fragment = document.createDocumentFragment();
+    let rendered = 0;
+    for (const entry of entries.slice(0, 400)) {
+      if (!text(entry?.id) || !text(entry?.displayName)) continue;
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'open-app-item';
+      item.dataset.appId = entry.id;
+      item.textContent = entry.displayName;
+      item.addEventListener('click', () => { void openAppPickItem(entry.id); });
+      fragment.append(item);
+      rendered += 1;
+    }
+    if (!rendered) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = '本机开始菜单里没有发现可打开的软件；可以改用上面的文字描述。';
+      fragment.append(empty);
+    }
+    list.replaceChildren(fragment);
+  }
+
+  async function openAppLoadInventory() {
+    const api = openAppApi();
+    if (!api || typeof api.inventory !== 'function') {
+      openAppNotice('本机软件清单尚未接入本页面：不会显示模拟列表，也不会打开任何软件。');
+      return;
+    }
+    const current = ++openAppInventoryRequest;
+    openAppListLoading = true;
+    openAppNotice('');
+    renderOpenApp();
+    try {
+      const reply = await api.inventory();
+      if (disposed || current !== openAppInventoryRequest || !openAppListOpen) return;
+      if (!reply || reply.ok !== true || !Array.isArray(reply.entries)) throw new Error('清单未确认');
+      openAppInventory = reply.entries;
+      if (Number.isSafeInteger(reply.total) && reply.total >= 0) openAppInventoryCount(reply.total);
+      openAppRenderInventory(reply.entries);
+      if (!reply.entries.length) element('open-app-progress').textContent = '本机开始菜单里没有发现可打开的软件。';
+    } catch {
+      if (disposed || current !== openAppInventoryRequest) return;
+      openAppInventory = undefined;
+      element('open-app-list').replaceChildren();
+      openAppNotice('读取本机软件清单失败：不会显示模拟条目，可以改用上面的文字描述。');
+    } finally {
+      if (!disposed && current === openAppInventoryRequest) { openAppListLoading = false; renderOpenApp(); }
+    }
+  }
+
+  function openAppCloseList() {
+    openAppListOpen = false;
+    openAppInventoryRequest += 1;
+    openAppListLoading = false;
+    renderOpenApp();
+  }
+
+  async function openAppToggleList() {
+    if (disposed) return;
+    if (openAppListOpen) {
+      openAppCloseList();
+      return;
+    }
+    openAppListOpen = true;
+    renderOpenApp();
+    await openAppLoadInventory();
+  }
+
+  async function openAppPickItem(id) {
+    const api = openAppApi();
+    if (!api || typeof api.pick !== 'function') {
+      openAppNotice('本机软件清单尚未接入本页面：没有选择任何软件，也不会用其他方式代替。');
+      return;
+    }
+    const current = ++openAppRequest;
+    openAppBusy = true;
+    openAppPlan = undefined;
+    openAppNeedsFolder = false;
+    openAppNotice('');
+    element('open-app-confirm').hidden = true;
+    element('open-app-clarify').hidden = true;
+    element('open-app-clarify').textContent = '';
+    element('open-app-result').hidden = true;
+    element('open-app-result').textContent = '';
+    element('open-app-progress').textContent = '正在读取这个条目的打开方式…';
+    renderOpenApp();
+    let autoRun = false;
+    try {
+      const reply = await api.pick(id);
+      if (disposed || current !== openAppRequest) return;
+      if (!reply || typeof reply !== 'object') throw new Error('回复无效');
+      if (reply.ok !== true) {
+        const code = text(reply.code);
+        openAppNeedsFolder = ['FOLDER_NOT_ALLOWED', 'FOLDER_MISSING'].includes(code);
+        element('open-app-progress').textContent = '';
+        openAppNotice(`${text(reply.message, '这个条目暂时不能打开，请刷新列表后重试。')}${code ? `（${code}）` : ''}`);
+      } else if (reply.kind === 'plan') {
+        openAppApplyPlan(record(reply.plan));
+        autoRun = Boolean(openAppPlan) && !openAppNeedsFolder && openAppPlan.requiresConfirmation !== true;
+        if (autoRun) element('open-app-progress').textContent = '主进程判定该目标无需再次确认，正在发送打开请求…';
+      } else {
+        element('open-app-progress').textContent = '';
+        element('open-app-clarify').textContent = text(reply.question, text(reply.message, '这个条目暂时不能打开，请改用文字描述。'));
+        element('open-app-clarify').hidden = false;
+      }
+    } catch {
+      if (disposed || current !== openAppRequest) return;
+      element('open-app-progress').textContent = '';
+      openAppNotice('这个条目没有读取成功：不会自动重试，也不会打开任何软件，请刷新列表后再选。');
+    } finally {
+      if (!disposed && current === openAppRequest) { openAppBusy = false; renderOpenApp(); }
+    }
+    if (autoRun && !disposed && current === openAppRequest) await openAppExecute(false);
   }
 
   function openAppApplyPlan(plan) {
@@ -1727,6 +1860,9 @@
     const api = openAppApi();
     const interrupt = openAppBusy || Boolean(openAppPlan);
     openAppRequest += 1;
+    openAppListOpen = false;
+    openAppInventoryRequest += 1;
+    openAppListLoading = false;
     openAppBusy = false;
     openAppPlan = undefined;
     openAppNeedsFolder = false;
@@ -1755,9 +1891,11 @@
   bind(element('open-app-confirm-ok'), 'click', () => { void openAppExecute(true); });
   bind(element('open-app-confirm-cancel'), 'click', () => { void openAppExecute(false); });
   bind(element('open-app-folder'), 'click', () => { void openAppPickFolder(); });
+  bind(element('open-app-list-toggle'), 'click', () => { void openAppToggleList(); });
   bind(window, 'nuanban:pet:view-changed', event => {
     const section = record(event.detail).section;
     if (section === 'openApp') { openAppShow(); return; }
+    openAppCloseList();
     if (!openAppBusy && !openAppPlan && element('open-app-consent').checked !== true) return;
     void openAppLeave();
   });

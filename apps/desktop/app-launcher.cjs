@@ -4,20 +4,27 @@ const { createAppLauncherRegistry, forbiddenSpawnText, pathIdentity } = require(
 
 // 智能打开软件 · 启动器（core）。
 // 只允许：注册表登记的固定 exe（绝对候选且存在）+ 固定参数数组，或 http/https 网址（shell.openExternal），
-// 或 explorer.exe/Code.exe + 单个已校验目录。绝不接受 Shell 字符串、任意 exe、任意参数、任意 URL。
+// 或 explorer.exe/Code.exe + 单个已校验目录，或本机开始菜单清单里的快捷方式（shell.openPath）。
+// 绝不接受 Shell 字符串、任意 exe、任意参数、任意 URL、任意路径。
 
 const HONEST_LAUNCH_NOTE = '仅确认已发送启动请求，无法确认软件内部页面已加载';
 // 唯一的进程创建方式：无 Shell、脱离父进程、丢弃标准流、不显示窗口。
 const SPAWN_OPTIONS = Object.freeze({ shell: false, detached: true, stdio: 'ignore', windowsHide: true });
-const REQUEST_FIELDS = Object.freeze(['appId', 'target', 'displayName', 'kind', 'executable', 'args', 'url', 'folder']);
-const LAUNCH_KINDS = Object.freeze(['exe', 'url', 'folder']);
+const REQUEST_FIELDS = Object.freeze(['appId', 'target', 'displayName', 'kind', 'executable', 'args', 'url', 'folder', 'shortcut']);
+const LAUNCH_KINDS = Object.freeze(['exe', 'url', 'folder', 'shortcut']);
 const LAUNCH_ERROR_CODES = Object.freeze(['APP_UNKNOWN', 'TARGET_UNKNOWN', 'TARGET_UNSUPPORTED', 'PARAMETERS_INVALID',
   'PARAMETERS_FORBIDDEN', 'URL_PROTOCOL_BLOCKED', 'URL_INVALID', 'FOLDER_NOT_ALLOWED', 'FOLDER_MISSING',
   'EXECUTABLE_MISSING', 'LAUNCH_FAILED']);
 const MAX_TEXT_LENGTH = 64;
 const MAX_ARGUMENTS = 16;
 const MAX_ARGUMENT_LENGTH = 1024;
+const MAX_SHORTCUT_LENGTH = 512;
 const CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u;
+const UNC_PATTERN = /^[\\/]{2}/u;
+const SHORTCUT_EXTENSIONS = new Set(['.lnk', '.url', '.exe']);
+const START_MENU_SUFFIX = 'Microsoft\\Windows\\Start Menu\\Programs';
+// 危险/管理类名称（与 app-inventory.cjs 的扫描排除规则一致）：即使出现在允许根内也不再放行。
+const DANGEROUS_NAME_PATTERN = /卸载|uninstall|remove|repair|修复|更新|update|administrative tools|windows 管理工具|系统工具|system tools|windows system|命令提示符|command prompt|powershell|pwsh|cmd|regedit|注册表|msconfig|系统配置|服务|services|计算机管理|磁盘管理|设备管理器|任务计划程序|gpedit|组策略|资源监视器|事件查看器|format|分区|diskpart|terminal|wsl|任务管理器|task manager|控制面板|control panel|设置|settings/iu;
 
 // core 只返回 errorCode；这里的 message 仅是兜底文案，界面统一提示由 app-launcher-bridge.cjs 映射。
 const FAILURE_MESSAGES = Object.freeze({
@@ -57,17 +64,77 @@ function errorCodeFor(error) {
   return code === 'ENOENT' ? 'EXECUTABLE_MISSING' : 'LAUNCH_FAILED';
 }
 
-function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env = process.env, settleMs = 300, registry } = {}) {
+function firstText(...values) {
+  return values.find(value => typeof value === 'string' && value.length > 0);
+}
+
+// 快捷方式允许根：两个开始菜单 Programs 根（可含子目录），以及 %SystemRoot%\System32 顶层的固定系统程序。
+function shortcutRoots(platform, env, pathApi) {
+  if (platform !== 'win32') return { startMenu: [], systemDirectory: undefined };
+  const profile = firstText(env.USERPROFILE, env.HOME);
+  const appData = firstText(env.APPDATA)
+    || (pathApi.isAbsolute(profile ?? '') ? pathApi.join(profile, 'AppData', 'Roaming') : 'C:\\Users\\Default\\AppData\\Roaming');
+  const programData = firstText(env.ProgramData) || 'C:\\ProgramData';
+  const systemRoot = firstText(env.SystemRoot, env.windir) || 'C:\\Windows';
+  return { startMenu: [pathApi.join(appData, START_MENU_SUFFIX), pathApi.join(programData, START_MENU_SUFFIX)],
+    systemDirectory: pathApi.join(systemRoot, 'System32') };
+}
+
+function withinDirectory(target, root, platform, pathApi, direct = false) {
+  const identity = pathIdentity(target, platform);
+  const rootIdentity = pathIdentity(root, platform);
+  if (!identity || !rootIdentity || identity === rootIdentity) return false;
+  const prefix = rootIdentity.endsWith(pathApi.sep) ? rootIdentity : `${rootIdentity}${pathApi.sep}`;
+  if (!identity.startsWith(prefix)) return false;
+  if (!direct) return true;
+  const rest = identity.slice(prefix.length);
+  return rest.length > 0 && !rest.includes(pathApi.sep);
+}
+
+function dangerousShortcutName(value, pathApi) {
+  return DANGEROUS_NAME_PATTERN.test(pathApi.basename(value)) || DANGEROUS_NAME_PATTERN.test(pathApi.basename(pathApi.dirname(value)));
+}
+
+// 快捷方式路径策略：绝对路径 + 固定扩展名 + 位于允许根 + 无 Shell 字符/UNC + 非危险名称 + 存在且不是目录。
+function shortcutPolicyError(value, { platform, env, pathApi, exists, stat }) {
+  if (typeof value !== 'string' || !value || value.length > MAX_SHORTCUT_LENGTH || value !== value.trim()) return 'PARAMETERS_INVALID';
+  if (forbiddenSpawnText(value)) return 'PARAMETERS_FORBIDDEN';
+  if (!pathApi.isAbsolute(value)) return 'PARAMETERS_INVALID';
+  if (UNC_PATTERN.test(value)) return 'PARAMETERS_FORBIDDEN';
+  if (!SHORTCUT_EXTENSIONS.has(pathApi.extname(value).toLowerCase())) return 'PARAMETERS_INVALID';
+  if (dangerousShortcutName(value, pathApi)) return 'PARAMETERS_FORBIDDEN';
+  const roots = shortcutRoots(platform, env, pathApi);
+  const inStartMenu = roots.startMenu.some(root => withinDirectory(value, root, platform, pathApi));
+  const inSystemPrograms = roots.systemDirectory !== undefined && pathApi.extname(value).toLowerCase() === '.exe'
+    && withinDirectory(value, roots.systemDirectory, platform, pathApi, true);
+  if (!inStartMenu && !inSystemPrograms) return 'PARAMETERS_FORBIDDEN';
+  if (!exists(value)) return 'EXECUTABLE_MISSING';
+  if (stat(value)?.isDirectory === true) return 'PARAMETERS_INVALID';
+  return null;
+}
+
+function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env = process.env, settleMs = 300, registry, inventory } = {}) {
   if (typeof spawn !== 'function') throw new TypeError('启动器缺少进程创建函数');
   if (typeof platform !== 'string' || !platform) throw new TypeError('运行平台无效');
   if (!Number.isSafeInteger(settleMs) || settleMs < 0 || settleMs > 10_000) throw new TypeError('启动确认时间无效');
   if (exists !== undefined && typeof exists !== 'function') throw new TypeError('文件存在性检查无效');
+  if (stat !== undefined && typeof stat !== 'function') throw new TypeError('文件类型检查无效');
   if (registry !== undefined && (!registry || typeof registry !== 'object'
     || typeof registry.resolve !== 'function' || typeof registry.validateParameters !== 'function'
     || typeof registry.executableCandidates !== 'function')) throw new TypeError('应用注册表无效');
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const fileExists = value => { try { return (exists ?? fs.existsSync)(value) === true; } catch { return false; } };
-  const store = registry ?? createAppLauncherRegistry({ platform, exists, stat, env });
+  // 与注册表一致：fs.statSync 的 isDirectory 是方法，注入桩常用布尔字段。
+  const fileStat = value => {
+    try {
+      const details = (stat ?? fs.statSync)(value);
+      if (!details || typeof details !== 'object') return undefined;
+      if (typeof details.isDirectory === 'function') return { isDirectory: details.isDirectory() === true };
+      return { isDirectory: details.isDirectory === true };
+    } catch { return undefined; }
+  };
+  const store = registry ?? createAppLauncherRegistry({ platform, exists, stat, env, inventory });
+  const shortcutContext = { platform, env, pathApi, exists: fileExists, stat: fileStat };
 
   function executableIndex(appId) {
     const index = new Map();
@@ -131,8 +198,8 @@ function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env
     });
   }
 
-  async function launchExecutable({ appId, target, resolved, executable, args, url, folder }) {
-    if (url !== undefined || folder !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'exe');
+  async function launchExecutable({ appId, target, resolved, executable, args, url, folder, shortcut }) {
+    if (url !== undefined || folder !== undefined || shortcut !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'exe');
     const parsed = validateSpawnArguments(args);
     if (!parsed.ok) return failure(appId, target, parsed.errorCode, 'exe');
     // 注册表未声明任何需要参数的 exe 启动：固定参数一律为空数组。
@@ -144,8 +211,8 @@ function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env
     return success(appId, target, 'exe', resolved.displayName);
   }
 
-  async function launchUrl({ appId, target, resolved, executable, args, url, folder }) {
-    if (executable !== undefined || folder !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'url');
+  async function launchUrl({ appId, target, resolved, executable, args, url, folder, shortcut }) {
+    if (executable !== undefined || folder !== undefined || shortcut !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'url');
     const parsed = validateSpawnArguments(args);
     if (!parsed.ok) return failure(appId, target, parsed.errorCode, 'url');
     if (parsed.args.length) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'url');
@@ -159,8 +226,8 @@ function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env
     return success(appId, target, 'url', resolved.displayName);
   }
 
-  async function launchFolder({ appId, target, resolved, executable, args, url, folder }) {
-    if (url !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'folder');
+  async function launchFolder({ appId, target, resolved, executable, args, url, folder, shortcut }) {
+    if (url !== undefined || shortcut !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'folder');
     const parsed = validateSpawnArguments(args);
     if (!parsed.ok) return failure(appId, target, parsed.errorCode, 'folder');
     // 目录只接受一个来源：args:[folder] 或 folder 字段；两者同时出现时必须完全一致。
@@ -177,6 +244,34 @@ function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env
     const outcome = await spawnDetached(command, [parameters.parameters.folder]);
     if (!outcome.ok) return failure(appId, target, outcome.errorCode, 'folder');
     return success(appId, target, 'folder', resolved.displayName);
+  }
+
+  // 动态清单项的快捷方式：路径必须来自清单（与 dynamicLaunch 的目标完全一致），且必须落在允许根内。
+  async function launchShortcut({ appId, target, resolved, executable, args, url, folder, shortcut }) {
+    if (url !== undefined || folder !== undefined || executable !== undefined) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'shortcut');
+    const parsed = validateSpawnArguments(args);
+    if (!parsed.ok) return failure(appId, target, parsed.errorCode, 'shortcut');
+    if (parsed.args.length > 1) return failure(appId, target, 'PARAMETERS_INVALID', 'shortcut');
+    if (shortcut !== undefined && parsed.args.length === 1 && parsed.args[0] !== shortcut) return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'shortcut');
+    const selected = shortcut ?? parsed.args[0];
+    if (typeof selected !== 'string' || !selected) return failure(appId, target, 'PARAMETERS_INVALID', 'shortcut');
+    // 先做路径策略，再做来源核对：路径必须与清单给出的目标完全一致（页面与模型都无法替换路径）。
+    const policyError = shortcutPolicyError(selected, shortcutContext);
+    if (policyError) return failure(appId, target, policyError, 'shortcut');
+    if (typeof store.dynamicLaunch === 'function') {
+      const descriptor = store.dynamicLaunch(appId);
+      if (!descriptor || descriptor.ok !== true) return failure(appId, target, 'APP_UNKNOWN', 'shortcut');
+      if (pathIdentity(descriptor.target, platform) !== pathIdentity(selected, platform)) {
+        return failure(appId, target, 'PARAMETERS_FORBIDDEN', 'shortcut');
+      }
+    }
+    if (!shell || typeof shell.openPath !== 'function') return failure(appId, target, 'LAUNCH_FAILED', 'shortcut');
+    try {
+      // Electron：返回空字符串表示成功，非空字符串是失败原因。
+      const opened = await shell.openPath(selected);
+      if (typeof opened === 'string' && opened) return failure(appId, target, 'LAUNCH_FAILED', 'shortcut');
+    } catch { return failure(appId, target, 'LAUNCH_FAILED', 'shortcut'); }
+    return success(appId, target, 'shortcut', resolved.displayName);
   }
 
   function readRequest(request) {
@@ -199,26 +294,28 @@ function createAppLauncher({ spawn, shell, platform = 'win32', exists, stat, env
     if (request.executable !== undefined && typeof request.executable !== 'string') return { ok: false, appId, target, errorCode: 'PARAMETERS_INVALID' };
     if (request.url !== undefined && typeof request.url !== 'string') return { ok: false, appId, target, errorCode: 'PARAMETERS_INVALID' };
     if (request.folder !== undefined && typeof request.folder !== 'string') return { ok: false, appId, target, errorCode: 'PARAMETERS_INVALID' };
+    if (request.shortcut !== undefined && typeof request.shortcut !== 'string') return { ok: false, appId, target, errorCode: 'PARAMETERS_INVALID' };
     if (request.args !== undefined && !Array.isArray(request.args)) return { ok: false, appId, target, errorCode: 'PARAMETERS_INVALID' };
     return { ok: true, appId, target, kind: request.kind ?? undefined, displayName: request.displayName,
-      executable: request.executable, args: request.args, url: request.url, folder: request.folder };
+      executable: request.executable, args: request.args, url: request.url, folder: request.folder, shortcut: request.shortcut };
   }
 
   async function launch(request) {
     const shape = readRequest(request);
     if (!shape.ok) return failure(shape.appId, shape.target, shape.errorCode, null);
     // displayName 只用来做类型校验；结果文案一律使用注册表登记的 displayName，不采信调用方文案。
-    const { appId, target, executable, args, url, folder } = shape;
+    const { appId, target, executable, args, url, folder, shortcut } = shape;
     const resolved = store.resolve(appId, target);
     if (!resolved.ok) {
       return failure(appId, target, resolved.errorCode, null, resolved.errorCode === 'TARGET_UNSUPPORTED' ? resolved.message : undefined);
     }
-    const expectedKind = resolved.requiresUrl ? 'url' : resolved.requiresFolder ? 'folder' : 'exe';
+    const expectedKind = resolved.dynamic ? 'shortcut' : resolved.requiresUrl ? 'url' : resolved.requiresFolder ? 'folder' : 'exe';
     const kind = shape.kind === undefined ? expectedKind : shape.kind;
     if (!LAUNCH_KINDS.includes(kind)) return failure(appId, target, 'PARAMETERS_INVALID', null);
-    // 目标与启动方式必须一致：不允许把“指定文件夹/指定网址”降级成其它方式启动。
+    // 目标与启动方式必须一致：不允许把“指定文件夹/指定网址/本机清单项”降级成其它方式启动。
     if (kind !== expectedKind) return failure(appId, target, 'PARAMETERS_INVALID', kind);
-    const context = { appId, target, resolved, executable, args, url, folder };
+    const context = { appId, target, resolved, executable, args, url, folder, shortcut };
+    if (kind === 'shortcut') return launchShortcut(context);
     if (kind === 'url') return launchUrl(context);
     if (kind === 'folder') return launchFolder(context);
     return launchExecutable(context);

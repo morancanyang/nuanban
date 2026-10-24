@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -10,6 +10,7 @@ const { createAppLauncherRegistry } = require('../../apps/desktop/app-launcher-r
 const { createAppLauncher } = require('../../apps/desktop/app-launcher.cjs');
 const { createAppLauncherIntent } = require('../../apps/desktop/app-launcher-intent.cjs');
 const { createAppLauncherHistory } = require('../../apps/desktop/app-launcher-history.cjs');
+const { createAppInventory } = require('../../apps/desktop/app-inventory.cjs');
 const { registerAppLauncherBridge } = require('../../apps/desktop/app-launcher-bridge.cjs');
 
 // 假 spawn：只记录调用并返回一个从不触发 error/exit 的句柄，绝不真实启动任何进程。
@@ -24,12 +25,19 @@ function fakeSpawn() {
   return { spawn, calls };
 }
 
-function integrationFixture(results: unknown[]) {
+function integrationFixture(results: unknown[], options: { startMenuBase?: string } = {}) {
   const queue = [...results];
-  const registry = createAppLauncherRegistry();
+  const env = options.startMenuBase
+    ? { ...process.env, APPDATA: options.startMenuBase, ProgramData: join(options.startMenuBase, 'ProgramData'), USERPROFILE: options.startMenuBase, SystemRoot: process.env.SystemRoot }
+    : process.env;
+  const inventory = options.startMenuBase
+    ? createAppInventory({ roots: [join(options.startMenuBase, 'Microsoft', 'Windows', 'Start Menu', 'Programs')], env })
+    : undefined;
+  const registry = createAppLauncherRegistry({ inventory, env });
   const { spawn, calls } = fakeSpawn();
   const openExternal = vi.fn(async () => undefined);
-  const launcher = createAppLauncher({ spawn, shell: { openExternal }, platform: 'win32', settleMs: 10 });
+  const openPath = vi.fn(async () => '');
+  const launcher = createAppLauncher({ spawn, shell: { openExternal, openPath }, platform: 'win32', settleMs: 10, registry, inventory, env });
   const provider = { status: () => ({ available: true }), answer: vi.fn(async () => ({ text: JSON.stringify(queue.shift()) })) };
   const intent = createAppLauncherIntent({ provider, registry });
   const historyPath = join(mkdtempSync(join(tmpdir(), 'nuanban-launcher-')), 'history.json');
@@ -38,13 +46,13 @@ function integrationFixture(results: unknown[]) {
   const bridge = registerAppLauncherBridge({
     ipcMain: { handle: (channel: string, handler: (event: unknown, payload?: unknown) => any) => handlers.set(channel, handler), removeHandler: () => {} },
     isTrusted: () => true,
-    registry, launcher, intent, history,
+    registry, launcher, intent, history, inventory,
     pickFolder: async () => folderPick.current,
     showPage: () => {},
   });
   const folderPick: { current: string | undefined } = { current: undefined };
   const invoke = (name: string, payload?: unknown): any => handlers.get(`nuanban:pet-open-app:${name}`)!( {}, payload);
-  return { registry, launcher, intent, history, bridge, invoke, calls, openExternal, historyPath, folderPick, spawn };
+  return { registry, launcher, intent, history, inventory, bridge, invoke, calls, openExternal, openPath, historyPath, folderPick, spawn };
 }
 
 const shellOutput = { action: 'open_app', appId: 'calculator', appName: '计算器', target: 'default',
@@ -143,5 +151,38 @@ describe('智能打开软件·真实注册表与启动器集成（假 spawn，�
     expect(executed.result).toMatchObject({ success: false });
     expect(['EXECUTABLE_MISSING', 'LAUNCH_FAILED']).toContain(executed.result.errorCode);
     expect(fixture.history.list().at(0)).toMatchObject({ appId: 'calculator', target: 'default', success: false });
+  });
+
+  it('本机开始菜单发现的软件：列表-选择-确认-以快捷方式打开，全程不暴露路径也不启动真实进程', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'nuanban-startmenu-'));
+    const programs = join(base, 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+    mkdirSync(programs, { recursive: true });
+    writeFileSync(join(programs, 'Apifox.lnk'), '');
+    writeFileSync(join(programs, 'Blender.lnk'), '');
+    writeFileSync(join(programs, '卸载 Apifox.lnk'), '');
+    mkdirSync(join(programs, 'Windows 管理工具'), { recursive: true });
+    writeFileSync(join(programs, 'Windows 管理工具', '服务.lnk'), '');
+    try {
+      const fixture = integrationFixture([], { startMenuBase: base });
+      const listed = fixture.invoke('inventory', {});
+      expect(listed).toMatchObject({ ok: true, total: 2 });
+      expect(listed.entries.map((entry: { displayName: string }) => entry.displayName).sort()).toEqual(['Apifox', 'Blender']);
+      expect(JSON.stringify(listed)).not.toContain(base);
+
+      const apifox = listed.entries.find((entry: { displayName: string }) => entry.displayName === 'Apifox');
+      const picked = fixture.invoke('pick', { id: apifox.id });
+      expect(picked).toMatchObject({ ok: true, kind: 'plan', plan: { appName: 'Apifox', target: 'default',
+        targetDescription: '主界面（本机开始菜单）', requiresConfirmation: true } });
+      expect(fixture.openPath).not.toHaveBeenCalled();
+      const executed = await fixture.invoke('execute', { planId: picked.plan.planId, approved: true });
+      expect(executed).toMatchObject({ ok: true, result: { success: true, errorCode: null } });
+      expect(String(executed.result.message)).toContain('仅确认已发送启动请求');
+      expect(fixture.openPath).toHaveBeenCalledWith(join(programs, 'Apifox.lnk'));
+      expect(fixture.calls).toHaveLength(0);
+      expect(JSON.stringify(executed)).not.toContain(base);
+      expect(fixture.invoke('pick', { id: 'sm:ffffffffffff' })).toMatchObject({ ok: false, code: 'APP_UNKNOWN' });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

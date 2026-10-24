@@ -19,14 +19,26 @@ const env = {
 };
 const userDirectories = ['C:\\Users\\anna\\Documents', 'C:\\Users\\anna\\Desktop'];
 const key = (value: string) => value.replace(/\//gu, '\\').replace(/\\+$/u, '').toLowerCase();
+const DYNAMIC_ID = 'sm:0123456789ab';
+const START_MENU = 'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs';
+const DYNAMIC_SHORTCUT = `${START_MENU}\\网易云音乐.lnk`;
 
-function fixture(options: { directories?: string[]; files?: string[]; platform?: string; env?: Record<string, string>; appPaths?: (input: unknown) => string[] } = {}) {
+// 假清单（app-inventory.cjs 的接口形状）：resolve(id) → { ok:true, id, displayName, kind, target } | { ok:false, errorCode:'APP_UNKNOWN' }
+function inventoryFixture(entries: Record<string, { displayName: string; kind: string; target: string }> = {}) {
+  const resolve = vi.fn((id: string) => {
+    const entry = entries[id];
+    return entry ? { ok: true, id, ...entry } : { ok: false, errorCode: 'APP_UNKNOWN' };
+  });
+  return { inventory: { resolve }, resolve };
+}
+
+function fixture(options: { directories?: string[]; files?: string[]; platform?: string; env?: Record<string, string>; appPaths?: (input: unknown) => string[]; inventory?: unknown } = {}) {
   const directories = new Set<string>([...userDirectories, ...(options.directories ?? [])].map(key));
   const files = new Set<string>((options.files ?? []).map(key));
   const exists = vi.fn((value: string) => directories.has(key(value)) || files.has(key(value)));
   const stat = vi.fn((value: string) => (directories.has(key(value)) ? { isDirectory: true } : files.has(key(value)) ? { isDirectory: false } : undefined));
   const registry = createAppLauncherRegistry({
-    platform: options.platform ?? 'win32', exists, stat, env: options.env ?? env, appPaths: options.appPaths,
+    platform: options.platform ?? 'win32', exists, stat, env: options.env ?? env, appPaths: options.appPaths, inventory: options.inventory,
   });
   return { registry, exists, stat };
 }
@@ -330,5 +342,87 @@ describe('智能打开软件 · 固定注册表', () => {
     expect(source).not.toContain('child_process');
     expect(source).not.toMatch(/\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\(/u);
     expect(source).not.toMatch(/shell\s*:\s*true/u);
+  });
+});
+
+describe('智能打开软件 · 动态清单项（本机开始菜单）', () => {
+  const dynamicEntry = { displayName: '网易云音乐', kind: 'lnk', target: DYNAMIC_SHORTCUT };
+
+  it('清单命中时解析为低风险的“主界面（本机开始菜单）”，固定软件仍走固定表', () => {
+    const { inventory, resolve } = inventoryFixture({ [DYNAMIC_ID]: dynamicEntry });
+    const { registry } = fixture({ inventory });
+    expect(registry.resolve(DYNAMIC_ID, 'default')).toEqual({ ok: true, appId: DYNAMIC_ID, target: 'default',
+      displayName: '网易云音乐', targetDescription: '主界面（本机开始菜单）', risk: 'low',
+      dynamic: true, requiresFolder: false, requiresUrl: false });
+    expect(resolve).toHaveBeenCalledWith(DYNAMIC_ID);
+    expect(registry.resolve('notepad', 'default')).not.toHaveProperty('dynamic');
+    expect(registry.resolve('notepad', 'default')).toMatchObject({ ok: true, displayName: '记事本', targetDescription: '主界面' });
+  });
+
+  it('清单未命中、非 sm: 前缀或非主界面目标都被拒绝', () => {
+    const { inventory } = inventoryFixture({ [DYNAMIC_ID]: dynamicEntry });
+    const { registry } = fixture({ inventory });
+    expect(registry.resolve('sm:ffffffffffff', 'default')).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    expect(registry.resolve(DYNAMIC_ID, 'folder')).toEqual({ ok: false, errorCode: 'TARGET_UNKNOWN' });
+    expect(registry.resolve(DYNAMIC_ID, 'settings')).toEqual({ ok: false, errorCode: 'TARGET_UNKNOWN' });
+    expect(registry.resolve(DYNAMIC_ID.toUpperCase(), 'default')).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    const spoofed = inventoryFixture({ evil: { displayName: '伪装项', kind: 'exe', target: 'C:\\Windows\\System32\\notepad.exe' } });
+    expect(fixture({ inventory: spoofed.inventory }).registry.resolve('evil', 'default')).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    expect(spoofed.resolve).not.toHaveBeenCalled();
+  });
+
+  it('清单返回的 id、名称、类型、目标不自洽时一律当作未命中', () => {
+    const brokenResolvers = [
+      () => ({ ok: false, errorCode: 'APP_UNKNOWN' }),
+      () => ({ ok: true, id: 'sm:other', displayName: '项', kind: 'lnk', target: DYNAMIC_SHORTCUT }),
+      () => ({ ok: true, id: DYNAMIC_ID, displayName: '', kind: 'lnk', target: DYNAMIC_SHORTCUT }),
+      () => ({ ok: true, id: DYNAMIC_ID, displayName: '项'.repeat(65), kind: 'lnk', target: DYNAMIC_SHORTCUT }),
+      () => ({ ok: true, id: DYNAMIC_ID, displayName: '项', kind: 'shell', target: DYNAMIC_SHORTCUT }),
+      () => ({ ok: true, id: DYNAMIC_ID, displayName: '项', kind: 'lnk' }),
+      () => ({ ok: true, id: DYNAMIC_ID, displayName: '项', kind: 'lnk', target: '' }),
+      () => 'not-an-object',
+      () => null,
+      () => { throw new Error('synthetic-inventory-failure'); },
+    ];
+    for (const resolve of brokenResolvers) {
+      const { registry } = fixture({ inventory: { resolve } });
+      expect(registry.resolve(DYNAMIC_ID, 'default')).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+      expect(registry.dynamicLaunch(DYNAMIC_ID)).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    }
+  });
+
+  it('动态项只接受空参数，且没有固定候选 exe', () => {
+    const { inventory } = inventoryFixture({ [DYNAMIC_ID]: dynamicEntry });
+    const { registry } = fixture({ inventory });
+    expect(registry.validateParameters(DYNAMIC_ID, 'default', {})).toEqual({ ok: true, parameters: {} });
+    expect(registry.validateParameters(DYNAMIC_ID, 'default', undefined)).toEqual({ ok: true, parameters: {} });
+    for (const parameters of [{ url: 'https://example.org/' }, { folder: 'C:\\Users\\anna\\Documents' },
+      { shortcut: DYNAMIC_SHORTCUT }, { command: 'cmd /c calc' }, { exe: 'C:\\evil.exe' }]) {
+      expect(registry.validateParameters(DYNAMIC_ID, 'default', parameters)).toEqual({ ok: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    }
+    expect(registry.executableCandidates(DYNAMIC_ID)).toEqual([]);
+    expect(registry.catalog().some((application: { appId: string }) => application.appId === DYNAMIC_ID)).toBe(false);
+    expect(registry.catalog()).toHaveLength(6);
+  });
+
+  it('dynamicLaunch 只回传清单给出的启动描述', () => {
+    const { inventory } = inventoryFixture({ [DYNAMIC_ID]: dynamicEntry });
+    const { registry } = fixture({ inventory });
+    expect(registry.dynamicLaunch(DYNAMIC_ID)).toEqual({ ok: true, kind: 'lnk', target: DYNAMIC_SHORTCUT, displayName: '网易云音乐' });
+    for (const appId of ['sm:missing', 'notepad', 'cmd /c calc', 'C:\\evil.exe', '', undefined, 42]) {
+      expect(registry.dynamicLaunch(appId)).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    }
+  });
+
+  it('未注入清单时动态 id 一律未命中；注入参数必须自洽', () => {
+    const { registry } = fixture();
+    expect(registry.resolve(DYNAMIC_ID, 'default')).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    expect(registry.dynamicLaunch(DYNAMIC_ID)).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    expect(registry.validateParameters(DYNAMIC_ID, 'default', {})).toEqual({ ok: false, errorCode: 'APP_UNKNOWN' });
+    expect(registry.executableCandidates(DYNAMIC_ID)).toEqual([]);
+    expect(() => createAppLauncherRegistry({ platform: 'win32', env, inventory: {} })).toThrow('本机软件清单无效');
+    expect(() => createAppLauncherRegistry({ platform: 'win32', env, inventory: 'synthetic' })).toThrow(TypeError);
+    expect(() => createAppLauncherRegistry({ platform: 'win32', env, inventory: null })).toThrow(TypeError);
+    expect(() => createAppLauncherRegistry({ platform: 'win32', env, inventory: { resolve: 'always' } })).toThrow(TypeError);
   });
 });

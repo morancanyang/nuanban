@@ -34,17 +34,31 @@ function createAppLauncherIntent({ provider, registry, timeoutMs = 30_000 } = {}
     }).join('\n');
   }
 
-  const instructions = '你是桌宠“智能打开软件”的意图解析器，只负责把用户的话转成打开指令，不执行任何操作。'
-    + '只输出一个 JSON 对象，不要 Markdown 代码块、解释或多余文字。禁止输出任何命令、脚本、Shell、PowerShell、CMD、批处理、可执行文件路径或系统调用；'
-    + '禁止输出 file://、javascript:、data:、vbscript:；禁止编造未登记的软件或界面。\n'
-    + '允许的 action：open_app、ask_clarification、unsupported、cancel。\n'
-    + 'open_app 只能使用下列已登记软件与 target（appId、target 必须逐字匹配）：\n' + catalogLines() + '\n'
-    + 'open_app 输出格式：{"action":"open_app","appId":"calculator","appName":"计算器","target":"default","targetDescription":"计算器主界面","parameters":{},"confidence":0.95,"needsConfirmation":true,"reason":"用户想打开计算器"}\n'
-    + 'target 为 url 时 parameters 只允许 {"url":"https://…"}；target 为 folder 时 parameters 必须是空对象（文件夹由用户在本机选择，不接受模型给路径）。\n'
-    + '目标不明确时输出：{"action":"ask_clarification","question":"你想打开哪个软件？例如计算器、记事本、文件资源管理器、浏览器、VS Code 或微信。","confidence":0.4}\n'
-    + '用户想打开的软件或界面不在上表时输出：{"action":"unsupported","reason":"…","confidence":0.9}\n'
-    + '用户说要取消或不想打开时输出：{"action":"cancel","reason":"…","confidence":0.9}\n'
-    + '不要因为用户提到“帮我操作一下”就编造内部页面；不确定就用 ask_clarification。';
+  function candidateLines(candidates) {
+    const list = Array.isArray(candidates) ? candidates : [];
+    if (!list.length) {
+      return '本机开始菜单候选：无（本次没有本地匹配结果）。用户要打开别的软件时，先输出 ask_clarification 让本人换个说法或从桌宠的“从本机列表选择”里挑，不要编造 appId。\n';
+    }
+    return '本机开始菜单候选（只能逐字使用下面的 appId；这些软件只支持 target 为 default）：\n'
+      + list.map(candidate => `- ${candidate.id} = ${candidate.displayName}`).join('\n') + '\n';
+  }
+
+  function buildInstructions(candidates) {
+    return '你是桌宠“智能打开软件”的意图解析器，只负责把用户的话转成打开指令，不执行任何操作。'
+      + '只输出一个 JSON 对象，不要 Markdown 代码块、解释或多余文字。禁止输出任何命令、脚本、Shell、PowerShell、CMD、批处理、可执行文件路径或系统调用；'
+      + '禁止输出 file://、javascript:、data:、vbscript:；禁止编造未登记的软件、界面或 appId。\n'
+      + '允许的 action：open_app、ask_clarification、unsupported、cancel。\n'
+      + 'open_app 可以使用两类 id：下面是桌面已登记软件（可带 target）：\n' + catalogLines() + '\n'
+      + candidateLines(candidates)
+      + 'open_app 输出格式：{"action":"open_app","appId":"calculator","appName":"计算器","target":"default","targetDescription":"计算器主界面","parameters":{},"confidence":0.95,"needsConfirmation":true,"reason":"用户想打开计算器"}\n'
+      + 'target 为 url 时 parameters 只允许 {"url":"https://…"}；target 为 folder 时 parameters 必须是空对象（文件夹由用户在本机选择，不接受模型给路径）；开始菜单候选的 target 只能是 default 且 parameters 必须为 {}。\n'
+      + '目标不明确时输出：{"action":"ask_clarification","question":"你想打开哪个软件？可以从桌宠的“从本机列表选择”里挑一个，或换个说法。","confidence":0.4}\n'
+      + '用户想打开的软件不在任何清单里时输出：{"action":"unsupported","reason":"…","confidence":0.9}\n'
+      + '用户说要取消或不想打开时输出：{"action":"cancel","reason":"…","confidence":0.9}\n'
+      + '不要因为用户提到“帮我操作一下”就编造内部页面；不确定就用 ask_clarification。';
+  }
+
+  const instructions = buildInstructions([]);
 
   function extractJson(text) {
     const trimmed = cleanText(text, 4000);
@@ -98,6 +112,15 @@ function createAppLauncherIntent({ provider, registry, timeoutMs = 30_000 } = {}
       return failure('PARAMETERS_INVALID', '打开网页需要给出具体网址，请补充要访问的网站。');
     }
     const confidence = Number.isFinite(payload.confidence) ? Math.min(1, Math.max(0, payload.confidence)) : 0;
+    // 动态清单项（本机开始菜单发现的软件）：只开主界面，首次必须确认。
+    if (resolved.dynamic === true) {
+      if (parameterKeys.length) return failure('PARAMETERS_FORBIDDEN', '本机发现的软件只支持打开主界面，不接受参数。');
+      if (resolved.target !== 'default') return failure('TARGET_UNKNOWN', '本机发现的软件只支持打开主界面。');
+      return { ok: true, kind: 'plan', plan: {
+        planId: randomUUID(), appId: resolved.appId, appName: resolved.displayName, target: 'default',
+        targetDescription: resolved.targetDescription, risk: 'low', dynamic: true, parameters: {},
+        requiresFolder: false, requiresConfirmation: true, reason: cleanText(payload.reason, 300) } };
+    }
     return { ok: true, kind: 'plan', plan: {
       planId: randomUUID(), appId: resolved.appId, appName: resolved.displayName, target: resolved.target,
       targetDescription: resolved.targetDescription, risk: resolved.risk,
@@ -106,7 +129,7 @@ function createAppLauncherIntent({ provider, registry, timeoutMs = 30_000 } = {}
       reason: cleanText(payload.reason, 300) } };
   }
 
-  async function parse(goal, { signal } = {}) {
+  async function parse(goal, { signal, candidates } = {}) {
     if (typeof goal !== 'string' || !goal.trim() || goal.length > 300 || controls.test(goal)) {
       return failure('PARAMETERS_INVALID', '请输入 1 至 300 字的目标，例如“打开计算器”。');
     }
@@ -114,8 +137,13 @@ function createAppLauncherIntent({ provider, registry, timeoutMs = 30_000 } = {}
     if (signal?.aborted) return failure('CANCELLED', '已取消本次解析。');
     if (!available()) return failure('MODEL_UNAVAILABLE', '智能解析需要本机已配置模型；未配置时不会猜测或执行任何打开操作。');
     let reply;
+    const candidateList = (Array.isArray(candidates) ? candidates : [])
+      .filter(candidate => candidate && typeof candidate.id === 'string' && typeof candidate.displayName === 'string')
+      .slice(0, 40)
+      .map(candidate => ({ id: cleanText(candidate.id, 40), displayName: cleanText(candidate.displayName, 60) }))
+      .filter(candidate => candidate.id && candidate.displayName);
     try {
-      reply = await provider.answer({ question, instructions, signal, timeoutMs });
+      reply = await provider.answer({ question, instructions: buildInstructions(candidateList), signal, timeoutMs });
     } catch (error) {
       if (signal?.aborted) return failure('CANCELLED', '已取消本次解析。');
       return failure('MODEL_UNAVAILABLE', '智能解析暂不可用，请稍后手动重试或检查本机模型配置。');
@@ -143,7 +171,8 @@ function createAppLauncherIntent({ provider, registry, timeoutMs = 30_000 } = {}
     return { ok: true, kind: 'cancel' };
   }
 
-  return Object.freeze({ available, parse, instructions: () => instructions });
+  return Object.freeze({ available, parse, instructions: () => instructions,
+    instructionsFor: candidates => buildInstructions(candidates) });
 }
 
 module.exports = { createAppLauncherIntent, unsafePattern, allowedKeys };

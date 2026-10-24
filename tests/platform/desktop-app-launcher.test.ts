@@ -12,6 +12,7 @@ const env = {
   SystemRoot: 'C:\\Windows',
   ProgramFiles: 'C:\\Program Files',
   'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+  ProgramData: 'C:\\ProgramData',
   LOCALAPPDATA: 'C:\\Users\\anna\\AppData\\Local',
   APPDATA: 'C:\\Users\\anna\\AppData\\Roaming',
   USERPROFILE: 'C:\\Users\\anna',
@@ -25,6 +26,13 @@ const CODE = 'C:\\Users\\anna\\AppData\\Local\\Programs\\Microsoft VS Code\\Code
 const REGISTERED = [NOTEPAD, CALC, EXPLORER, EDGE, CODE];
 const DESKTOP = 'C:\\Users\\anna\\Desktop';
 const DOCUMENTS = 'C:\\Users\\anna\\Documents';
+const START_MENU = 'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs';
+const PUBLIC_START_MENU = 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs';
+const DYNAMIC_ID = 'sm:0123456789ab';
+const LNK = `${START_MENU}\\网易云音乐.lnk`;
+const PUBLIC_LNK = `${PUBLIC_START_MENU}\\Some App\\Some App.lnk`;
+const URL_SHORTCUT = `${START_MENU}\\示例网站.url`;
+const SYSTEM32_EXE = 'C:\\Windows\\System32\\notepad.exe';
 const SPAWN_OPTIONS = { shell: false, detached: true, stdio: 'ignore', windowsHide: true };
 const key = (value: string) => value.replace(/\//gu, '\\').replace(/\\+$/u, '').toLowerCase();
 
@@ -37,7 +45,7 @@ class FakeChild extends EventEmitter {
 
 function fixture(options: {
   existing?: string[]; directories?: string[]; files?: string[]; settleMs?: number;
-  shell?: unknown; plan?: (child: FakeChild) => void; spawnFailure?: unknown;
+  shell?: unknown; plan?: (child: FakeChild) => void; spawnFailure?: unknown; inventory?: unknown;
 } = {}) {
   const existing = new Set<string>((options.existing ?? REGISTERED).map(key));
   const directories = new Set<string>([DESKTOP, DOCUMENTS, ...(options.directories ?? [])].map(key));
@@ -55,11 +63,24 @@ function fixture(options: {
     return child;
   });
   const openExternal = vi.fn(async (_url: string) => undefined);
+  const openPath = vi.fn(async (_path: string) => '');
   const launcher = createAppLauncher({
-    spawn, shell: options.shell === undefined ? { openExternal } : options.shell,
-    platform: 'win32', exists, stat, env, settleMs: options.settleMs ?? 0,
+    spawn, shell: options.shell === undefined ? { openExternal, openPath } : options.shell,
+    platform: 'win32', exists, stat, env, settleMs: options.settleMs ?? 0, inventory: options.inventory,
   });
-  return { launcher, spawn, calls, children, exists, stat, openExternal };
+  return { launcher, spawn, calls, children, exists, stat, openExternal, openPath };
+}
+
+// 假清单（app-inventory.cjs 的接口形状）+ 假 shell.openPath：绝不真实打开任何软件。
+function dynamicInventory(target: string, displayName = '网易云音乐', kind = 'lnk') {
+  const resolve = vi.fn((id: string) => (id === DYNAMIC_ID ? { ok: true, id, displayName, kind, target } : { ok: false, errorCode: 'APP_UNKNOWN' }));
+  return { inventory: { resolve }, resolve };
+}
+
+function shortcutFixture(target: string, options: { files?: string[]; directories?: string[]; shell?: unknown } = {}) {
+  const dynamic = dynamicInventory(target);
+  const current = fixture({ ...options, files: [target, ...(options.files ?? [])], inventory: dynamic.inventory });
+  return { ...current, resolve: dynamic.resolve };
 }
 
 describe('智能打开软件 · 启动器', () => {
@@ -427,5 +448,194 @@ describe('智能打开软件 · 启动器', () => {
       expect(result.success).toBe(true);
     }
     expect(spawn).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe('智能打开软件 · 动态清单项（开始菜单快捷方式）', () => {
+  it('清单项交给 shell.openPath 打开，绝不创建进程，也只声称已发送启动请求', async () => {
+    const f = shortcutFixture(LNK);
+    const result = await f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', displayName: '网易云音乐', kind: 'shortcut', shortcut: LNK });
+    expect(result).toEqual({ success: true, appId: DYNAMIC_ID, target: 'default', errorCode: null, resolvedType: 'shortcut',
+      message: expect.stringContaining(HONEST_LAUNCH_NOTE) });
+    expect(f.openPath).toHaveBeenCalledWith(LNK);
+    expect(f.spawn).not.toHaveBeenCalled();
+    expect(f.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('省略 kind 时按清单派生 shortcut，同时兼容 args:[路径] 与双来源一致写法', async () => {
+    const f = shortcutFixture(LNK);
+    expect((await f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', shortcut: LNK })).resolvedType).toBe('shortcut');
+    expect((await f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', args: [LNK] })).success).toBe(true);
+    expect((await f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', shortcut: LNK, args: [LNK] })).success).toBe(true);
+    expect(f.openPath).toHaveBeenCalledTimes(3);
+    expect(f.spawn).not.toHaveBeenCalled();
+  });
+
+  it('两个开始菜单根与 System32 顶层系统程序都在允许范围内', async () => {
+    for (const target of [LNK, PUBLIC_LNK, URL_SHORTCUT]) {
+      const f = shortcutFixture(target);
+      await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: target }))
+        .resolves.toMatchObject({ success: true, resolvedType: 'shortcut' });
+      expect(f.openPath).toHaveBeenCalledWith(target);
+    }
+    const system = shortcutFixture(SYSTEM32_EXE);
+    await expect(system.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: SYSTEM32_EXE }))
+      .resolves.toMatchObject({ success: true });
+  });
+
+  it.each(['C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs2\\evil.lnk',
+    'C:\\Users\\anna\\Desktop\\evil.lnk', 'C:\\Temp\\evil.lnk',
+    'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\evil.lnk', 'C:\\Windows\\evil.lnk',
+    'C:\\Windows\\System32\\sub\\notepad.exe', 'C:\\Windows\\System32\\calc.lnk'])('允许根之外的路径一律拒绝：%s', async target => {
+    const f = shortcutFixture(target);
+    const result = await f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: target });
+    expect(result).toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    expect(f.openPath).not.toHaveBeenCalled();
+    expect(f.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\evil.bat',
+    'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\evil.ps1',
+    'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\evil.txt',
+    'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\evil',
+    'C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\evil.lnk.txt'])('只允许 .lnk/.url/.exe 扩展名：%s', async target => {
+    const f = shortcutFixture(target);
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: target }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    expect(f.openPath).not.toHaveBeenCalled();
+  });
+
+  it.each(['卸载工具.lnk', 'Uninstall Helper.lnk', 'Windows 管理工具\\磁盘管理.lnk', 'Command Prompt.lnk',
+    'regedit.exe', '系统配置.lnk', 'Format Tool.lnk', 'Windows Terminal.lnk', '任务管理器.lnk', '控制面板.lnk',
+    'System Settings.lnk', 'System Tools\\系统信息.lnk', 'Windows System\\控制面板.lnk'])('即使位于开始菜单根，危险/管理类条目也一律拒绝：%s', async name => {
+    const target = `${START_MENU}\\${name}`;
+    const f = shortcutFixture(target);
+    const result = await f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: target });
+    expect(result).toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    expect(f.openPath).not.toHaveBeenCalled();
+  });
+
+  it.each([`${START_MENU}\\a;b.lnk`, `${START_MENU}\\a && b.lnk`, `${START_MENU}\\a|b.lnk`, `${START_MENU}\\a>b.lnk`,
+    `${START_MENU}\\a<b.lnk`, `${START_MENU}\\a\nb.lnk`, `${START_MENU}\\quote"name.lnk`,
+    '\\\\server\\share\\evil.lnk', '//server/share/evil.lnk', `\\\\?\\C:\\Users\\anna\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\evil.lnk`])('含 Shell 字符或 UNC 的路径一律拒绝：%j', async target => {
+    const f = shortcutFixture(target);
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: target }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    expect(f.openPath).not.toHaveBeenCalled();
+  });
+
+  it('路径不存在、是目录、缺失或类型错误分别报错', async () => {
+    const dynamic = dynamicInventory(LNK);
+    const missing = fixture({ inventory: dynamic.inventory, files: [] });
+    await expect(missing.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: false, errorCode: 'EXECUTABLE_MISSING' });
+    const asDirectory = fixture({ inventory: dynamic.inventory, directories: [LNK] });
+    await expect(asDirectory.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    const f = shortcutFixture(LNK);
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut' }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: 42 }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: `${LNK} ` }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    for (const current of [missing, asDirectory, f]) {
+      expect(current.openPath).not.toHaveBeenCalled();
+      expect(current.spawn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('路径必须与清单给出的目标一致，页面或模型无法替换路径', async () => {
+    const other = `${START_MENU}\\另一个.lnk`;
+    const dynamic = dynamicInventory(LNK);
+    const f = fixture({ inventory: dynamic.inventory, files: [LNK, other] });
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: other }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: true });
+    expect(f.openPath).toHaveBeenCalledTimes(1);
+    expect(f.openPath).toHaveBeenCalledWith(LNK);
+    expect(f.spawn).not.toHaveBeenCalled();
+  });
+
+  it('注入的注册表没有 dynamicLaunch 时仍执行完整路径策略', async () => {
+    const legacy = {
+      resolve: () => ({ ok: true, appId: DYNAMIC_ID, target: 'default', displayName: '旧清单项',
+        targetDescription: '主界面（本机开始菜单）', risk: 'low', dynamic: true, requiresFolder: false, requiresUrl: false }),
+      validateParameters: () => ({ ok: true, parameters: {} }),
+      executableCandidates: () => [],
+    };
+    const spawn = vi.fn();
+    const openPath = vi.fn(async (_path: string) => '');
+    const launcher = createAppLauncher({ spawn, shell: { openPath }, platform: 'win32',
+      exists: (value: string) => key(value) === key(LNK), stat: () => ({ isDirectory: false }), env, settleMs: 0, registry: legacy });
+    await expect(launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK })).resolves.toMatchObject({ success: true });
+    await expect(launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: 'C:\\Temp\\evil.lnk' }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: 'C:\\Windows\\System32\\cmd.exe' }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it('shell.openPath 缺失、抛错或返回错误字符串时 LAUNCH_FAILED，不创建进程', async () => {
+    const missing = shortcutFixture(LNK, { shell: {} });
+    await expect(missing.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: false, errorCode: 'LAUNCH_FAILED' });
+    const throwing = shortcutFixture(LNK, { shell: { openPath: vi.fn(async () => { throw new Error('synthetic-open-failure'); }) } });
+    const result = await throwing.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK });
+    expect(result).toMatchObject({ success: false, errorCode: 'LAUNCH_FAILED' });
+    expect(result.message).not.toContain('synthetic');
+    const refused = shortcutFixture(LNK, { shell: { openPath: vi.fn(async () => '文件已被移动或删除') } });
+    await expect(refused.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: false, errorCode: 'LAUNCH_FAILED' });
+    const tolerant = shortcutFixture(LNK, { shell: { openPath: vi.fn(async () => undefined) } });
+    await expect(tolerant.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: true });
+    for (const current of [missing, throwing, refused]) {
+      expect(current.spawn).not.toHaveBeenCalled();
+      expect(current.openExternal).not.toHaveBeenCalled();
+    }
+  });
+
+  it('固定软件不能用 shortcut 启动，清单项也不能降级成 exe/url/folder', async () => {
+    const fixed = fixture();
+    await expect(fixed.launcher.launch({ appId: 'notepad', target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    const dynamic = shortcutFixture(LNK);
+    await expect(dynamic.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'exe', executable: NOTEPAD }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    await expect(dynamic.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'url', url: 'https://example.org/' }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    await expect(dynamic.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'folder', args: [DESKTOP] }))
+      .resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    expect(fixed.spawn).not.toHaveBeenCalled();
+    expect(fixed.openPath).not.toHaveBeenCalled();
+    expect(dynamic.spawn).not.toHaveBeenCalled();
+    expect(dynamic.openPath).not.toHaveBeenCalled();
+    expect(dynamic.launcher.resolveExecutable(DYNAMIC_ID)).toBeUndefined();
+    expect(dynamic.launcher.resolveExecutable(DYNAMIC_ID, [NOTEPAD])).toBeUndefined();
+  });
+
+  it('shortcut 请求不接受 executable/url/folder 混用、双来源不一致或额外字段', async () => {
+    const f = shortcutFixture(LNK);
+    const launch = (request: Record<string, unknown>) => f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', ...request });
+    await expect(launch({ shortcut: LNK, executable: NOTEPAD })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(launch({ shortcut: LNK, url: 'https://example.org/' })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(launch({ shortcut: LNK, folder: DESKTOP })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(launch({ shortcut: LNK, args: [DESKTOP] })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(launch({ shortcut: LNK, args: [LNK, DESKTOP] })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    await expect(launch({ shortcut: LNK, command: 'cmd /c calc' })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_FORBIDDEN' });
+    await expect(launch({ shortcut: LNK, args: 'cmd /c calc' })).resolves.toMatchObject({ success: false, errorCode: 'PARAMETERS_INVALID' });
+    expect(f.openPath).not.toHaveBeenCalled();
+    expect(f.spawn).not.toHaveBeenCalled();
+  });
+
+  it('未注入清单时 sm: id 一律 APP_UNKNOWN，不创建进程也不调用 openPath', async () => {
+    const f = fixture();
+    await expect(f.launcher.launch({ appId: DYNAMIC_ID, target: 'default', kind: 'shortcut', shortcut: LNK }))
+      .resolves.toMatchObject({ success: false, errorCode: 'APP_UNKNOWN' });
+    expect(f.openPath).not.toHaveBeenCalled();
+    expect(f.spawn).not.toHaveBeenCalled();
   });
 });

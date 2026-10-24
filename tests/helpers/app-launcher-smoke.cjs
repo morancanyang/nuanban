@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createAppLauncherRegistry } = require('../../apps/desktop/app-launcher-registry.cjs');
 const { createAppLauncherIntent } = require('../../apps/desktop/app-launcher-intent.cjs');
 const { createAppLauncherHistory } = require('../../apps/desktop/app-launcher-history.cjs');
+const { createAppInventory } = require('../../apps/desktop/app-inventory.cjs');
 const { registerAppLauncherBridge } = require('../../apps/desktop/app-launcher-bridge.cjs');
 
 const userData = process.env.NUANBAN_APP_LAUNCHER_TEST_USER_DATA;
@@ -15,9 +16,11 @@ app.disableHardwareAcceleration();
 
 const desktop = path.join(__dirname, '..', '..', 'apps', 'desktop');
 const calls = [];
+const openedShortcuts = [];
 let screenRequests = 0;
 global.__appLauncherSmoke = {
   get calls() { return calls.map(call => ({ ...call })); },
+  get openedShortcuts() { return openedShortcuts.map(entry => ({ ...entry })); },
   get screenRequests() { return screenRequests; },
 };
 
@@ -38,6 +41,7 @@ const fakeLauncher = {
   launch: async spec => {
     calls.push({ appId: spec.appId, target: spec.target, kind: spec.kind, executable: spec.executable,
       args: Array.isArray(spec.args) ? [...spec.args] : [], url: spec.url });
+    if (typeof spec.shortcut === 'string') openedShortcuts.push({ appId: spec.appId, shortcut: spec.shortcut });
     return { success: true, appId: spec.appId, target: spec.target,
       message: `已打开${spec.displayName}，仅确认已发送启动请求，无法确认软件内部页面已加载。`, errorCode: null };
   },
@@ -53,7 +57,13 @@ app.whenReady().then(async () => {
     if (permission === 'media' || permission === 'display-capture') screenRequests += 1;
     callback(false);
   });
-  const registry = createAppLauncherRegistry();
+  const startMenuRoot = path.join(userData, 'smoke-start-menu');
+  fs.mkdirSync(startMenuRoot, { recursive: true });
+  fs.writeFileSync(path.join(startMenuRoot, 'Apifox.lnk'), '');
+  fs.writeFileSync(path.join(startMenuRoot, 'Blender.lnk'), '');
+  fs.writeFileSync(path.join(startMenuRoot, '卸载工具.lnk'), '');
+  const inventory = createAppInventory({ roots: [startMenuRoot] });
+  const registry = createAppLauncherRegistry({ inventory });
   const history = createAppLauncherHistory({ filePath: path.join(userData, 'app-launcher-history.json') });
   petWindow = new BrowserWindow({ width: 900, height: 760, show: true,
     webPreferences: { preload: path.join(desktop, 'pet-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
@@ -61,6 +71,7 @@ app.whenReady().then(async () => {
     ipcMain,
     isTrusted: event => Boolean(petWindow) && !petWindow.isDestroyed() && event.sender === petWindow.webContents,
     registry,
+    inventory,
     launcher: fakeLauncher,
     intent: createAppLauncherIntent({ provider: fakeProvider, registry }),
     history,

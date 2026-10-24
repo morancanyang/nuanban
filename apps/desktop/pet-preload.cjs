@@ -467,6 +467,25 @@ function projectOpenAppHistory(value) {
   };
 }
 
+function openAppItemId(value) {
+  return typeof value === 'string' && (/^sm:[a-f0-9]{12}$/.test(value) || /^[a-z][a-z0-9-]{0,39}$/.test(value));
+}
+
+function projectOpenAppInventory(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true) throw new TypeError('本机软件清单无效');
+  if (!Number.isSafeInteger(value.total) || value.total < 0 || value.total > 100000) throw new TypeError('本机软件清单数量无效');
+  if (!Array.isArray(value.entries) || value.entries.length > 400) throw new TypeError('本机软件清单无效');
+  return {
+    ok: true,
+    total: value.total,
+    entries: value.entries.map(entry => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !openAppItemId(entry.id)) throw new TypeError('本机软件条目无效');
+      if (typeof entry.displayName !== 'string' || !entry.displayName.trim() || entry.displayName.length > 200) throw new TypeError('本机软件条目无效');
+      return { id: entry.id, displayName: entry.displayName };
+    }),
+  };
+}
+
 function projectOpenAppStatus(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true) throw new TypeError('智能打开软件状态无效');
   if (typeof value.modelReady !== 'boolean' || typeof value.autoExecute !== 'boolean' || !Array.isArray(value.catalog) || value.catalog.length > 50) throw new TypeError('智能打开软件状态无效');
@@ -486,7 +505,9 @@ function projectOpenAppStatus(value) {
       }),
     };
   });
-  return { ok: true, modelReady: value.modelReady, autoExecute: value.autoExecute, catalog };
+  const status = { ok: true, modelReady: value.modelReady, autoExecute: value.autoExecute, catalog };
+  if (Number.isSafeInteger(value.inventoryTotal) && value.inventoryTotal >= 0 && value.inventoryTotal <= 100000) status.inventoryTotal = value.inventoryTotal;
+  return status;
 }
 
 function projectOpenAppCancelled(value) {
@@ -503,6 +524,11 @@ function projectOpenAppAuto(value) {
 
 contextBridge.exposeInMainWorld('nuanbanOpenApp', Object.freeze({
   status: () => ipcRenderer.invoke('nuanban:pet-open-app:status').then(projectOpenAppStatus),
+  inventory: () => ipcRenderer.invoke('nuanban:pet-open-app:inventory').then(projectOpenAppInventory),
+  pick: id => {
+    if (!openAppItemId(id)) throw new TypeError('本机软件标识无效，请刷新列表后重新选择');
+    return ipcRenderer.invoke('nuanban:pet-open-app:pick', { id }).then(projectOpenAppReply);
+  },
   parse: input => {
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 2) throw new TypeError('智能打开软件请求无效');
     if (typeof input.goal !== 'string' || !input.goal.trim() || input.goal.length > 300) throw new TypeError('请输入 1 至 300 字的打开目标');

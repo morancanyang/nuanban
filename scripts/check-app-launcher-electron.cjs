@@ -9,8 +9,9 @@ const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'
 const cache = path.join(root, '.cache', `app-launcher-electron-${Date.now()}`);
 const userData = path.join(cache, 'profile');
 mkdirSync(cache, { recursive: true });
-const evidence = { cardOpened: false, planConfirmed: false, executed: false, autoExecute: false, untrustedRejected: false,
-  noNodeInRenderer: false, noCapture: false, confirmText: '', resultText: '', calls: [], screenRequests: 0, errors: [] };
+const evidence = { cardOpened: false, planConfirmed: false, executed: false, autoExecute: false, inventoryList: false,
+  untrustedRejected: false, noNodeInRenderer: false, noCapture: false, confirmText: '', resultText: '', shortcutOpened: '',
+  calls: [], screenRequests: 0, errors: [] };
 
 async function launch() {
   const environment = { ...process.env, NUANBAN_APP_LAUNCHER_TEST_USER_DATA: userData };
@@ -48,7 +49,7 @@ async function run() {
     assert.equal(nodeSurface.require, 'undefined');
     assert.equal(nodeSurface.process, 'undefined');
     assert.equal(nodeSurface.bridge, 'object');
-    assert.deepEqual(nodeSurface.methods, ['cancel', 'execute', 'history', 'parse', 'pickFolder', 'setAutoExecute', 'status']);
+    assert.deepEqual(nodeSurface.methods, ['cancel', 'execute', 'history', 'inventory', 'parse', 'pick', 'pickFolder', 'setAutoExecute', 'status']);
     evidence.noNodeInRenderer = true;
 
     // 3. 默认确认模式：解析 → 显示确认卡片 → 本人确认后才执行（假启动器不打开真实软件）
@@ -80,7 +81,21 @@ async function run() {
     assert.equal(calls.length, 2, '自动执行应直接发出第二次启动请求');
     evidence.autoExecute = true;
 
-    // 5. 非受信任窗口调用同一通道被拒绝
+    // 5. 从本机清单直接选择（不调用模型，仍要确认）
+    await expect(pet.locator('#open-app-inventory-count')).toContainText('2');
+    await pet.locator('#open-app-list-toggle').click();
+    await expect(pet.locator('#open-app-list')).toBeVisible();
+    await pet.locator('#open-app-list button.open-app-item').filter({ hasText: 'Apifox' }).first().click();
+    await expect(pet.locator('#open-app-confirm-text')).toContainText('即将打开：Apifox', { timeout: 15000 });
+    await pet.locator('#open-app-confirm-ok').click();
+    await expect(pet.locator('#open-app-result')).toContainText('仅确认已发送启动请求', { timeout: 15000 });
+    const shortcuts = await application.evaluate(() => global.__appLauncherSmoke.openedShortcuts);
+    assert.equal(shortcuts.length, 1, '清单项应通过快捷方式打开一次');
+    assert.match(String(shortcuts[0].shortcut), /Apifox\.lnk$/u);
+    evidence.inventoryList = true;
+    evidence.shortcutOpened = shortcuts[0].shortcut.replace(/\\/gu, '/').split('/').pop();
+
+    // 6. 非受信任窗口调用同一通道被拒绝
     const stranger = application.windows().filter(page => page.url().endsWith('/pet.html'))[1];
     if (stranger) {
       const rejected = await stranger.evaluate(async () => {
