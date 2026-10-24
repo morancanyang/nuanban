@@ -6,7 +6,7 @@ import { checkedDictationResult } from '../../apps/web/src/local-voice';
 const { registerDictationBridge } = createRequire(import.meta.url)('../../apps/desktop/wake/dictation-bridge.cjs');
 type Handler = (event: unknown, ...argumentsList: unknown[]) => unknown;
 const bridges: Array<{ dispose(): void }> = [];
-const complete = { status: 'complete', text: '教我收藏网页', localOnly: true, microphoneActive: false };
+const complete = { status: 'complete', text: '教我收藏网页', localOnly: true, microphoneActive: false, recognition: 'local' };
 const settle = async () => { for (let count = 0; count < 8; count += 1) await Promise.resolve(); };
 
 function fixture() {
@@ -39,6 +39,27 @@ describe('本次本地听写的可信 IPC 与发起窗口生命周期（不启�
     expect(current.host.requestVoiceDictation).toHaveBeenCalledWith({ signal: expect.any(AbortSignal), purpose: 'screen-guidance', observationGeneration: 3 });
     expect(() => current.invoke('dictate', current.event, { purpose: 'screen-guidance', observationGeneration: 0 })).toThrow('本人');
     expect(() => current.invoke('dictate', current.event, { purpose: 'other', observationGeneration: 3 })).toThrow('本人');
+  });
+
+  it('云端听写结果如实标记为已上传音频，只透传文字与来源', async () => {
+    const current = fixture();
+    current.host.requestVoiceDictation.mockResolvedValueOnce({ status: 'complete', text: '把字体调大', localOnly: false,
+      recognition: 'cloud', microphoneActive: false, wavBytes: 'not exposed', seconds: 4.2 });
+    expect(await current.invoke('dictate')).toEqual({ status: 'complete', text: '把字体调大', localOnly: false, recognition: 'cloud', microphoneActive: false });
+  });
+
+  it('缺少来源标记或来源与 localOnly 不一致时拒绝结果', async () => {
+    const inconsistent = [
+      { status: 'complete', text: '把字体调大', localOnly: false, microphoneActive: false },
+      { status: 'complete', text: '把字体调大', localOnly: false, recognition: 'local', microphoneActive: false },
+      { status: 'complete', text: '把字体调大', localOnly: true, recognition: 'cloud', microphoneActive: false },
+      { status: 'uncertain', localOnly: false, recognition: 'cloud', microphoneActive: false },
+    ];
+    for (const result of inconsistent) {
+      const current = fixture();
+      current.host.requestVoiceDictation.mockResolvedValueOnce(result);
+      await expect(current.invoke('dictate')).rejects.toThrow('未确认');
+    }
   });
 
   it('低置信听写只返回无文字状态，不能把猜测内容投递给网页', async () => {

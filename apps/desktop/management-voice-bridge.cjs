@@ -17,8 +17,11 @@ function registerManagementVoiceBridge({ ipcMain, isTrusted, getHost, openMicrop
     const wake = host.snapshot().wake;
     if (!wake || !phases.has(wake.phase) || typeof wake.enabled !== 'boolean' || typeof wake.microphoneActive !== 'boolean'
       || typeof wake.dictationAvailable !== 'boolean' || wake.localOnly !== true || typeof wake.reason !== 'string') throw new Error('本地语音状态未确认');
+    const cloud = wake.cloudDictation;
+    if (!cloud || typeof cloud.enabled !== 'boolean' || typeof cloud.available !== 'boolean') throw new Error('云端听写状态未确认');
     return Object.freeze({ phase: wake.phase, enabled: wake.enabled, microphoneActive: wake.microphoneActive,
-      dictationAvailable: wake.dictationAvailable, localOnly: true, message: wake.reason.slice(0, 500) });
+      dictationAvailable: wake.dictationAvailable, localOnly: true, message: wake.reason.slice(0, 500),
+      cloudDictation: Object.freeze({ enabled: cloud.enabled, available: cloud.available }) });
   }
 
   function handle(channel, action) {
@@ -33,6 +36,14 @@ function registerManagementVoiceBridge({ ipcMain, isTrusted, getHost, openMicrop
     return status(host);
   });
   handle('nuanban:voice:disable', async host => { await host.stopLocalVoice(); return status(host); });
+  ipcMain.handle('nuanban:voice:set-cloud-dictation', async (event, enabled) => {
+    if (!isTrusted(event)) throw new Error('不可信语音入口');
+    const host = getHost();
+    if (!host || !host.hasPetWindow() || typeof host.setCloudDictation !== 'function') throw new Error('独立桌宠尚未就绪');
+    const next = await host.setCloudDictation(enabled === true);
+    return Object.freeze({ enabled: next.enabled === true });
+  });
+  channels.push('nuanban:voice:set-cloud-dictation');
   handle('nuanban:voice:open-settings', async () => {
     if (typeof openMicrophoneSettings !== 'function') throw new Error('请在 Windows 设置中手动打开麦克风隐私页');
     await openMicrophoneSettings();

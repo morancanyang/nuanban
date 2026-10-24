@@ -1,4 +1,4 @@
-const { ProviderFailure } = require('../ai-provider.cjs');
+const { ProviderFailure, readProviderConfiguration } = require('../ai-provider.cjs');
 
 const TRANSCRIBE_MODELS = new Set(['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1']);
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
@@ -91,4 +91,19 @@ function createCloudDictation(options = {}) {
   });
 }
 
-module.exports = { createCloudDictation, TRANSCRIBE_MODELS, MAX_AUDIO_BYTES, MAX_TEXT_CHARS };
+/**
+ * Builds a cloud dictation client from the same encrypted provider configuration the text model uses.
+ * Returns undefined when no gateway is configured, so the host simply keeps local-only dictation.
+ */
+async function loadConfiguredCloudDictation(options = {}) {
+  const configuration = await readProviderConfiguration(options);
+  if (!configuration) return undefined;
+  const env = options.env ?? process.env;
+  const model = options.model ?? env.NUANBAN_AI_TRANSCRIBE_MODEL ?? 'gpt-4o-transcribe';
+  return createCloudDictation({ baseUrl: configuration.baseUrl, apiKey: configuration.apiKey, model,
+    timeoutMs: options.timeoutMs ?? 60_000, fetch: options.fetch,
+    ...(options.retryAttempts === undefined ? {} : { retryAttempts: options.retryAttempts }),
+    ...(options.retryDelaysMs === undefined ? {} : { retryDelaysMs: options.retryDelaysMs }) });
+}
+
+module.exports = { createCloudDictation, loadConfiguredCloudDictation, TRANSCRIBE_MODELS, MAX_AUDIO_BYTES, MAX_TEXT_CHARS };

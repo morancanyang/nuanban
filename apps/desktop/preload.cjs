@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('nuanbanVoice', Object.freeze({
   enable: () => ipcRenderer.invoke('nuanban:voice:enable'),
   disable: () => ipcRenderer.invoke('nuanban:voice:disable'),
   openSettings: () => ipcRenderer.invoke('nuanban:voice:open-settings'),
+  setCloudDictation: enabled => ipcRenderer.invoke('nuanban:voice:set-cloud-dictation', enabled === true),
 }));
 contextBridge.exposeInMainWorld('nuanbanObservation', Object.freeze({
   status: () => ipcRenderer.invoke('nuanban:observation:status'),

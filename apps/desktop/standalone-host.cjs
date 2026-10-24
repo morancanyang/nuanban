@@ -44,6 +44,18 @@ function createStandaloneHost(options) {
   let dictationObservationGeneration = 0;
   let wakeConsentGeneration = 0;
   let wakeController = null;
+  // Owner-approved cloud dictation: the switch is persisted, the audio client is optional, and the
+  // recorder helper never uploads by itself. Everything stays fail-closed when any piece is missing.
+  let cloudFailure = '';
+  let cloudRecording = false;
+  const cloudSettings = options.cloudSettings;
+  const cloudDictation = options.cloudDictation;
+  const cloudRecorder = options.cloudRecorder;
+  const cloudDictationStatus = () => Object.freeze({
+    enabled: cloudSettings?.read?.().enabled === true,
+    available: typeof cloudDictation?.transcribe === 'function' && cloudRecorder?.available === true,
+  });
+  const cloudDictationReady = () => { const status = cloudDictationStatus(); return status.enabled && status.available; };
   let wakeFailure = '';
   let closing = false;
   let runtime;
@@ -107,8 +119,10 @@ function createStandaloneHost(options) {
     state.voice = { ...state.voice, presentation: 'pet', ...(faceVoiceVisible ? { bubble: { ...voiceBubble } } : {}) };
     const localWake = wake.snapshot();
     const microphonePending = localWake.microphoneActive || localWake.enabled || ['starting', 'stopping'].includes(localWake.state);
-    state.wake = { ...localWake, phase: localWake.state, state: microphonePending ? 'enabled' : 'disabled',
+    state.wake = { ...localWake, cloudDictation: cloudDictationStatus(), phase: localWake.state, state: microphonePending ? 'enabled' : 'disabled',
       reason: wakeFailure || (localWake.state === 'stopping' ? '正在等待本地麦克风进程真实退出，尚未确认停止。'
+        : dictating && cloudFailure ? '云端识别失败（' + cloudFailure + '），已回退本机离线听写；请检查网络后重试。'
+          : dictating && cloudRecording ? '正在录音并上传识别（仅本次，识别后立即丢弃）；请直接说话。'
         : dictating && localWake.state === 'question' ? dictationPurpose === 'screen-guidance' ? '正在本机听写；停麦后按本次授权查找屏幕目标，只绘制指引。' : '正在本机听写，请直接说话；识别后填入发起输入框，不会自动发送。'
           : dictating && localWake.state === 'starting' ? '正在启动本次本机听写，请等候“正在本机听写”提示。'
         : localWake.microphoneActive ? localWake.dictationAvailable ? '本地唤醒监听中；说“小暖”后可在本机识别问题，未唤醒音频不上传。' : '本地唤醒监听中；说“小暖”打开桌宠后，请输入问题。本机听写不可用。'
@@ -574,24 +588,48 @@ function createStandaloneHost(options) {
     wakeFailure = '';
     const current = () => !controller.signal.aborted && !closing && consentGeneration === wakeConsentGeneration;
     try {
-      const confirmation = await showDialog({ type: 'question', title: screenGuidance ? '本次语音查找与屏幕指引' : '本次本地语音输入',
-        message: screenGuidance ? '允许听写这句话，并结合已授权的屏幕查找目标吗？' : '允许本次使用麦克风，把说话内容填入输入框吗？',
+      // Cloud dictation applies to plain voice input; screen guidance keeps the local engine.
+      const cloudMode = !screenGuidance && cloudDictationReady();
+      cloudFailure = '';
+      const confirmation = await showDialog({ type: 'question', title: screenGuidance ? '本次语音查找与屏幕指引' : cloudMode ? '本次云端语音输入' : '本次本地语音输入',
+        message: screenGuidance ? '允许听写这句话，并结合已授权的屏幕查找目标吗？' : cloudMode ? '允许本次使用麦克风，并把这段录音上传到已配置的模型网关识别吗？' : '允许本次使用麦克风，把说话内容填入输入框吗？',
         detail: (screenGuidance ? '仅使用本机离线中文听写。直接说一句“帮我找到……”；最多等待 20 秒，识别结束并关闭麦克风后，识别文字将自动提交，结合当前已授权范围的脱敏画面进行分析。成功定位后绘制高亮和箭头，不控制系统鼠标，不代点或代输。不覆盖已有输入草稿；观察停止或范围改变后，不再发起查找。'
+          : cloudMode ? '本人已开启云端听写：本次录制的这一句话会被上传到已配置的模型网关做语音识别，识别结束立即丢弃，不在本机保存、不用于其它用途；识别文字仍需你检查后亲手发送。若云端失败会回退本机离线识别，并明确提示。最多等待 20 秒。'
           : '仅使用本机离线中文听写，不需要先说唤醒词。看到“正在本机听写”后直接说一句话，最多等待 20 秒；识别结束即关闭本次麦克风，文字需由你检查后亲手发送。')
-          + '\n\n音频不上云、不保存。如果本地语音唤醒已开启，本次输入会先关闭唤醒，不会自动恢复。此确认不授予新的屏幕观察或云分析权限。',
+          + (cloudMode ? '\n\n如不再希望上传音频，请在语音面板关闭“云端听写”。此确认不授予新的屏幕观察或云分析权限。' : '\n\n音频不上云、不保存。如果本地语音唤醒已开启，本次输入会先关闭唤醒，不会自动恢复。此确认不授予新的屏幕观察或云分析权限。'),
         buttons: ['本人同意本次输入', '取消'], defaultId: 1, cancelId: 1, noLink: true });
       if (confirmation.response !== 0 || !current() || (screenGuidance && !observationValid())) return cancelled();
       const stopped = await wake.disable();
       if (!current()) return cancelled();
       if (stopped.enabled || stopped.microphoneActive) throw new Error('麦克风停止尚未确认');
+      if (cloudMode) {
+        cloudRecording = true;
+        publish();
+        try {
+          const recording = await cloudRecorder.record({ signal: controller.signal });
+          if (!current()) return cancelled();
+          const reply = await cloudDictation.transcribe({ wav: recording.wav, signal: controller.signal });
+          if (!current()) return cancelled();
+          return Object.freeze({ status: 'complete', text: reply.text, localOnly: false, recognition: 'cloud', microphoneActive: false,
+            seconds: recording.seconds, model: cloudDictation.model });
+        } catch (error) {
+          if (!current()) return cancelled();
+          cloudFailure = typeof error?.code === 'string' ? error.code : 'cloud_dictation_failed';
+        } finally {
+          cloudRecording = false;
+          publish();
+        }
+      }
       const capability = await wake.probe({ signal: controller.signal });
       if (!current() || (screenGuidance && !observationValid())) return cancelled();
       if (capability.status !== 'complete' || capability.dictationAvailable !== true) throw Object.assign(new Error('wake_dictation_unavailable'), { code: 'wake_dictation_unavailable' });
       const result = await wake.dictate({ actor: 'owner', confirmed: true, signal: controller.signal });
-      return current() && (!screenGuidance || observationValid()) ? result : cancelled();
+      if (!current() || (screenGuidance && !observationValid())) return cancelled();
+      return result?.status === 'complete' ? Object.freeze({ ...result, recognition: 'local' }) : result;
     } catch (error) {
       if (!current()) return cancelled();
-      wakeFailure = error?.code === 'wake_dictation_timeout' ? '20 秒内未识别到完整语句，请靠近默认麦克风说话，再试一次。'
+      wakeFailure = cloudFailure ? '云端识别失败（' + cloudFailure + '），已回退本机离线识别但仍未得到结果；请检查网络与麦克风后重试。'
+        : error?.code === 'wake_dictation_timeout' ? '20 秒内未识别到完整语句，请靠近默认麦克风说话，再试一次。'
         : error?.code === 'wake_dictation_unavailable' ? '本机离线中文听写引擎不可用；未改用云端，请检查中文语音组件。'
           : error?.code === 'wake_microphone_access_denied' ? 'Windows 拒绝麦克风访问，请检查麦克风访问和桌面应用访问开关。'
             : '本次语音输入失败，请检查 Windows 默认输入设备、麦克风权限和离线中文语音引擎。';
@@ -975,7 +1013,25 @@ function createStandaloneHost(options) {
     return result;
   }
 
+  async function setCloudDictation(enabled) {
+    if (typeof enabled !== 'boolean') throw new Error('云端听写开关参数无效');
+    if (!cloudSettings?.write) throw new Error('当前客户端不支持云端听写开关');
+    const status = cloudDictationStatus();
+    if (enabled && !status.available) throw new Error('本机尚未配置可用的模型网关，云端听写不可用');
+    if (enabled) {
+      const confirmation = await showDialog({ type: 'question', title: '开启云端语音听写',
+        message: '开启后，每次语音输入的这一句话会被上传到已配置的模型网关做识别，用于替代本机离线识别。是否开启？',
+        detail: '仅在你每次确认“本次语音输入”后录音并上传；识别结束立即丢弃，不在本机保存，不用于其它用途；识别文字仍需你检查后亲手发送。关闭开关后立即恢复为仅本机离线识别。\n\n音频上传属于隐私边界变更，请确认你接受后再开启。',
+        buttons: ['本人同意开启云端听写', '取消'], defaultId: 1, cancelId: 1, noLink: true });
+      if (confirmation.response !== 0) return Object.freeze({ enabled: cloudSettings.read().enabled });
+    }
+    cloudSettings.write({ enabled });
+    publish();
+    return Object.freeze({ enabled });
+  }
+
   return { initialize, dispose, stop, snapshot, showPetPanel, showLocalModel, setPetDisplayCompatibility, selectLili, lili, requestObservation: resume => chooseObservation(resume === true),
+    cloudDictationStatus, setCloudDictation,
     requestLocalVoice: enableWake, stopLocalVoice: disableWake, requestVoiceDictation,
     hasPetWindow: () => live(petWindow), getPetWindow: () => live(petWindow) ? petWindow : null };
 }

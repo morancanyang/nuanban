@@ -10,6 +10,9 @@ const { registerManagementCompanionBridge } = require('./management-companion-br
 const { registerManagementVoiceBridge } = require('./management-voice-bridge.cjs');
 const { createImageQuestionService, registerManagementImageQuestionBridge } = require('./image-question.cjs');
 const { loadConfiguredProvider } = require('./ai-provider.cjs');
+const { loadConfiguredCloudDictation } = require('./voice/cloud-dictation.cjs');
+const { createCloudRecorder } = require('./voice/cloud-recorder.cjs');
+const { createCloudDictationSettings } = require('./voice/cloud-dictation-settings.cjs');
 const { createProviderAnalysisClient } = require('./provider-analysis.cjs');
 const { registerManagementTextQuestionBridge } = require('./text-question.cjs');
 const { createLocalArtworkStore, registerLocalArtworkBridge } = require('./local-artwork.cjs');
@@ -188,9 +191,21 @@ if (ownsInstance) app.whenReady().then(async () => {
       },
     });
   } catch { reminderStore = undefined; reminderNotifications = undefined; }
-  try { aiProvider = await loadConfiguredProvider({ fetch: (input, init) => electron.net.fetch(input, { ...init, credentials: 'omit' }) }); } catch { aiProvider = undefined; }
+  const desktopFetch = (input, init) => electron.net.fetch(input, { ...init, credentials: 'omit' });
+  let cloudDictation;
+  let cloudRecorder;
+  let cloudSettings;
+  try { aiProvider = await loadConfiguredProvider({ fetch: desktopFetch }); } catch { aiProvider = undefined; }
+  // Owner-approved cloud dictation: same encrypted credential file, separate client. Missing gateway or
+  // missing recorder simply keeps the local-only path; nothing uploads unless the owner turned it on.
+  try { cloudDictation = await loadConfiguredCloudDictation({ fetch: desktopFetch }); } catch { cloudDictation = undefined; }
+  try {
+    cloudSettings = createCloudDictationSettings({ userDataPath: app.getPath('userData') });
+    cloudRecorder = createCloudRecorder({ scriptPath: path.join(__dirname, 'voice', 'windows-cloud-dictation.ps1') });
+  } catch { cloudSettings = undefined; cloudRecorder = undefined; }
   registerBridge();
   standaloneHost = createStandaloneHost({ electron, userDataPath: app.getPath('userData'), showManagement: showMainWindow,
+    ...(cloudDictation ? { cloudDictation } : {}), ...(cloudRecorder ? { cloudRecorder } : {}), ...(cloudSettings ? { cloudSettings } : {}),
     liliEnabled: process.argv.includes('--pet-lili') || (!process.argv.includes('--pet-default') && process.env.NUANBAN_DESKTOP_PET === 'lili'),
     petDisplayCompatible: captureVisibility.petVisible || process.argv.includes('--pet-display-compatible'),
     showPetTool: route => petTools.show(route),

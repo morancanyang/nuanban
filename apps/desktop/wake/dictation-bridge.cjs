@@ -29,11 +29,14 @@ function registerDictationBridge({ ipcMain, prefix, isTrusted, getHost }) {
     operation.promise = Promise.resolve().then(() => host.requestVoiceDictation({ signal: operation.controller.signal,
       ...(input ? { purpose: 'screen-guidance', observationGeneration: input.observationGeneration } : {}) })).then(result => {
       if (operation.controller.signal.aborted || disposed || !isTrusted(event)) return { status: 'cancelled', localOnly: true };
-      if (!result || result.localOnly !== true || !['complete', 'uncertain', 'cancelled'].includes(result.status)
+      const cloud = result?.localOnly === false && result?.recognition === 'cloud';
+      const local = result?.localOnly === true && (result?.recognition === undefined || result?.recognition === 'local');
+      if (!result || (!cloud && !local) || !['complete', 'uncertain', 'cancelled'].includes(result.status)
         || (result.status === 'complete' && (result.microphoneActive !== false || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500))
-        || (result.status === 'uncertain' && result.microphoneActive !== false)) throw new Error('本地听写结果未确认');
-      return Object.freeze({ status: result.status, ...(result.status === 'complete' ? { text: result.text.trim(), microphoneActive: false }
-        : result.status === 'uncertain' ? { microphoneActive: false } : {}), localOnly: true });
+        || (result.status === 'uncertain' && result.microphoneActive !== false)
+        || (cloud && result.status !== 'complete')) throw new Error('听写结果未确认');
+      return Object.freeze({ status: result.status, ...(result.status === 'complete' ? { text: result.text.trim(), microphoneActive: false,
+        recognition: cloud ? 'cloud' : 'local' } : result.status === 'uncertain' ? { microphoneActive: false } : {}), localOnly: cloud ? false : true });
     }).finally(() => {
       operation.sender?.removeListener('destroyed', abort);
       operation.sender?.removeListener('render-process-gone', abort);

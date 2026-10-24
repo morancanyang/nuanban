@@ -121,8 +121,11 @@ describe('桌面真实模型端口（仅合成HTTP，不是供应验收）', () 
 describe('桌面密钥配置', () => {
   it('正式主进程使用系统网络通道且不附带会话凭证', async () => {
     const main = await readFile(new URL('../../apps/desktop/main.cjs', import.meta.url), 'utf8');
-    expect(main).toContain("loadConfiguredProvider({ fetch: (input, init) => electron.net.fetch(input, { ...init, credentials: 'omit' }) })");
+    expect(main).toContain("const desktopFetch = (input, init) => electron.net.fetch(input, { ...init, credentials: 'omit' })");
+    expect(main).toContain('loadConfiguredProvider({ fetch: desktopFetch })');
+    expect(main).toContain('loadConfiguredCloudDictation({ fetch: desktopFetch })');
     expect(main).not.toContain('loadConfiguredProvider()');
+    expect(main).not.toContain('loadConfiguredCloudDictation()');
   });
 
   it('没有配置时关闭，不回退或生成默认密钥', async () => {
