@@ -65,7 +65,7 @@ async function configureAiProvider() {
   const script = path.join(__dirname, '..', '..', 'scripts', 'configure-ai-provider.ps1');
   if (!fs.existsSync(script)) {
     await dialog.showMessageBox({ type: 'warning', title: '无法打开配置窗口', message: '当前运行方式没有包含配置脚本。',
-      detail: '请从仓库源码目录启动暖伴，或手动运行 scripts/configure-ai-provider.ps1。未保存任何密钥。', buttons: ['知道了'] });
+      detail: '请从仓库源码目录启动微光指引，或手动运行 scripts/configure-ai-provider.ps1。未保存任何密钥。', buttons: ['知道了'] });
     return { configured: false };
   }
   await dialog.showMessageBox({ type: 'info', title: '配置云端智能服务', message: '接下来会打开一个输入窗口。',
@@ -83,7 +83,7 @@ async function configureAiProvider() {
   while (Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, 500));
     if (providerConfigurationStamp() > stamp) {
-      const answer = await dialog.showMessageBox({ type: 'question', title: '智能服务配置已保存', message: '现在重启暖伴以启用吗？',
+      const answer = await dialog.showMessageBox({ type: 'question', title: '智能服务配置已保存', message: '现在重启微光指引以启用吗？',
         detail: '重启不会自动开启屏幕观察或麦克风；语音与问答仍需本人每次确认。', buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1, noLink: true });
       if (answer.response === 0) { app.relaunch(); app.exit(0); }
       return { configured: true };
