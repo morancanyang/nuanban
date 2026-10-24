@@ -4,6 +4,14 @@
 >
 > **并入的提交**：`af987fd`（为 Web 管理端补齐全站动效层：CSS + 轻量 WAAPI）、`bd17a5d`（修复 Web 端必修无障碍缺陷：对比度、抽屉焦点、渲染兜底、页面标题）。合并基点是我们自己的 `48c3121`，即对方分支只比我们多这 2 个提交；合并提交为 `2753a0c`（`git merge mobiwusi/main`，35 个本地提交保留）。
 >
+
+> **2026-10-24 r22：** 修复“说话它听不见”——现场实测内置麦克风阵列拾音仅 **−27 dBFS**（近场 0.12~0.17），Windows 离线中文引擎对这种弱信号只给出 0.03~0.05 置信度的乱码，因此新增**可选、默认关闭的云端听写**（所有者批准）：录音（NAudio 16 kHz 单声道、语音门限自动停、**自动增益归一到 ≈ −3 dBFS**）→ 上传到已配置网关 `/audio/transcriptions`（默认 `gpt-4o-transcribe`，429/5xx 有界退避重试）。开启需本人在原生窗口确认；**每次语音输入仍单独弹窗写明本次录音会上传**，识别后立即丢弃、不在本机保存；云端失败自动回退本机离线识别并在语音状态说明原因。未开启时音频不出机。r21 已从下载目录撤下。
+
+> **产物核验（r22）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r22.zip` 197,335,820 字节（188.19 MiB），SHA256 `b847416e9afa9925c0fcfed04822e81fab1ca5353d22c222b17c8cbc69b7983d`；主机上传后按字节核验一致，公开 HEAD 200。包内核对：`app.asar.unpacked/voice/windows-cloud-dictation.ps1`、`app.asar.unpacked/voice/NAudio.dll`（PE，513,536 字节）均在 asar 之外；r21→r22 条目 85→87（**仅新增这 2 个解包文件**），变化条目只有 `resources/app.asar`（51,184,539 → 51,214,703 字节，+30,164）。录音助手脚本经静态核对**不含任何联网调用**；NAudio 1.10 为 MIT，许可文本随包内 `voice/NAudio-LICENSE.txt`（在 asar 内）。
+
+> **验证范围（r22）**：`pnpm typecheck` 0；非 acceptance 全量 **2972 passed / 18 failed**，18 项失败全部落在既有红测（`android-3d-assets`、`android-3d-render-policy`、`android-model-access`、`desktop-shell-target-stability`，均为其他会话在途工作）；云听写相关新增测试 18 项（上传/重试/限额/取消/不落盘/不联网、录音器协议与错误映射、开关持久化）+ 语音桥与管理端用例全绿。**未做真机语音验收**：以上不证明"在本人机器上识别准确"，需用户在 r22 里亲自试。
+
+
 > **冲突与解决**（仅 2 处，均为"双方各自新增"）：`apps/web/src/responsive.css`（我们新增的输入框窄窗规则 + 对方新增的抽屉关闭入口规则 → 两块**都保留**）；`apps/web/src/pages/pet-settings.tsx`（我方 `localModelBridge/liliModel` 与对方 `stagger/localCompanionBridge/showLiliCompanion` 的 import → **两组都保留**，故两边的宠物设置能力都不丢）。
 >
 > **合并前后严格对照（都在干净工作树上，排除他人在途改动）**：
@@ -119,7 +127,7 @@
 
 | 产物 | 绝对路径 | 大小 | SHA256 |
 | --- | --- | --- | --- |
-| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip` | 197,126,522 字节（183.395 MiB） | `4ca6e1a0c15fe585cf89e3d558058a6697e387cff745584d968403fbf7266d52` |
+| 便携 zip（推荐分发物） | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r22.zip` | 197,335,820 字节（188.19 MiB） | `b847416e9afa9925c0fcfed04822e81fab1ca5353d22c222b17c8cbc69b7983d` |
 | 可执行目录 | `C:\Users\33864\Desktop\nuanban\apps\desktop\out\NuanbanDemo-win32-x64\` | 78 个文件 / 418,924,042 字节（399.517 MiB） | 见下方目录清单 |
 | 主程序 | `...\out\NuanbanDemo-win32-x64\nuanban.exe` | 245,621,248 字节（234.243 MiB） | `c7af6cbe5ec98eecc72c512fac6b7bdb92fc9ed559e0458772dadb24ae611753` |
 | 应用归档 | `...\out\NuanbanDemo-win32-x64\resources\app.asar` | 34,169,465 字节（32.587 MiB） | `3696c3bdf9f31cccc87d3088523981284b60c77e328f252e30497aef665bed7d` |
@@ -164,7 +172,7 @@
 本产物是**便携目录 + zip**，不是安装器，不写注册表、不装服务、不需要管理员权限。
 
 1. 校验 zip：在 PowerShell 中执行
-   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip' -Algorithm SHA256).Hash`
+   `(Get-FileHash 'C:\Users\33864\Desktop\nuanban\apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r22.zip' -Algorithm SHA256).Hash`
    应为 `42C5609E88CD6905BD4161622F39E6DF3CB15314E3ABDF595E9A8C09C34B4FB0`。
 2. 解压 zip 到本地固定目录（不要在压缩包内直接运行，也不要在 Program Files 等受保护目录内运行）：
    例如 `C:\Users\<用户名>\Apps\NuanbanDemo-0.1.0\`，解压后应存在 `NuanbanDemo-win32-x64\nuanban.exe`。
@@ -228,11 +236,11 @@ node scripts/check-d03-candidate.mjs
 #    不同压缩工具/级别会得到不同 SHA256，正式分发的哈希以第 1 节为准）
 $sevenZip = (Resolve-Path 'node_modules/.pnpm/electron-winstaller@5.4.4/node_modules/electron-winstaller/vendor/7z-x64.exe').Path
 Push-Location apps\desktop\out
-& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip' 'NuanbanDemo-win32-x64'
+& $sevenZip a -tzip -mx=5 'dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r22.zip' 'NuanbanDemo-win32-x64'
 Pop-Location
 
 # 4) 校验
-(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261023-r21.zip' -Algorithm SHA256).Hash
+(Get-FileHash 'apps\desktop\out\dist\NuanbanDemo-0.1.0-win32-x64-portable-20261024-r22.zip' -Algorithm SHA256).Hash
 node scripts/check-d03-candidate.mjs
 ```
 
