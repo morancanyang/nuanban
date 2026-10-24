@@ -248,7 +248,8 @@
           <ol class="guidance-workflow" aria-label="屏幕查找流程"><li>选择屏幕<br><small>本人开启观察与授权</small></li><li>说出目标<br><small>例如“帮我找到设置”</small></li><li>看箭头操作<br><small>由你亲手点击</small></li></ol>
           <p id="guidance-analysis" class="fine-print" role="status" hidden></p>
           <div class="button-row"><button id="guidance-start-observation" type="button" disabled>① 选择屏幕与授权</button><button id="screen-voice-find" class="primary-button" type="button" disabled>② 语音查找并指引</button></div>
-          <div class="button-row"><button id="auto-step-start" class="primary-button" type="button" disabled>③ 自动步进指引（共享后自动截帧）</button></div>
+          <div class="button-row"><button id="auto-step-start" class="primary-button" type="button" aria-describedby="auto-step-hint" disabled>③ 自动步进指引（共享后自动截帧）</button></div>
+          <p id="auto-step-hint" class="fine-print" role="status" aria-live="polite" hidden></p>
           <p id="auto-step-progress" class="fine-print" role="status" aria-live="polite" hidden></p>
           <p class="fine-print">自动步进由本人确认后，每一步都会在本机遮盖文字与人脸后自动上传一帧给模型；箭头出现后请亲手点击目标，箭头消失后点“我点好了，请核验”继续下一步，直到目标打开或找到。敏感或未分类画面不会再暂停共享，只在本机遮盖后继续；检测失败的那一帧不会上传。</p>
           <p class="fine-print">“语音查找”由你点击并确认后，只听写这一句话，停麦后自动结合当前画面查找。下方也可打字查找；“智能查询”不读取屏幕，不会生成箭头。暖暖只绘制高亮和箭头，不移动系统鼠标、不代点或代输。</p>
@@ -375,7 +376,7 @@
       <span id="xingyun-pet" class="pet xingyun-pet" role="img" aria-label="星云花环水獭 3D 桌宠" hidden><span id="xingyun-canvas" class="xingyun-canvas"></span></span>
       </button>
       <button id="pet-notification" class="pet-notification" type="button" aria-label="有新消息，点击查看" aria-controls="pet-panel" hidden><span aria-hidden="true"></span></button>
-      <div class="dock-copy"><p id="message" role="status">我在这里，点我聊聊</p><div class="dock-tools"><span class="drag-handle" aria-hidden="true" title="也可直接按住桌宠形象拖动">⠿ 移动</span><button id="pet-voice" type="button" title="单独授权后直接与暖暖语音聊天" disabled>语音聊聊</button><button id="pet-search" type="button" title="使用已配置的模型回答问题">搜索</button><button id="pet-menu" type="button" title="打开原生菜单；位置调整由桌面宿主提供">功能与位置</button></div></div>
+      <div class="dock-copy"><p id="message" role="status">我在这里，点我聊聊</p><div class="dock-tools"><span class="drag-handle" aria-hidden="true" title="也可直接按住桌宠形象拖动">⠿ 移动</span><button id="pet-voice" type="button" title="单独授权后直接与暖暖语音聊天" disabled>语音聊聊</button><button id="pet-search" type="button" title="使用已配置的模型回答问题">搜索</button><button id="pet-menu" type="button" title="打开原生菜单；位置调整由桌面宿主提供">功能与位置</button><button id="pet-collapse" type="button" title="把桌宠收起为屏幕边上的悬浮球；点击悬浮球可再取回">收起为悬浮球</button></div></div>
     </div>
     <div id="pet-voice-controls" class="pet-voice-controls" aria-label="面对面语音控制" hidden>
       <span class="drag-handle voice-drag-handle" aria-hidden="true" title="按住这里移动桌宠">⠿</span>

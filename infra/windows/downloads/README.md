@@ -5,6 +5,13 @@
 
 > **2026-10-24 r24：** 桌宠“智能查询”改回 **AnySearch 实时检索**（`d22fa08`）。2026-10-18 起该入口只复用本机模型、不联网，因而回答不了实时问题。现在新增 `pet-search-client.cjs` 组合供应：**配置密钥就调 `POST https://api.anysearch.com/v1/search`**（Bearer），展示来源标题/摘要与可打开原文的 HTTPS 链接，页面标注“AnySearch 实时检索”；**没有密钥**才回退本机模型并标注“未联网核验”；**AnySearch 已配置但失败时直接报错，不静默改走模型冒充检索结果**。密钥只存本机 DPAPI 加密文件（`%APPDATA%\@nuanban\desktop\nuanban-anysearch-key.bin`，69 字节密文）或环境变量，**不进仓库、不进安装包**，用 `scripts/set-anysearch-key.ps1` 写入；新增 `scripts/check-anysearch-live.cjs` 做真实调用核对，并有防泄漏测试扫描源码/脚本/测试/文档。构建来自独立干净工作树（HEAD `d22fa08`，先变基到最新远端并保留对方提交）：`tsc --noEmit` 0，相关套件 415 passed。真实调用记录：“今天北京天气”7 条、“上海今天天气怎么样”7 条、“人民币 美元 汇率”9 条结果，全部 HTTPS、来源各异，模型调用 0 次。Android 两包未重出（另一会话正在改 Android/Web，当前 Web 构建与其已发布 APK 已不一致），下载页保留此前逐文件核验过的 APK 行；旧 r23 包与页面行已移除。
 
+> **2026-10-24 r27：** 修复"星云实时对话无法点击"（现场反馈）。原因：`avatar-conversation-start` 的禁用条件包含"已有会话或本地实例"，因此**只要仅形象会话在运行（用户已启用花环水獭），对话入口就永久不可点，界面也不说明原因、没有切换路径**。现在：仅形象会话就绪时按钮保持可用并把文案改为 **"切换到实时对话"**，同区说明改为"会先停止这个仅形象会话并确认远端关闭，再建立实时对话会话"；`start('conversation')` 在**本人于原生对话框确认之后**先 `stop()` 结束仅形象会话，再建立对话会话（取消确认则完全不动现有形象）。r26→r27 条目 87→87、新增 0、删除 0，**唯一变化是 `resources/app.asar`（77,011,923 → 77,116,099 字节，+104,176 = 重建后的 `avatar-runtime/xingyun-renderer.js`）**。旧 r26 包已撤下。
+
+> **产物核验（r27）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261024-r27.zip` 215,370,602 字节（205.39 MiB），SHA256 `1e31114902e4ed2849c9a35c318b134e5548385e65669a16d5640f224771beff`；主机按字节核验一致，公开 HEAD 200。包内核对：构建产物含"切换到实时对话"与切换说明文案、源码含 `switchingFromRender`/`await stop()`、render 会话体（`auto_send_asr_to_llm:false`）与对话会话体（`true`）各自完整、权限闸门随包、`main.cjs` 无 `callback(true)`、品牌文案仍是"微光指引"、解包目录含录音助手与 `NAudio.dll`。
+
+> **验证范围（r27）**：`pnpm typecheck` 0；星云与桌宠单测 **263 passed**；`desktop-pet-avatar.spec.ts`（合成 SDK，msedge）**28 passed**（14 用例 × 2 视口），其中新增用例"仅形象会话运行中也能进入实时对话"覆盖：按钮可用与文案、点击前不改变形象、确认后先停形象（`stops=1 destroyed=1`）再建对话会话（`modes=['render','conversation']`、`asrStarts=1`、`volume=1`）、停止后 `asr=idle`。**未验证**：仍无真机开麦与真实星云会话验收（口型/延迟/计费口径未实测）。
+
+
 
 > **2026-10-24 r21：** 合并上游前端仓库 [101274017/mobiwusi](https://github.com/101274017/mobiwusi) 的界面更新并重出 Windows 客户端。
 

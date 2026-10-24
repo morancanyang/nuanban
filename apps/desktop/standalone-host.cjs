@@ -93,7 +93,9 @@ function createStandaloneHost(options) {
   let menuOpen = false;
   let dialogOpen = 0;
   let lastActivityAt = 0;
-  const idleHideMs = Number.isFinite(options.autoHideMs) ? Math.max(0, options.autoHideMs) : 5_000;
+  // Owner decision: the pet never collapses on its own. The floating ball appears only when the owner
+  // clicks the collapse button (or the menu entry), or when a dragged ball snaps to a screen edge.
+  const idleHideMs = 0;
   const ballSize = 64;
   let petClosePromise = null;
   let petDrag = null;
@@ -271,6 +273,7 @@ function createStandaloneHost(options) {
     const bounds = display.bounds;
     if (target.rect.x < bounds.x || target.rect.y < bounds.y || target.rect.x + target.rect.width > bounds.x + bounds.width || target.rect.y + target.rect.height > bounds.y + bounds.height) { clearGuide(); return false; }
     clearTimeout(guideTimer);
+    if (collapsed) expandFromBall({ focus: false });
     movePetAwayFrom(target.rect, display.workArea);
     guideWindow.setBounds(bounds);
     pendingGuide = { ...target, rect: { ...target.rect, x: target.rect.x - bounds.x, y: target.rect.y - bounds.y } };
@@ -366,14 +369,9 @@ function createStandaloneHost(options) {
   }
 
   function resetIdleTimer() {
+    // Auto-hide was removed by owner request: no timer ever collapses the pet on its own.
     clearTimeout(idleTimer);
     idleTimer = null;
-    if (closing || collapsed || dialogOpen > 0 || menuOpen || !live(petWindow) || !petWindow.isVisible()) return;
-    idleTimer = setTimeout(() => {
-      idleTimer = null;
-      collapseToBall('idle');
-    }, idleHideMs);
-    idleTimer.unref?.();
   }
 
   function noteActivity() {
@@ -1141,13 +1139,11 @@ function createStandaloneHost(options) {
       noteActivity();
     });
     petWindow.on('blur', () => {
+      // Losing focus no longer collapses the pet; only the owner's button, menu entry or an
+      // edge-snapped drag produces the floating ball.
       clearPetDrag();
       clearTimeout(blurTimer);
-      blurTimer = setTimeout(() => {
-        blurTimer = null;
-        collapseToBall('blur');
-      }, 300);
-      blurTimer.unref?.();
+      blurTimer = null;
     });
     petWindow.on('show', () => resetIdleTimer());
     petWindow.webContents.on('render-process-gone', (_event, details) => { avatarTrace?.record({ kind: 'renderer-gone', message: 'reason=' + String(details?.reason ?? '') }); runAction(() => stop('renderer-gone')); });
