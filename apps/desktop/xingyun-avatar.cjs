@@ -1,5 +1,6 @@
 const { createHash, randomUUID } = require('node:crypto');
 const { appendFileSync, readFileSync, statSync, writeFileSync } = require('node:fs');
+const net = require('node:net');
 const defaultPet = require('./default-pet.json');
 
 const GATEWAY = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session';
@@ -101,7 +102,77 @@ function registerAvatarTraceBridge({ ipcMain, trace, isTrusted }) {
   return { dispose() { ipcMain.removeListener('nuanban:avatar:trace', listener); } };
 }
 
-function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalThis.fetch, onState = () => {}, timeoutMs = 25000 }) {
+// ---- 失效系统代理的应用内回退（不改用户系统设置） --------------------------------------
+// 现场：用户系统配了已停止的代理 127.0.0.1:6518，Chromium 默认遵循系统代理，于是星云会话与
+// 实时通道全部发往死代理 → SDK 报 code=10002 socket连接失败。这里只做两件事：
+//   1) 用 Electron 自己的 resolveProxy 读出该 URL 实际会用的代理（不读注册表、不改注册表）；
+//   2) 只有当代理不是 DIRECT、且该端口在极短超时内连不上时，才把**承载形象的 session** 设为直连。
+// 直连后仍然失败 → 恢复 system 并如实报错；会话结束/停止同样恢复。绝不写注册表或调用系统设置。
+function parseProxySpec(resolved) {
+  if (typeof resolved !== 'string' || !resolved.trim()) return null;
+  for (const entry of resolved.split(';')) {
+    const text = entry.trim();
+    if (!text || /^DIRECT$/i.test(text)) continue;
+    const match = text.match(/^(PROXY|HTTPS?|SOCKS5?|SOCKS4)\s+([A-Za-z0-9._:-]{1,253}):(\d{1,5})$/i);
+    if (!match) continue;
+    // 只接受"主机:端口"；IPv6 字面量形状不受支持时直接跳过（宁可不切换，也不猜）。
+    const host = match[2];
+    if (host.includes(':') && !/^[0-9a-f:.]+$/i.test(host)) continue;
+    const port = Number(match[3]);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) continue;
+    return Object.freeze({ kind: match[1].toUpperCase(), host, port, label: host + ':' + port });
+  }
+  return null;
+}
+
+function probeTcpPort(host, port, { timeoutMs = 300, connect } = {}) {
+  const dial = connect ?? ((target, targetPort, ms) => new Promise(resolve => {
+    let settled = false;
+    const socket = net.connect({ host: target, port: targetPort });
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket.destroy(); } catch {}
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish('timeout'), ms);
+    socket.once('connect', () => finish('open'));
+    socket.once('error', error => finish(error?.code === 'ECONNREFUSED' ? 'refused' : 'error'));
+  }));
+  return Promise.resolve(dial(host, port, timeoutMs)).then(value => (typeof value === 'string' ? value : 'error')).catch(() => 'error');
+}
+
+function createAvatarProxyFallback({ resolveProxy, probe, applyDirect, restoreSystem, trace = () => {}, probeTimeoutMs = 300 } = {}) {
+  let switched = false;
+  const noticeFor = label => `检测到系统代理 ${label} 无法连接（可能已停止）；可启动代理软件或在系统设置里关闭代理后重试；已自动改为直连尝试。`;
+  return Object.freeze({
+    // 返回 { mode: 'system' | 'direct', label?, notice? }；任何无法判定的情况都保持 system（不改动）。
+    async prepare() {
+      if (typeof resolveProxy !== 'function' || typeof applyDirect !== 'function') return { mode: 'system' };
+      let resolved = null;
+      try { resolved = await resolveProxy(GATEWAY); } catch { return { mode: 'system' }; }
+      const proxy = parseProxySpec(resolved);
+      if (!proxy) return { mode: 'system' };
+      let outcome = 'open';
+      try { outcome = typeof probe === 'function' ? await probe(proxy, { timeoutMs: probeTimeoutMs }) : 'open'; } catch { outcome = 'error'; }
+      if (outcome === 'open') { trace('avatar_proxy', { state: 'reachable', label: proxy.label }); return { mode: 'system' }; }
+      try { await applyDirect(); } catch { trace('avatar_proxy', { state: 'direct_unavailable', label: proxy.label, outcome }); return { mode: 'system' }; }
+      switched = true;
+      trace('avatar_proxy', { state: 'unreachable_direct', label: proxy.label, outcome });
+      return { mode: 'direct', label: proxy.label, notice: noticeFor(proxy.label) };
+    },
+    // 恢复系统代理：直连也失败、会话停止、进程退出时都必须调用，避免影响其他网络功能。
+    async restore() {
+      if (!switched) return false;
+      switched = false;
+      try { await restoreSystem?.(); return true; } catch { return false; }
+    },
+    direct: () => switched,
+  });
+}
+
+function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalThis.fetch, onState = () => {}, timeoutMs = 25000, proxy } = {}) {
   const configured = Boolean(credentials?.appId?.startsWith(defaultPet.application.appIdPrefix));
   const configurationMismatch = Boolean(credentials) && !configured;
   let phase = configured ? 'idle' : 'unconfigured';
@@ -111,6 +182,8 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
   let active;
   let lastMode = 'render';
   let disposed = false;
+  // 本次会话是否已切到直连，以及触发原因文案（用于失败时如实说明并恢复系统代理）。
+  let proxyNotice = '';
   const conversationState = () => {
     if (!active || active.mode !== 'conversation') return { enabled: false, phase: 'idle' };
     if (phase === 'cleanup_failed') return { enabled: false, phase: 'cleanup_failed' };
@@ -174,7 +247,12 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
       } catch {
         publish('cleanup_failed', '本机已停止显示，但星云未确认会话关闭；请重试停止，并在星云后台检查会话与计费。');
         return { stopped: false, ...status() };
-      } finally { attempt.stopping = undefined; }
+      } finally {
+        attempt.stopping = undefined;
+        // 会话结束（成功或失败）都恢复系统代理设置：直连只服务于本次形象会话。
+        try { await proxy?.restore(); } catch {}
+        proxyNotice = '';
+      }
     })();
     return attempt.stopping;
   }
@@ -207,18 +285,32 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
       : { request_id: requestId, gateway_type: 'default',
         features: { auto_send_asr_to_llm: false, speech_frontend: { enabled: false } }, session_speak_req_id: 1,
         config: { framedata_proto_version: 2, walk_version: 3, raw_audio: rawAudio } };
-    attempt.starting = send('POST', sessionRequest).then(body => {
-      if (typeof body.data?.session_id === 'string' && body.data.session_id.length <= 256) attempt.sessionId = body.data.session_id;
-      return body;
-    });
-    try {
-      const body = await attempt.starting;
+    // 发 POST **之前**先判断"系统代理已配置但连不上"：若是，仅把承载形象的 session 切到直连，
+      // 让本次会话（含随后由渲染端建立的实时通道 WS 与资源下载）绕过死代理。
+      // 不改用户系统设置；一次会话仍然只发一次 POST，不新增自动重连。
+      // 注意：没有注入代理端口时**不引入 await**，保持"exchange 调用期间同步建立 attempt.starting"的既有语义
+      // （取消尚未返回的创建请求时要等会话标识再 DELETE，不能出现孤儿会话）。
+      if (typeof proxy?.prepare === 'function') {
+        try {
+          const decision = await proxy.prepare();
+          proxyNotice = decision?.mode === 'direct' ? decision.notice ?? '' : '';
+        } catch { proxyNotice = ''; }
+      }
+      attempt.starting = send('POST', sessionRequest).then(body => {
+        if (typeof body.data?.session_id === 'string' && body.data.session_id.length <= 256) attempt.sessionId = body.data.session_id;
+        return body;
+      });
+      try {
+        const body = await attempt.starting;
       if (!body.data?.resource_pack || typeof body.data.resource_pack !== 'object') throw new Error('星云应用未返回形象资源，请在平台核对' + defaultPet.name + '应用配置后重试。');
       if (attempt.stopRequested) { await stop('user'); throw new Error('本次形象连接已取消。'); }
       return { status: 200, body };
     } catch (error) {
       const wasStopping = attempt.stopRequested;
-      const text = error instanceof Error && error.message.startsWith('星云') ? error.message : '星云形象连接失败或超时；未自动重连，请检查网络后手动重试。';
+      const baseText = error instanceof Error && error.message.startsWith('星云') ? error.message : '星云形象连接失败或超时；未自动重连，请检查网络后手动重试。';
+      // 直连仍失败：如实报错 + 追加代理提示，并立刻恢复系统代理设置。
+      const restored = proxy?.direct?.() === true ? await proxy.restore().catch(() => false) : false;
+      const text = proxyNotice ? baseText + ' ' + proxyNotice + (restored ? '直连仍失败，已恢复系统代理设置。' : '') : baseText;
       const stopped = await stop('load_failed');
       if (stopped.stopped && !wasStopping) publish('error', text);
       throw new Error(text);
@@ -237,10 +329,14 @@ function createXingyunAvatarService({ credentials, fetch: fetchRequest = globalT
     if (!active || lease !== active.lease) return status();
     // 失败阶段与真实原因由渲染端给出，主进程只做受限脱敏后上屏，便于现场直接看到原因。
     const reason = redactSecret(sanitizeReason(detail), credentials?.appSecret);
+    // 如果本次已经因为"系统代理连不上"切到直连（例如实时通道仍报 socket 失败），
+    // 如实说明并恢复系统代理设置；stop() 的 finally 也会兜底恢复一次。
+    const restored = proxy?.direct?.() === true ? await proxy.restore().catch(() => false) : false;
+    const proxySuffix = proxyNotice ? ' ' + proxyNotice + (restored ? '直连仍失败，已恢复系统代理设置。' : '') : '';
     const stopped = await stop(kind === 'timeout' ? 'timeout' : 'load_failed');
     if (stopped.stopped) publish('error', (kind === 'timeout'
       ? defaultPet.name + '加载超时，已停止会话并恢复本机桌宠；不会自动重连。'
-      : defaultPet.name + '资源或连接加载失败，已恢复本机桌宠；请检查网络后手动重试。') + (reason ? '失败阶段与原因：' + reason + '。' : ''));
+      : defaultPet.name + '资源或连接加载失败，已恢复本机桌宠；请检查网络后手动重试。') + (reason ? '失败阶段与原因：' + reason + '。' : '') + proxySuffix);
     return status();
   }
 
@@ -261,4 +357,5 @@ function registerXingyunAvatarBridge({ ipcMain, service, isTrusted, confirmConve
   return { dispose() { for (const name of Object.keys(actions)) ipcMain.removeHandler('nuanban:avatar:' + name); } };
 }
 
-module.exports = { GATEWAY, MARKER_GATEWAY, PET_AVATAR_CSP, defaultPet, signSession, sanitizeReason, createAvatarTraceLog, registerAvatarTraceBridge, createXingyunAvatarService, registerXingyunAvatarBridge };
+module.exports = { GATEWAY, MARKER_GATEWAY, PET_AVATAR_CSP, defaultPet, signSession, sanitizeReason, createAvatarTraceLog, registerAvatarTraceBridge,
+  parseProxySpec, probeTcpPort, createAvatarProxyFallback, createXingyunAvatarService, registerXingyunAvatarBridge };

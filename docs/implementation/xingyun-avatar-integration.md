@@ -178,6 +178,32 @@ node scripts/test-xingyun-avatar.mjs --simulate
 - 测试：`tests/platform/desktop-xingyun-*` 60 项通过；`pnpm typecheck` 0；`desktop-pet-avatar.spec.ts`（合成 SDK，msedge）28 项通过。
 - **未验证**：现场故障机本身；可见窗口/真机开麦；代理、杀软或显卡驱动差异导致的失败仍未归因。
 
+## 失效系统代理的应用内回退（2026-10-25，`deviceVerified=false`）
+
+现场故障：启用花环水獭报“资源或连接加载失败…失败阶段与原因：**实时通道：code=10002 Error: socket连接失败**”（render 模式）。实测根因是用户系统配了**已停止的代理**（`ProxyEnable=1`、`ProxyServer=127.0.0.1:6518`，该端口无进程监听、连接被拒）；Chromium 默认遵循系统代理，于是星云会话与实时通道全部发往死代理 → SDK 报 10002。对照验证：Node 直连 `e2emp.xingyun3d.com` / `nebula-agent.xingyun3d.com` 的 TLS 正常（TLSv1.3、证书有效、145~166ms），DNS 正常 → 星云服务无问题。
+
+**回退策略（应用内、只影响承载形象的 session，绝不改用户系统设置）**
+
+1. 发会话 POST **之前**，用 Electron 自己的 `session.resolveProxy(GATEWAY)` 读出该地址实际会用的代理（**不读注册表、不写注册表**）；返回 `DIRECT` 或无法解析时保持系统设置不动。
+2. 解析到 `host:port` 后，对该端口做一次**极短超时（默认 300ms）的 TCP 探测**：只有确认为不可达（连接被拒 / 超时 / 解析失败）才继续。
+3. 确认不可达 → 仅对承载形象的 session（桌宠窗口的 session，实时通道 WS 与资源下载同源）调用 `session.setProxy({ mode: 'direct' })`，本次会话改走直连；其他网络功能不受影响（切换只作用于该 session，且在会话结束时恢复）。
+4. 直连后**仍然失败**（POST 失败，或渲染端后来报实时通道失败）→ 立刻 `session.setProxy({ mode: 'system' })` 恢复系统设置，并在失败文案里如实说明"直连仍失败，已恢复系统代理设置"。会话正常停止、退出（`dispose`）也恢复 system。
+5. 代理可达、未配置代理、`resolveProxy` 抛错、`setProxy` 失败等一切无法判定或无法切换的情况**保持 system**（fail closed，不做任何改动）。
+
+**失败文案**（沿用既有 `fail(kind, detail)` 链路与 `avatar-trace.log`）：
+
+```text
+花环水獭资源或连接加载失败，已恢复本机桌宠；请检查网络后手动重试。失败阶段与原因：实时通道：code=10002 socket连接失败。检测到系统代理 127.0.0.1:6518 无法连接（可能已停止）；可启动代理软件或在系统设置里关闭代理后重试；已自动改为直连尝试。直连仍失败，已恢复系统代理设置。
+```
+
+trace 只记录 `avatar_proxy{state: reachable|unreachable_direct|direct_unavailable, label, outcome}`（host:port 与探测结果），不含密钥、令牌、会话标识。
+
+**安全语义不变**：不修改注册表或系统代理设置、不涉及 `netsh`/`reg`；仍然一次授权一次 POST、不自动重连；探测与切换都是本地行为，不抓屏、不外发任何额外信息；切换只使用 `direct`/`system` 两种模式，不注入自定义 `proxyRules` 或 PAC。
+
+**测试**：`tests/platform/desktop-xingyun-proxy-fallback.test.ts`（13 项，假 session/假探针，不碰真实网络）：代理可达→system 且不调用 `setProxy`；未配代理→连探针都不调用、行为与今天一致；代理被拒→只切 direct 且文案含“检测到系统代理 … 无法连接 / 已自动改为直连尝试”；直连仍失败→如实报错并恢复 system、一次会话仍只发一次 POST；正常停止也恢复 system；`resolveProxy` 抛错/切换失败/未注入端口一律保持 system；静态断言无注册表写入、无抓屏 API、切换只允许 direct/system。相关 5 个套件共 **161 项通过**，`pnpm typecheck` 0。
+
+**未验证（`deviceVerified=false`）**：真机需所有者复测：(a) 关闭失效代理后点“启用花环水獭”应能连上；(b) 若重新启动代理软件，应仍走代理且正常（探测到端口可达 → 不改设置）；(c) 用一个“配置了但没启动”的代理复现时，应看到自动直连提示且能连上。本轮只有假 session/假探针的合成测试，没有真机代理环境；宿主层的实际 `setProxy` 生效范围（桌宠窗口 session）与主进程 `fetch` 是否共用该代理设置未在本机实测。
+
 ## 旧猴子应用历史记录
 
 旧猴子应用的 2026-10-18 真实接口记录返回 `1008`：`ttsa request error: 请求参数不完整,请检查传入参数(如角色、音色等)`，未获得 `resource_pack`；随后 DELETE 返回 `error_code: 0`。用户此前提供的配置截图已显示角色“小猴子”、音色“运动男孩”、自动保存，不能再仅凭此错误认定角色或音色未选择、未保存。2026-10-19 重新核对旧调试截图发现页面显示“重新连接”、输入框和“提问”按钮不可用；对应公开工作台源码的未连接预览分支，不能将画面中存在猴子认定为内部会话连接成功。顶部自动连接说明不是实时连接成功状态。这些历史证据不代表新花环水獭应用的调用结果。

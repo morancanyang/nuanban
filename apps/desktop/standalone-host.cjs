@@ -21,7 +21,7 @@ const { registerAppLauncherBridge } = require('./app-launcher-bridge.cjs');
 const { createRealtimeVoiceHost } = require('./realtime-voice-host.cjs');
 const { registerDictationBridge } = require('./wake/dictation-bridge.cjs');
 const { loadXingyunCredentials } = require('./xingyun-credentials.cjs');
-const { createXingyunAvatarService, registerXingyunAvatarBridge, createAvatarTraceLog, registerAvatarTraceBridge, defaultPet } = require('./xingyun-avatar.cjs');
+const { createXingyunAvatarService, registerXingyunAvatarBridge, createAvatarTraceLog, registerAvatarTraceBridge, createAvatarProxyFallback, probeTcpPort, defaultPet } = require('./xingyun-avatar.cjs');
 const { createLiliHost } = require('./lili-host.cjs');
 const { createSingleFrameGuidance } = require('./single-frame-guidance.cjs');
 const { createUiaInventoryReader } = require('./observation/uia-inventory.cjs');
@@ -1315,7 +1315,18 @@ function createStandaloneHost(options) {
   async function initialize() {
     const avatarCredentials = await (options.loadAvatarCredentials ?? loadXingyunCredentials)().catch(() => undefined);
     avatarTrace = createAvatarTraceLog({ filePath: path.join(options.userDataPath, 'avatar-trace.log') });
-    avatarService = createXingyunAvatarService({ credentials: avatarCredentials, onState: state => {
+    // 失效系统代理的应用内回退：只作用于承载形象的 session（桌宠窗口用的就是它），
+    // 用 Electron 的 resolveProxy 读取实际生效的代理（不读/不写注册表），端口连不上才切直连，
+    // 直连仍失败或会话结束即恢复 system，绝不修改用户的系统设置。
+    const avatarSession = () => (live(petWindow) ? petWindow.webContents.session : session.defaultSession);
+    const avatarProxy = options.avatarProxy ?? createAvatarProxyFallback({
+      resolveProxy: url => avatarSession().resolveProxy(url),
+      probe: (proxy, { timeoutMs }) => probeTcpPort(proxy.host, proxy.port, { timeoutMs }),
+      applyDirect: () => avatarSession().setProxy({ mode: 'direct' }),
+      restoreSystem: () => avatarSession().setProxy({ mode: 'system' }),
+      trace: (event, detail) => avatarTrace?.record({ kind: 'stage', message: event + ' ' + JSON.stringify(detail ?? {}) }),
+    });
+    avatarService = createXingyunAvatarService({ credentials: avatarCredentials, proxy: avatarProxy, onState: state => {
       syncConversationPermission(state);
       avatarTrace?.record({ kind: 'stage', message: 'phase=' + String(state?.phase ?? '') + ' mode=' + String(state?.mode ?? '') + ' conversation=' + String(state?.conversation?.phase ?? '') + ' message=' + String(state?.message ?? '') });
       if (live(petWindow)) petWindow.webContents.send('nuanban:avatar:state', state);
