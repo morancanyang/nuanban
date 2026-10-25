@@ -1251,10 +1251,30 @@ function createDesktopRuntime(options) {
     }
   }
 
+  // 无截屏指引不走帧分析，但仍必须把"本次问题"记进任务状态，界面才能显示在问什么。
+  // 这里只做本地记录与风险门控：不采集、不外发、不触发任何分析请求。
+  function recordGuidanceQuestion(text) {
+    if (disposed || typeof text !== 'string' || !text.trim() || text.length > 500) throw new Error('请输入不超过500字的问题');
+    taskGeneration += 1;
+    clarificationReplies = [];
+    state.task = { id: randomUUID(), kind: 'guidance', state: 'needs_help', observationGeneration, question: safeSummary(text.trim()),
+      instruction: '', explanation: '', presentation: null, targetState: 'hidden', result: null, autoStep: false, stepIndex: 0, startedAt: now() };
+    message(safeSummary(text.trim()), 'user');
+    if (isRestrictedText(text)) {
+      clearTarget();
+      state.task.state = 'ended';
+      state.task.result = 'risk_blocked';
+      state.task.explanation = '涉及支付、转账、验证码或私人信息时，微光指引不继续指导该操作。请退出风险页面，必要时与家人电话确认。';
+      state.captions.text = state.task.explanation;
+    }
+    publish();
+    return snapshot();
+  }
+
   return { snapshot, startObservation, stopObservation: reason => closeObservation(reason ?? 'user'),
     resumeObservation: input => startObservation({ ...input, resume: true }), authorizeCloudAnalysis, ask, startAutoStep, replyToClarification,
     rescanClarification: input => continueClarification(input), verify, finishTeaching: result => { invalidateQuestion(); return finishTeaching(result); }, repeat,
-    toggleCaptions, dispose, whenIdle };
+    toggleCaptions, recordGuidanceQuestion, dispose, whenIdle };
 }
 
 // 无截屏指引（UIA 控件清单）与帧分析共用同一份诊断 trace：只记事件、计数、原因码，不记控件名或像素。

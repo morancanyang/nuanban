@@ -350,6 +350,10 @@ function createStandaloneHost(options) {
   }
 
   async function guidanceAsk(text) {
+    // 先本地记录本次问题（含风险门控），界面才能显示在问什么；随后才走控件清单指引。
+    if (typeof runtime.recordGuidanceQuestion === 'function') {
+      try { runtime.recordGuidanceQuestion(text); } catch (error) { if (error?.message?.includes('不超过500字') || error?.message?.includes('请输入')) throw error; }
+    }
     const result = await guidanceSession.ask(text);
     const mapped = guidanceTarget(result);
     let final = result;
