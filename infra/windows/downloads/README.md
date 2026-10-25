@@ -5,6 +5,13 @@
 
 > **2026-10-24 r27：** 功能小屋新增“**智能打开软件**”（`3a24f55`）。用户说“打开计算器/浏览器看新闻/打开 VS Code 的项目”，由已配置模型解析成**严格 JSON**，主进程按固定注册表校验后打开：首批 `calculator`、`notepad`、`explorer`（可打开本人选择的目录）、`browser`（仅 http/https）、`vscode`（本机未安装则如实报 EXECUTABLE_MISSING）、`wechat`（只打开主界面；`settings`/`chat`/`moments` 明确不支持，不伪造跳转）。默认**每次都要本人确认**（确认卡片“即将打开：… / 目标界面：… / 是否继续？”）；自动执行默认关闭，仅对低风险且本会话确认过一次的目标免确认，可随时关闭。模型输出出现 `powershell`/`cmd /c`/`start`/`node`/`python`/`.exe`/`.ps1`/盘符路径等即拒绝；参数只接受白名单键，目录必须由本人用系统对话框选择；启动一律固定绝对 exe + 字符串数组、`shell:false`，网址只走 `shell.openExternal`。Renderer 无 `require`/`process`，所有启动经受信 IPC（8 个通道、严格字段白名单）；最近记录只存时间/appId/target/结果；本功能不请求屏幕、麦克风、摄像头或 OCR。验证：相关套件 **517 passed / 0 failed**（7 个文件，含真实注册表+真实启动器的集成测试），现有功能回归 **892 passed / 0 failed**（15 个文件），`tsc --noEmit` 0；Electron 冒烟（真实 ipcMain + preload + 页面、假启动器，不打开真实软件）确认：确认前 0 次执行、确认后 1 次 `calc.exe args:[]`、开启自动执行后免确认、非受信窗口被拒、屏幕/麦克风请求 0 次。构建来自独立干净工作树（HEAD `3a24f55`）。旧 r26 包已从下载目录移除。
 
+> **2026-10-25 r33：** 修"无截屏模式下指引按钮点不动"以及随之暴露的两个断点。① **按钮可用性**：默认无截屏时，"语音查找并指引"不再要求观察/画面授权（点击后：文本发送同意 → 普通听写 → 走无截屏路径），并新增显式入口 **"直接查找并指引（无需截屏）"**（用输入框文字，空草稿也保持可点并提示先输入）；单帧/持续观察的门槛保持原样。界面同时改正误导文案：顶部写明"无需选择屏幕或开启共享"、初始状态行按模式变化、选屏式流程列表按模式隐藏、"① 选择屏幕与授权"标注为仅在需要单帧/持续观察时使用。② **转发断点**：已提交的 `pet-preload.cjs` 丢掉了 `ask` 的第三个参数（无截屏标志），导致按钮路径仍会落到画面流程——已修（只转发标志、不携带任何画面数据，是否可用仍由主进程判定）。③ **记录断点**：无截屏路径绕过了 `runtime.ask`，导致 `snapshot().task.question` 为空、界面不显示"在问什么"——新增仅本地的 `recordGuidanceQuestion`（同一任务形状与风险门控，不采集、不外发、不触发分析）并在控件清单会话前调用。页面上 `r30` 与 `r32` 为先前版本，均保留。
+
+> **产物核验（r33）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261025-r33.zip` 215,420,347 字节（205.44 MiB），SHA256 `d0ed196e0e519a1803107dca55e8fe7fd338ea7c9acd20ba7ce8617cdcff3e0c`；主机按字节核验一致，公开 HEAD 200。包内已确认：`pet.html` 含 `guidance-text-find`（"直接查找并指引（无需截屏）"）、`pet-preload.cjs` 转发 `screenshotFree`、无截屏路径无截屏调用、模式与原因码在界面可见。
+
+> **验证范围（r33）**：`pnpm typecheck` 0；`desktop-guidance-screenshot-free` 11（新增）+ `desktop-standalone-host` + `desktop-uia-guidance` + `desktop-runtime-coordinator` 合计 **300 passed**；桌宠 Playwright（合成装置）**62 passed / 4 failed**，4 项为 `desktop-pet-search.spec.ts` 的 HEAD 既有失败（stash 后同样失败）。**未验证**：`deviceVerified=false`——需所有者在真实桌宠窗口确认默认无截屏下两个按钮可点、弹出"发送控件文本"确认框、随后出箭头或给出真实原因（控件清单与箭头为真机行为，本机只有合成单测）。
+
+
 > **2026-10-25 r32：** 按所有者决定，把光标指引的**默认模式**改为"**无截屏（UIA 控件清单）**"：大模型的角色从"看图找坐标"变成"读控件名做选择题"。本机读取**前台窗口**的控件清单（名称/类型/精确矩形，深度 ≤8、数量 ≤400，超限标注"已截断"，**无像素**），只把这份文本清单 + 问题发给模型，模型只能回**控件序号**（回包里出现坐标字段直接拒绝）；坐标一律取**本机 UIA 矩形**，并在画箭头前做物理→DIP 一致性证明，证不出来就不画。控件名外发前先过既有隐私词门控；清单不可用（自绘界面/游戏/视频）时**明确提示"这次需要你允许截一帧"**，不静默降级、不假装指引。复核改为**重读控件树**（不截屏）判定 advanced/unchanged/unverifiable。授权未被绕过：无截屏模式仍需本人对"把控件名称等文本发给已配置模型"的显式同意（文案按模式区分，可在设置撤销），单帧与持续观察流程保持原样。界面显示当前模式、"已读取 N 个控件（上限 M，是否截断）"与本次未给箭头的原因码。本版同时包含 r31 的"核验活锁"修复（周期 tick 合并而非取消、补发最小间隔 6 秒与退避）。**诚实边界**：UIA 覆盖不到的软件（游戏/全屏视频/自绘引擎）在不截屏前提下无法精准定位；无名称的自绘控件同样要退回单帧；"不截屏 + 全覆盖 + 每步精准"三者不可兼得；真机验收 `deviceVerified=false`。页面上另一行 `r30` 是**其他会话**发布的版本，未撤下。
 
 > **产物核验（r32）**：`NuanbanDemo-0.1.0-win32-x64-portable-20261025-r32.zip` 215,418,834 字节（205.44 MiB），SHA256 `628eda3a7cbc12f0bac407e5d8615045c48da63c3d2da900cfe149b5a021a991`；主机按字节核验一致，公开 HEAD 200。包内核对（解包 ASAR）：`observation/uia-inventory.cjs`、`uia-guidance.cjs`、`uia-coordinates.cjs` 与 `windows-uia-inventory.ps1` 随包；模式常量 `screenshot-free` 且默认取 `DEFAULT_GUIDANCE_MODE`、界面文案含"无截屏（默认）"；**无截屏三件套中不出现 `sanitizedPng/desktopCapturer/capturePage/toPNG`**；使用 `isRestrictedText` 门控；宿主暴露 `uia_blocked`/`uia_text_consent` 原因；`management-observation-bridge.cjs` 透传模式（旧字段不变）。
@@ -326,4 +333,5 @@ node scripts/check-d03-candidate.mjs
 - 打包隔离校验（`apps/android/check-standalone-packaging.ps1`）通过 **89/89**：普通包不含 `INTERNET`/悬浮窗/前台服务/采屏权限与 nativehost 类，独立包含全部相关权限与 6 个组件，独立包 39 个 OCR/人脸模型资产指纹与 `AndroidScreenPolicy.MODEL_FINGERPRINT` 一致，普通包不含桌宠形象资源、独立包含该资源，且不含自动 CCT 传输后端。
 - **冻结说明**：本表冻结版为 2026-10-23 21:24 线上发布的一对（`1edbb6b7…` / `0b5b0e3d…`），由 HEAD `9dfa22e` 干净构建；21:10 旧对与 21:11 本地重编对均已作废，不得对外分发。
 - `zipalign -c 4` 与 `apksigner verify` 对两个包均返回 0（v2 scheme，单一 debug 签名者）。
+
 
