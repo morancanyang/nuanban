@@ -321,10 +321,12 @@ contextBridge.exposeInMainWorld('nuanbanPet', Object.freeze({
     if (['learning.review.confirm', 'learning.review.decline'].includes(payload.type)) command.proposalId = requireIdentifier(payload.proposalId);
     return ipcRenderer.invoke('nuanban:pet:command', command).then(projectReply);
   },
-  ask: (text, observationGeneration) => {
+  ask: (text, observationGeneration, screenshotFree) => {
     if (typeof text !== 'string' || !text.trim() || text.length > 500) throw new TypeError('请输入 1 至 500 字的问题');
     if (observationGeneration !== undefined && (!Number.isSafeInteger(observationGeneration) || observationGeneration < 1)) throw new TypeError('屏幕观察代次无效');
-    return ipcRenderer.invoke('nuanban:pet:ask', { text, ...(observationGeneration !== undefined ? { observationGeneration } : {}) }).then(projectReply);
+    if (screenshotFree !== undefined && screenshotFree !== true) throw new TypeError('无截屏标志无效');
+    // 只做转发：第三项只表示"这次走无截屏控件清单路径"，不携带任何画面数据，是否可用由主进程决定。
+    return ipcRenderer.invoke('nuanban:pet:ask', { text, ...(observationGeneration !== undefined ? { observationGeneration } : {}), ...(screenshotFree === true ? { screenshotFree: true } : {}) }).then(projectReply);
   },
   close: () => ipcRenderer.invoke('nuanban:pet:close'),
   openMain: (route = '/') => {
