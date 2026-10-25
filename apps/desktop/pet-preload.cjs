@@ -197,6 +197,30 @@ function projectSnapshot(value) {
     const section = projectRecord(value[name], fields);
     if (section) result[name] = section;
   }
+  // 无截屏指引模式必须能到达桌宠界面，否则按钮会因为看不到模式而一直禁用。
+  // 只投影文本元数据：模式、原因码、控件计数与复核结论；控件名原文、像素与路径一律不在此列。
+  const rawGuidance = value.observation && typeof value.observation === 'object' && !Array.isArray(value.observation)
+    ? value.observation.guidance : undefined;
+  const guidance = projectRecord(rawGuidance, { mode: 'string', modeLabel: 'string', screenshotFree: 'boolean',
+    active: 'boolean', reasonCode: 'string', reasonMessage: 'string', severity: 'string',
+    suggestSingleFrame: 'boolean', textConsent: 'boolean', available: 'boolean' });
+  if (guidance && typeof guidance.screenshotFree === 'boolean' && result.observation) {
+    if (rawGuidance.reasonCode === null) guidance.reasonCode = null;
+    if (rawGuidance.reasonMessage === null) guidance.reasonMessage = null;
+    if (guidance.severity !== 'info' && guidance.severity !== 'blocked') delete guidance.severity;
+    if (typeof guidance.modeLabel === 'string' && guidance.modeLabel.length > 64) delete guidance.modeLabel;
+    if (typeof guidance.reasonMessage === 'string' && guidance.reasonMessage.length > 300) delete guidance.reasonMessage;
+    const counts = projectRecord(rawGuidance.counts, { count: 'number', limit: 'number', truncated: 'boolean' }) ?? {};
+    if (Number.isSafeInteger(counts.count) && counts.count >= 0 && Number.isSafeInteger(counts.limit) && counts.limit >= 0 && counts.limit <= 4096) {
+      guidance.counts = { count: counts.count, limit: counts.limit, truncated: counts.truncated === true };
+    }
+    const review = projectRecord(rawGuidance.review, { verdict: 'string', code: 'string', detail: 'string' });
+    if (review && ['advanced', 'unchanged', 'unverifiable'].includes(review.verdict)
+      && String(review.code ?? '').length <= 48 && String(review.detail ?? '').length <= 48) {
+      guidance.review = { verdict: review.verdict, code: review.code, detail: review.detail };
+    }
+    result.observation.guidance = guidance;
+  }
   if (result.voice?.presentation === 'pet' && (result.voice.active === true || result.voice.microphoneActive === true)) {
     const bubble = projectRecord(value.voice?.bubble, { user: 'string', assistant: 'string' });
     if (bubble && Object.values(bubble).every(text => text.length <= 6000)) result.voice.bubble = bubble;
