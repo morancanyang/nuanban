@@ -3,8 +3,11 @@ const path = require('node:path');
 const { externalScriptPath } = require('../external-script-path.cjs');
 const { ObservationError, checkAborted } = require('./observation-common.cjs');
 
-function createWindowsHelperProcess({ spawn = nodeSpawn, timeoutMs = 15_000, maxOutputBytes = 2 * 1024 * 1024, platform = process.platform } = {}) {
+function createWindowsHelperProcess({ spawn = nodeSpawn, timeoutMs = 15_000, maxOutputBytes = 2 * 1024 * 1024, platform = process.platform, script = 'windows-local-analysis.ps1', maxStderrBytes = 8192, maxInputBytes = 33_570_816 } = {}) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000 || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 128 || maxOutputBytes > 2 * 1024 * 1024) throw new ObservationError('invalid_helper_limits');
+  // 固定脚本名（不接受调用方传任意路径）：调用方只能在本目录内选择随包脚本。
+  if (typeof script !== 'string' || !/^windows-[a-z0-9-]+\.ps1$/.test(script)) throw new ObservationError('invalid_helper_script');
+  if (!Number.isSafeInteger(maxInputBytes) || maxInputBytes < 128 || maxInputBytes > 33_570_816) throw new ObservationError('invalid_helper_limits');
   let active = null;
 
   async function run(request, { signal } = {}) {
@@ -12,11 +15,11 @@ function createWindowsHelperProcess({ spawn = nodeSpawn, timeoutMs = 15_000, max
     if (platform !== 'win32') throw new ObservationError('windows_analysis_unavailable');
     if (active) throw new ObservationError('busy');
     const encoded = Buffer.from(JSON.stringify(request), 'utf8');
-    if (encoded.length > 33_570_816) throw new ObservationError('helper_input_limit');
+    if (encoded.length > maxInputBytes) throw new ObservationError('helper_input_limit');
     let child;
     try {
       const executable = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-      child = spawn(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', externalScriptPath(path.join(__dirname, 'windows-local-analysis.ps1'))], { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', externalScriptPath(path.join(__dirname, script))], { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch {
       encoded.fill(0);
       throw new ObservationError('helper_spawn_unavailable');
@@ -47,7 +50,7 @@ function createWindowsHelperProcess({ spawn = nodeSpawn, timeoutMs = 15_000, max
       });
       child.stderr.on('data', chunk => {
         stderrBytes += chunk.length;
-        if (stderrBytes > 8192) cancel('helper_stderr_limit');
+        if (stderrBytes > maxStderrBytes) cancel('helper_stderr_limit');
       });
       child.stdin.on('error', () => {
         if (!pendingError) cancel('helper_stdin_failed');

@@ -141,10 +141,17 @@
     const guidancePending = [...pending].some(type => type.startsWith('guidance.'));
     const bridgeAvailable = typeof bridge?.command === 'function';
     const voice = record(runtime.voice);
+    // 无截屏指引：默认模式；只在本人当次同意"把控件文本发给模型"后才会外发，不需要屏幕共享。
+    const guidance = record(observation.guidance);
+    const screenshotFree = guidance.screenshotFree === true;
+    const guidanceUsable = screenshotFree && bridgeAvailable;
     return {
       observation, task, analysis, privacyPaused, cleanupFailed, safetyUnclassified, captureConflict, privacyConflict, blocked, safeObserving, activeTask, taskOutdated, observationPending,
+      guidance, screenshotFree, textConsent: guidance.textConsent === true,
       canAsk: ready && typeof bridge?.ask === 'function' && !privacyPaused && !blocked && !taskBusy && !observationPending && !pending.has('ask') && !pending.has('dictate') && !pending.has('voice-find')
-        && (activeSection === 'guidance' ? safeObserving && (observation.cloudConsent === true || (observation.cloudConsent === false && bridgeAvailable)) : safeObserving || (['off', 'stopped'].includes(observation.state) && observation.captureActive === false)),
+        && (activeSection === 'guidance'
+          ? (guidanceUsable || (safeObserving && (observation.cloudConsent === true || (observation.cloudConsent === false && bridgeAvailable))))
+          : safeObserving || (['off', 'stopped'].includes(observation.state) && observation.captureActive === false)),
       canVoiceFind: ready && safeObserving && (observation.cloudConsent === true || (observation.cloudConsent === false && bridgeAvailable)) && !blocked && !taskBusy && !observationPending && !guidancePending
         && !pending.has('ask') && !pending.has('dictate') && !pending.has('voice-find') && voice.active !== true
         && typeof bridge?.ask === 'function' && typeof bridge?.dictate === 'function' && typeof bridge?.cancelDictation === 'function',
@@ -153,9 +160,9 @@
         || pending.has('ask') || (task.kind === 'text' && taskBusy)
         || record(runtime.wake).state === 'enabled' || record(runtime.wake).microphoneActive === true || record(runtime.voice).active === true || record(runtime.voice).microphoneActive === true || pending.has('voice.open') || pending.has('wake.enable') || pending.has('dictate') || observationPending),
       canResume: ready && privacyPaused && !cleanupFailed && !captureConflict && !privacyConflict && observation.captureActive === false && generationKnown && !observationPending,
-      canVerify: safeObserving && !blocked && !taskOutdated && ['awaiting_action', 'awaiting_verify', 'needs_help'].includes(task.state)
+      canVerify: (screenshotFree ? guidanceUsable && !blocked : safeObserving && !blocked) && !taskOutdated && ['awaiting_action', 'awaiting_verify', 'needs_help'].includes(task.state)
         && (Boolean(text(task.instruction)) || task.state === 'awaiting_verify') && !guidancePending && !observationPending && !pending.has('ask'),
-      canAutoStepRequest: ready && safeObserving && !blocked && !taskBusy && !observationPending && !guidancePending
+      canAutoStepRequest: ready && (screenshotFree ? guidanceUsable && !blocked : safeObserving && !blocked) && !taskBusy && !observationPending && !guidancePending
         && !pending.has('ask') && !pending.has('dictate') && bridgeAvailable && task.autoStep !== true,
       canRepeat: ready && !privacyPaused && !blocked && !taskOutdated && ['awaiting_action', 'needs_help', 'completed'].includes(task.state) && Boolean(text(task.instruction)) && !guidancePending && !observationPending && !pending.has('ask'),
       canFinish: ready && activeTask && !pending.has('guidance.finish'),
@@ -493,7 +500,13 @@
                     : state.task.state === 'needs_help' ? `本次分析没有生成箭头。${text(task.explanation, text(state.analysis.message, '请重新描述目标，或先亲手打开需要操作的软件。'))}${task.awaitingReply === true ? '可在下方“回答暖暖的追问”继续回答，或点击“重新识别当前画面”。' : ''}`
                   : '点击并确认后说出目标；音频仅在本机识别，文字与必要的脱敏画面只为本次查找发送。';
     const observationScope = state.safeObserving && source ? `观察范围：${source}。` : '';
-    element('guidance-status').textContent = voiceFindStatus + (observationScope ? `\n${observationScope}` : '');
+    const guidanceCounts = record(state.guidance?.counts);
+    const guidanceModeLine = state.screenshotFree
+      ? `当前模式：${text(state.guidance?.modeLabel, '无截屏（默认）')}。已读取 ${Number.isSafeInteger(guidanceCounts.count) ? guidanceCounts.count : 0} 个控件（前台上限 ${Number.isSafeInteger(guidanceCounts.limit) ? guidanceCounts.limit : 0}${guidanceCounts.truncated === true ? '，清单已截断' : '，未截断'}）。${state.textConsent ? '文本发送同意：已同意（可在菜单里撤回）。' : '文本发送同意：未同意；点击查找时由本人在弹窗中确认，未同意前不会外发任何控件文本。'}`
+      : '';
+    element('guidance-status').textContent = state.screenshotFree
+      ? `${guidanceModeLine}${state.guidance?.reasonMessage ? `\n${text(state.guidance.reasonMessage)}` : ''}${state.guidance?.suggestSingleFrame === true ? '\n当前软件没有可读控件树：这次需要你允许截一帧（下方“① 选择屏幕与授权”走原来的单帧/持续观察确认流程）。' : ''}`
+      : voiceFindStatus + (observationScope ? `\n${observationScope}` : '');
     element('guidance-analysis').hidden = !state.analysis.message || ['idle', 'ready', 'analyzing'].includes(state.analysis.state);
     element('guidance-analysis').textContent = text(state.analysis.message);
     const canReselectObservation = state.safeObserving && observation.cloudConsent === false && !state.blocked && !state.privacyPaused && !state.observationPending
@@ -942,10 +955,36 @@
       taskGeneration: context.taskGeneration, observationGeneration: context.observationGeneration }), rescanGuidance, true);
   }
 
+  // 无截屏指引的文本发送同意：未同意时一个字都不外发，由原生确认框取得本人同意（可随时撤回）。
+  async function ensureGuidanceTextConsent() {
+    if (flags().textConsent) return true;
+    if (typeof bridge?.command !== 'function') {
+      dictationNotice = '当前客户端不支持无截屏指引的文本发送确认，本次没有外发任何内容。';
+      return false;
+    }
+    dictationNotice = '无截屏指引只把前台窗口的控件名称、类型与位置等文本发给已配置模型，不发送任何画面；请在弹窗中由本人确认。';
+    try { await bridge.command({ type: 'guidance.authorize-text' }); }
+    catch { dictationNotice = '文本发送确认未完成，本次没有外发任何内容。'; return false; }
+    await refreshSnapshot();
+    if (!flags().textConsent) {
+      dictationNotice = '未同意发送控件文本：本次没有读取控件清单，也没有外发任何内容。';
+      return false;
+    }
+    return true;
+  }
+
   function startAutoStep() {
     const current = flags();
     if (!current.canAutoStepRequest) return;
     const goal = element('question').value.trim();
+    // 默认无截屏：不需要屏幕共享与画面授权，只读前台窗口控件清单；但仍须本人同意发送控件文本。
+    if (current.screenshotFree) {
+      void perform('guidance.auto-start', '自动步进未确认', async () => {
+        if (!await ensureGuidanceTextConsent()) return null;
+        return bridge.command({ type: 'guidance.auto-start', ...(goal ? { goal } : {}) });
+      }, startAutoStep, true);
+      return;
+    }
     // 自动步进必须上传脱敏帧；没有画面分析授权时先由本人确认这一次授权，再立即开始。
     const operation = async () => {
       if (flags().observation.cloudConsent !== true) {
@@ -972,6 +1011,14 @@
       return;
     }
     void perform('ask', '问题未确认', async () => {
+      if (flags().screenshotFree && activeSection === 'guidance') {
+        // 无截屏指引：先取得本人对"发送控件文本"的同意，再读前台窗口控件清单；不开启屏幕共享。
+        if (!await ensureGuidanceTextConsent()) return null;
+        const reply = await bridge.ask(question, undefined, true);
+        checkReply(reply);
+        if (!disposed) dictationNotice = '已按无截屏模式提交：本机读前台窗口的控件清单，模型只选序号，箭头坐标由本机给出。';
+        return reply;
+      }
       if (guidanceGeneration !== undefined) {
         if (!await ensureGuidanceCloudConsent(guidanceGeneration)) return;
         if (disposed || activeSection !== 'guidance' || draftVersion !== version || element('question').value !== draft) {

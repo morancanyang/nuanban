@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Monitor, Square } from 'lucide-react';
-import { checkedObservationStatus, localObservationBridge, type LocalObservationStatus } from './local-observation';
+import { checkedGuidanceStatus, checkedObservationStatus, guidanceSummary, localObservationBridge, type LocalObservationStatus } from './local-observation';
 
 const descriptions: Record<LocalObservationStatus['state'], string> = {
   off: '尚未开启；不会因打开此窗口而采集屏幕。',
@@ -67,9 +67,23 @@ export function ScreenObservationPanel({ onPractice }: { onPractice: () => void 
 
   const canStart = !!status && ['off', 'stopped'].includes(status.state);
   const canResume = status?.state === 'privacy_paused' && !status.captureActive;
+  const guidance = status ? (status.guidance ?? checkedGuidanceStatus(undefined)) : null;
+  const guidanceLines = guidance ? guidanceSummary(guidance) : null;
   return <div className="stack">
-    <p>观察真实电脑屏幕，在独立桌宠中教学；文字对话不会冒充真实屏幕分析。</p>
-    <section className="confirmation-box" aria-label="真实屏幕观察状态" aria-live="polite">
+    <p>桌宠默认使用<strong>无截屏指引</strong>：本机读前台窗口的控件清单，模型只选第几号控件，箭头坐标由本机给出。截帧只在本人当次允许时使用，不会因为读不到控件树就自动截屏。</p>
+    {guidanceLines && <section className="confirmation-box" aria-label="当前指引模式" aria-live="polite">
+      <strong>{guidanceLines.mode}</strong>
+      <p>{guidanceLines.reason}</p>
+      <p>{guidanceLines.controls}</p>
+      <p>{guidanceLines.consent}</p>
+      {guidance?.review && <p>上次核验：{guidance.review.verdict === 'advanced' ? '界面已变化，给出下一步' : guidance.review.verdict === 'unchanged' ? '界面没有变化，可能没有点到' : '本机无法判断，不猜结果'}（{guidance.review.detail}）</p>}
+      {guidance?.suggestSingleFrame && <p role="status">当前软件没有可读控件树。需要截帧时请由你本人在桌宠里选择“允许截一帧”，这里不会自动开启屏幕采集。</p>}
+      {!guidance?.available && <p role="status">本机没有返回指引模式信息；不会因此改用截屏。</p>}
+    </section>}
+    <details>
+      <summary>改用截帧方式（仅在本人当次允许时；会采集屏幕）</summary>
+      <p>观察真实电脑屏幕，在独立桌宠中教学；文字对话不会冒充真实屏幕分析。</p>
+      <section className="confirmation-box" aria-label="真实屏幕观察状态" aria-live="polite">
       <strong>{status?.state === 'observing' && status.captureActive ? '真实屏幕正在本地观察' : '本机观察状态'}</strong>
       <p>{status?.state === 'observing' && status.captureActive ? '所选屏幕正在本机采集并逐帧检查；不会自动点击或输入。'
         : status?.state === 'privacy_paused' && status.captureActive ? '隐私保护已关闭发送，正在等待本地采集退出；尚不能确认停止。'
@@ -85,5 +99,6 @@ export function ScreenObservationPanel({ onPractice }: { onPractice: () => void 
       <button type="button" className="button plain" disabled={busy} onClick={() => void act('showPet')}>打开独立桌宠 <ArrowRight size={18} /></button>
     </div>
     <p className="small-note">关闭这个说明窗口不等于停止观察。可在此点击停止，或随时右键桌宠停止全部采集。</p>
+    </details>
   </div>;
 }

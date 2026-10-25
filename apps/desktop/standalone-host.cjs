@@ -24,6 +24,12 @@ const { loadXingyunCredentials } = require('./xingyun-credentials.cjs');
 const { createXingyunAvatarService, registerXingyunAvatarBridge, createAvatarTraceLog, registerAvatarTraceBridge, defaultPet } = require('./xingyun-avatar.cjs');
 const { createLiliHost } = require('./lili-host.cjs');
 const { createSingleFrameGuidance } = require('./single-frame-guidance.cjs');
+const { createUiaInventoryReader } = require('./observation/uia-inventory.cjs');
+const { createUiaGuidanceSession, DEFAULT_GUIDANCE_MODE, GUIDANCE_MODES, MODE_LABELS, reasonInfo } = require('./observation/uia-guidance.cjs');
+const { physicalToDipRect } = require('./observation/uia-coordinates.cjs');
+const { createControlChoiceAnalysisClient } = require('./provider-analysis.cjs');
+const { isRestrictedText } = require('./observation-policy.cjs');
+const { traceGuidance } = require('./runtime-coordinator.cjs');
 const { PRODUCT_ICON_PATH } = require('./brand.cjs');
 
 function createStandaloneHost(options) {
@@ -123,6 +129,48 @@ function createStandaloneHost(options) {
   const singleFrame = createSingleFrameGuidance({ source: singleFrameSource, provider: options.questioner, nativeImage,
     selectSource: selectSingleFrameSource, onTarget: showGuide, clearTarget: clearGuide,
     onState: state => { if (live(petWindow)) petWindow.webContents.send('nuanban:pet:single-frame:state', state); } });
+  // 默认"无截屏"：只读前台窗口的 UIA 控件清单（名称/类型/矩形，不带像素），模型只选序号，坐标由本机给出。
+  // 单帧截屏与持续观察仍保留，但只在本人当次明确允许时使用（两者原有确认链路不变）。
+  const guidanceMode = options.guidanceMode ?? DEFAULT_GUIDANCE_MODE;
+  if (!Object.values(GUIDANCE_MODES).includes(guidanceMode)) throw new Error('指引模式无效');
+  function ownProcessIds() {
+    const ids = [process.pid];
+    try {
+      for (const window of BrowserWindow.getAllWindows()) {
+        try {
+          const processId = window.webContents?.getOSProcessId?.();
+          if (Number.isSafeInteger(processId) && processId > 0) ids.push(processId);
+        } catch {}
+      }
+    } catch {}
+    return [...new Set(ids)];
+  }
+  const guidanceSession = options.createUiaGuidanceSession ?? createUiaGuidanceSession({
+    inventory: options.uiaInventory ?? createUiaInventoryReader({ spawn: options.spawnProcess, platform: process.platform, excludedProcessIds: ownProcessIds }),
+    chooser: options.controlChooser ?? createControlChoiceAnalysisClient({ provider: options.questioner, relaxedSafety }),
+    isRestrictedText, hasConsent: () => textConsent, trace: traceGuidance,
+  });
+  // 无截屏指引的"文本发送同意"：只覆盖"把前台窗口的控件名称/类型/位置文本发给已配置模型"，
+  // 不覆盖屏幕共享、不覆盖麦克风。默认未同意 → 一个字都不外发；本人可随时撤回。
+  let textConsent = false;
+  async function authorizeGuidanceText() {
+    if (textConsent) return { textConsent: true };
+    const answer = await showDialog({ type: 'warning', title: '允许无截屏指引发送控件文本',
+      message: '无截屏指引会把前台窗口的控件名称、类型与位置等**文本**发给已配置的模型，用来判断"你要找的是第几号控件"。',
+      detail: '不会发送任何画面、截图、音频或文件内容；控件名称仍会先经过本机的隐私词过滤，命中即隐藏。箭头坐标由本机 UIA 给出，模型不提供坐标。\n你可以随时在桌宠的指引页或右键菜单里撤回这个同意。',
+      buttons: ['同意（本次运行内有效）', '取消'], defaultId: 1, cancelId: 1, noLink: true });
+    if (answer?.response !== 0) return { textConsent: false };
+    textConsent = true;
+    traceGuidance('uia_text_consent', { granted: true });
+    publish();
+    return { textConsent: true };
+  }
+  function revokeGuidanceText() {
+    textConsent = false;
+    traceGuidance('uia_text_consent', { granted: false });
+    publish();
+    return { textConsent: false };
+  }
   const wake = (options.createWakeSource ?? createWindowsLocalWake)({
     onState: () => { if (runtime) publish(); },
     onWake: event => {
@@ -134,7 +182,9 @@ function createStandaloneHost(options) {
     },
     onQuestion: text => {
       const current = wake.snapshot();
-      if (!closing && current.enabled && current.microphoneActive && typeof text === 'string') runAction(() => runtime.ask(text));
+      if (!closing && current.enabled && current.microphoneActive && typeof text === 'string') {
+        runAction(() => (guidanceMode === GUIDANCE_MODES.screenshotFree ? guidanceAsk(text) : runtime.ask(text)));
+      }
     },
   });
 
@@ -153,7 +203,8 @@ function createStandaloneHost(options) {
 
   function snapshot() {
     const state = runtime.snapshot();
-    state.observation = { ...state.observation, relaxedSafety: relaxedSafety(), maxPermissions: maxPermissions() };
+    state.observation = { ...state.observation, relaxedSafety: relaxedSafety(), maxPermissions: maxPermissions(),
+      guidance: guidanceState() };
     state.pet = { collapsed, ballSize, idleHideMs, hidden: ballEdge !== null, edge: ballEdge };
     state.voice = voiceHost?.snapshot() ?? { state: 'off', active: false, microphoneActive: false, configured: false, message: '面对面语音未开启。' };
     state.voice = { ...state.voice, presentation: 'pet', ...(faceVoiceVisible ? { bubble: { ...voiceBubble } } : {}) };
@@ -259,6 +310,70 @@ function createStandaloneHost(options) {
       guideWindow.webContents.send('nuanban:guide:state', { visible: false });
       guideWindow.hide();
     }
+  }
+
+  // 默认无截屏：只有当本人当次已经开启屏幕共享（观察中 + 采集活动 + 云分析授权）时，
+  // 才走原来的截帧/持续观察路径；否则指引一律走"读前台窗口控件清单"的无截屏路径。
+  function screenshotFreeGuidance() {
+    if (guidanceMode !== GUIDANCE_MODES.screenshotFree) return false;
+    const observation = runtime.snapshot().observation;
+    return !(observation.state === 'observing' && observation.captureActive === true && observation.cloudConsent === true);
+  }
+
+  // 界面（管理窗指引页 / 桌宠）要看到的是"当前模式 + 这次为什么没给箭头 + 读到几个控件"，
+  // 全部是文本元数据：没有控件名原文、没有像素、没有帧。
+  function guidanceState() {
+    const base = typeof guidanceSession?.snapshot === 'function' ? guidanceSession.snapshot() : {};
+    const mode = Object.hasOwn(MODE_LABELS, guidanceMode) ? guidanceMode : DEFAULT_GUIDANCE_MODE;
+    return Object.freeze({
+      mode,
+      modeLabel: MODE_LABELS[mode],
+      screenshotFree: mode === GUIDANCE_MODES.screenshotFree,
+      active: base.active === true,
+      reasonCode: typeof base.reasonCode === 'string' ? base.reasonCode : null,
+      reasonMessage: typeof base.reasonMessage === 'string' ? base.reasonMessage : null,
+      severity: base.severity === 'blocked' ? 'blocked' : 'info',
+      suggestSingleFrame: base.suggestSingleFrame === true,
+      textConsent: base.textConsent === true,
+      counts: { count: Number.isSafeInteger(base.counts?.count) ? base.counts.count : 0,
+        limit: Number.isSafeInteger(base.counts?.limit) ? base.counts.limit : 0, truncated: base.counts?.truncated === true },
+      review: base.review && typeof base.review.verdict === 'string' ? { verdict: base.review.verdict, code: String(base.review.code ?? ''), detail: String(base.review.detail ?? '') } : null,
+      available: true,
+    });
+  }
+
+  function guidanceTarget(step) {
+    if (step?.status !== 'ready' || !step.target) return null;
+    const rect = physicalToDipRect(step.target.rect, { screen });
+    if (!rect) return { blocked: 'coordinates_unverified' };
+    return { target: { visible: true, rect, label: step.target.name, instruction: step.instruction ?? '', presentation: 'confirmed', expiresAt: Date.now() + 15000 } };
+  }
+
+  async function guidanceAsk(text) {
+    const result = await guidanceSession.ask(text);
+    const mapped = guidanceTarget(result);
+    let final = result;
+    if (mapped?.target) showGuide(mapped.target);
+    else {
+      clearGuide();
+      if (result?.status === 'ready') {
+        traceGuidance('uia_blocked', { code: 'coordinates_unverified' });
+        final = Object.freeze({ ...result, status: 'blocked', ...reasonInfo('coordinates_unverified') });
+      }
+    }
+    publish();
+    return { ...final, snapshot: guidanceState() };
+  }
+
+  async function guidanceVerify() {
+    const result = await guidanceSession.review();
+    const next = guidanceTarget(result?.next);
+    const current = guidanceTarget(result);
+    if (next?.target) showGuide(next.target);
+    else if (current?.target && result.status === 'ready') showGuide(current.target);
+    else clearGuide();
+    publish();
+    return { ...result, snapshot: guidanceState() };
   }
 
   function intersects(first, second) {
@@ -955,6 +1070,8 @@ function createStandaloneHost(options) {
       { label: maxPermissions() ? '最大权限：已开启（不遮盖、不拦敏感词）' : '最大权限：仅本机自用（关闭遮盖与敏感词拦截）', type: 'checkbox', checked: maxPermissions(),
         enabled: typeof privacySettings?.write === 'function',
         click: () => runAction(() => setMaxPermissions(!maxPermissions())) },
+      { label: textConsent ? '无截屏指引：已同意发送控件文本（可撤回）' : '无截屏指引：未同意发送控件文本', type: 'checkbox', checked: textConsent,
+        click: () => runAction(() => (textConsent ? revokeGuidanceText() : authorizeGuidanceText())) },
       { type: 'separator' }, { label: '停止观察、语音和发送', click: () => runAction(() => stop('user')) },
       { label: '关闭桌宠（停止所有采集）', click: () => runAction(closePetWindow) },
     ]);
@@ -1071,6 +1188,7 @@ function createStandaloneHost(options) {
     const fields = { 'observation.authorize-cloud': ['type', 'observationGeneration'], 'panel.set-expanded': ['type', 'expanded'], 'learning.set-mastery': ['type', 'noteId', 'mastered'],
       'guidance.reply': ['type', 'text', 'guideId', 'taskGeneration', 'observationGeneration'],
       'guidance.rescan': ['type', 'guideId', 'taskGeneration', 'observationGeneration'],
+      'guidance.authorize-text': ['type'], 'guidance.revoke-text': ['type'],
       'learning.review.confirm': ['type', 'proposalId'], 'learning.review.decline': ['type', 'proposalId'] };
     const allowed = fields[payload.type] ?? ['type'];
     if (Object.keys(payload).some(key => !allowed.includes(key))) throw new Error('桌宠指令包含不允许的参数');
@@ -1084,8 +1202,16 @@ function createStandaloneHost(options) {
       }
       case 'observation.resume': return chooseObservation(true);
       case 'observation.stop': await stop(); break;
-      case 'guidance.auto-start': await runtime.startAutoStep(typeof payload.goal === 'string' ? payload.goal : undefined); break;
-      case 'guidance.verify': await runtime.verify(); break;
+      case 'guidance.auto-start': {
+        // 默认无截屏：不需要先开屏幕共享，直接读前台窗口控件清单做选择题。
+        if (screenshotFreeGuidance()) { await guidanceAsk('帮助我完成当前屏幕上要做的下一步'); break; }
+        await runtime.startAutoStep(); break;
+      }
+      case 'guidance.verify':
+        if (screenshotFreeGuidance()) { await guidanceVerify(); break; }
+        await runtime.verify(); break;
+      case 'guidance.authorize-text': await authorizeGuidanceText(); break;
+      case 'guidance.revoke-text': revokeGuidanceText(); break;
       case 'guidance.finish': await runtime.finishTeaching(); break;
       case 'guidance.repeat': runtime.repeat(); break;
       case 'guidance.reply': await runtime.replyToClarification(payload); break;
@@ -1234,8 +1360,14 @@ function createStandaloneHost(options) {
     for (const event of ['blur', 'hide', 'closed']) listen(petWindow, event, clearPetDrag);
     listen(petWindow.webContents, 'render-process-gone', clearPetDrag);
     handle('nuanban:pet:ask', async input => {
-      if (!input || typeof input.text !== 'string' || !Object.keys(input).every(key => ['text', 'observationGeneration'].includes(key))
+      if (!input || typeof input.text !== 'string' || !Object.keys(input).every(key => ['text', 'observationGeneration', 'screenshotFree'].includes(key))
+        || (Object.hasOwn(input, 'screenshotFree') && input.screenshotFree !== true)
         || (Object.hasOwn(input, 'observationGeneration') && (!Number.isSafeInteger(input.observationGeneration) || input.observationGeneration < 1))) throw new Error('提问参数无效');
+      // 默认无截屏模式：界面显式要求走无截屏路径、且本人没有当次开启屏幕共享时，
+      // 只读前台窗口 UIA 控件清单并让模型选序号；不开启屏幕共享、不截帧、不发送画面。
+      if (input.screenshotFree === true && screenshotFreeGuidance()) {
+        return { ok: true, snapshot: snapshot(), guidance: await guidanceAsk(input.text) };
+      }
       await runtime.ask(input.text, input.observationGeneration);
       return { ok: true, snapshot: snapshot() };
     });

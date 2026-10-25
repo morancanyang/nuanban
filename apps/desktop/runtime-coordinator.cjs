@@ -1257,4 +1257,5 @@ function createDesktopRuntime(options) {
     toggleCaptions, dispose, whenIdle };
 }
 
-module.exports = { createDesktopRuntime };
+// 无截屏指引（UIA 控件清单）与帧分析共用同一份诊断 trace：只记事件、计数、原因码，不记控件名或像素。
+module.exports = { createDesktopRuntime, traceGuidance };
