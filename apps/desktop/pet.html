@@ -234,7 +234,7 @@
           <p class="fine-print">本人授权后持续实时共享，不因文字内容或未知页面暂停；可随时点击“停止共享”。本地仍遮盖文字与人脸，云分析须单独授权且仅按需发送。</p>
         </section>
         <section id="lesson-card" class="lesson-card" aria-labelledby="guidance-title" tabindex="-1" hidden>
-          <p id="guidance-status" class="guidance-feedback muted" role="status">请先选择屏幕并允许按需脱敏分析。</p>
+          <p id="guidance-status" class="guidance-feedback muted" role="status">默认无截屏模式：在下方输入问题并点击“直接查找并指引”即可，无需选择屏幕或开启共享；需要单帧图片或持续观察时再点“① 选择屏幕与授权”。</p>
           <h2 id="guidance-title">光标指引 · 真实软件教学</h2>
           <section id="single-frame-card" class="single-frame-card" aria-labelledby="single-frame-title">
             <h3 id="single-frame-title">单帧图片指引 · 试验入口</h3>
@@ -248,10 +248,13 @@
             </div>
             <p id="single-frame-status" class="fine-print" role="status" aria-live="polite">先截帧，再检查预览；不会自动上传。</p>
           </section>
-          <ol class="guidance-workflow" aria-label="屏幕查找流程"><li>选择屏幕<br><small>本人开启观察与授权</small></li><li>说出目标<br><small>例如“帮我找到设置”</small></li><li>看箭头操作<br><small>由你亲手点击</small></li></ol>
+          <ol id="guidance-workflow" class="guidance-workflow" aria-label="屏幕查找流程"><li>选择屏幕<br><small>本人开启观察与授权</small></li><li>说出目标<br><small>例如“帮我找到设置”</small></li><li>看箭头操作<br><small>由你亲手点击</small></li></ol>
+          <ol id="guidance-workflow-screenshot-free" class="guidance-workflow" aria-label="无截屏查找流程" hidden><li>输入或说出目标<br><small>例如“帮我找到设置”</small></li><li>本机读控件清单<br><small>模型只选序号，坐标由本机给出</small></li><li>看箭头操作<br><small>由你亲手点击</small></li></ol>
           <p id="guidance-analysis" class="fine-print" role="status" hidden></p>
           <p id="unredacted-warning" class="fine-print" role="status" hidden>已开启“关闭本机遮盖”：上传的是原始画面，本机不再遮盖文字与人脸；可在桌宠右键菜单改回。</p>
-          <div class="button-row"><button id="guidance-start-observation" type="button" disabled>① 选择屏幕与授权</button><button id="screen-voice-find" class="primary-button" type="button" disabled>② 语音查找并指引</button></div>
+          <div class="button-row"><button id="guidance-text-find" class="primary-button" type="button" disabled>直接查找并指引（无需截屏）</button><button id="screen-voice-find" class="primary-button" type="button" disabled>② 语音查找并指引</button></div>
+          <div class="button-row"><button id="guidance-start-observation" type="button" disabled>① 选择屏幕与授权</button></div>
+          <p id="guidance-screenshot-only-note" class="fine-print" role="status" hidden>上方“① 选择屏幕与授权”只用于需要单帧图片或持续观察时；无截屏模式不需要选择屏幕或开启共享。</p>
           <div class="button-row"><button id="auto-step-start" class="primary-button" type="button" aria-describedby="auto-step-hint" disabled>③ 自动步进指引（共享后自动截帧）</button></div>
           <p id="auto-step-hint" class="fine-print" role="status" aria-live="polite" hidden></p>
           <p id="auto-step-progress" class="fine-print" role="status" aria-live="polite" hidden></p>

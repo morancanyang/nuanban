@@ -152,9 +152,18 @@
         && (activeSection === 'guidance'
           ? (guidanceUsable || (safeObserving && (observation.cloudConsent === true || (observation.cloudConsent === false && bridgeAvailable))))
           : safeObserving || (['off', 'stopped'].includes(observation.state) && observation.captureActive === false)),
-      canVoiceFind: ready && safeObserving && (observation.cloudConsent === true || (observation.cloudConsent === false && bridgeAvailable)) && !blocked && !taskBusy && !observationPending && !guidancePending
+      // 无截屏模式（默认）下，语音查找不再要求观察/画面授权：只需本人同意"把控件文本发给模型"。
+      // 单帧/持续观察模式的旧门槛（safeObserving + 画面授权）保持不变。
+      canVoiceFind: ready && !blocked && !taskBusy && !observationPending && !guidancePending
         && !pending.has('ask') && !pending.has('dictate') && !pending.has('voice-find') && voice.active !== true
-        && typeof bridge?.ask === 'function' && typeof bridge?.dictate === 'function' && typeof bridge?.cancelDictation === 'function',
+        && typeof bridge?.ask === 'function' && typeof bridge?.dictate === 'function' && typeof bridge?.cancelDictation === 'function'
+        && (screenshotFree ? guidanceUsable
+          : safeObserving && (observation.cloudConsent === true || (observation.cloudConsent === false && bridgeAvailable))),
+      // 无截屏模式的显式"直接查找并指引"入口：用输入框文字走无截屏查找，不需要选屏或开启共享。
+      // 空草稿时保持可用（点击后提示先输入），避免再次出现"按钮是灰的、以为功能不存在"。
+      canTextFind: ready && screenshotFree && guidanceUsable && activeSection === 'guidance' && !privacyPaused && !blocked && !taskBusy
+        && !observationPending && !guidancePending && !pending.has('ask') && !pending.has('dictate') && !pending.has('voice-find')
+        && typeof bridge?.ask === 'function',
       canStart: ready && !blocked && ['off', 'stopped'].includes(observation.state) && observation.captureActive === false && !observationPending,
       canStop: bridgeAvailable && !pending.has('observation.stop') && (!['off', 'stopped'].includes(observation.state) || observation.captureActive !== false
         || pending.has('ask') || (task.kind === 'text' && taskBusy)
@@ -502,7 +511,7 @@
     const observationScope = state.safeObserving && source ? `观察范围：${source}。` : '';
     const guidanceCounts = record(state.guidance?.counts);
     const guidanceModeLine = state.screenshotFree
-      ? `当前模式：${text(state.guidance?.modeLabel, '无截屏（默认）')}。已读取 ${Number.isSafeInteger(guidanceCounts.count) ? guidanceCounts.count : 0} 个控件（前台上限 ${Number.isSafeInteger(guidanceCounts.limit) ? guidanceCounts.limit : 0}${guidanceCounts.truncated === true ? '，清单已截断' : '，未截断'}）。${state.textConsent ? '文本发送同意：已同意（可在菜单里撤回）。' : '文本发送同意：未同意；点击查找时由本人在弹窗中确认，未同意前不会外发任何控件文本。'}`
+      ? `当前模式：${text(state.guidance?.modeLabel, '无截屏（默认）')}。在下方输入问题并点击“直接查找并指引”或“查找并指引”即可，无需选择屏幕或开启共享。已读取 ${Number.isSafeInteger(guidanceCounts.count) ? guidanceCounts.count : 0} 个控件（前台上限 ${Number.isSafeInteger(guidanceCounts.limit) ? guidanceCounts.limit : 0}${guidanceCounts.truncated === true ? '，清单已截断' : '，未截断'}）。${state.textConsent ? '文本发送同意：已同意（可在菜单里撤回）。' : '文本发送同意：未同意；点击查找时由本人在弹窗中确认，未同意前不会外发任何控件文本。'}`
       : '';
     element('guidance-status').textContent = state.screenshotFree
       ? `${guidanceModeLine}${state.guidance?.reasonMessage ? `\n${text(state.guidance.reasonMessage)}` : ''}${state.guidance?.suggestSingleFrame === true ? '\n当前软件没有可读控件树：这次需要你允许截一帧（下方“① 选择屏幕与授权”走原来的单帧/持续观察确认流程）。' : ''}`
@@ -513,9 +522,23 @@
       && !['analyzing', 'verifying'].includes(task.state) && !pending.has('dictate') && !pending.has('ask');
     element('guidance-start-observation').disabled = !state.canStart && !canReselectObservation && !state.canResume;
     element('guidance-start-observation').textContent = pending.has('observation.start') || pending.has('observation.reselect') || pending.has('observation.resume') ? '正在等待选择屏幕…' : state.canResume ? '① 本人继续共享' : canReselectObservation
-      ? '① 重新选择观察屏幕' : state.safeObserving ? '① 屏幕已就绪' : '① 选择屏幕与授权';
+      ? '① 重新选择观察屏幕' : state.safeObserving ? '① 屏幕已就绪' : state.screenshotFree ? '① 选择屏幕与授权（仅在需要单帧或持续观察时使用）' : '① 选择屏幕与授权';
+    // 无截屏（默认）下这两个按钮不需要画面授权；语音与"直接查找"始终可用（除本人未同意文本发送时由弹窗确认）。
+    const textFindButton = element('guidance-text-find');
+    if (textFindButton) {
+      textFindButton.disabled = !state.canTextFind;
+      textFindButton.textContent = pending.has('ask') ? '正在查找…' : '直接查找并指引（无需截屏）';
+    }
+    // 流程提示按模式区分：无截屏模式隐藏"选择屏幕"那套步骤，改用控件清单步骤。
+    element('guidance-workflow').hidden = state.screenshotFree;
+    element('guidance-workflow-screenshot-free').hidden = !state.screenshotFree;
+    const screenshotOnlyNote = element('guidance-screenshot-only-note');
+    if (screenshotOnlyNote) {
+      screenshotOnlyNote.hidden = !state.screenshotFree;
+      screenshotOnlyNote.textContent = '上方“① 选择屏幕与授权”只用于需要单帧图片或持续观察时；无截屏模式不需要选择屏幕或开启共享。';
+    }
     element('screen-voice-find').disabled = !state.canVoiceFind;
-    element('screen-voice-find').textContent = cloudAuthorizing ? '正在等待分析授权…' : pending.has('dictate') && voiceFindMode ? '正在本机听写…' : state.analysis.state === 'capture_retry' ? '正在刷新本地画面…' : state.task.kind !== 'text' && state.task.state === 'analyzing' ? '正在分析当前画面…' : clarificationContext() ? '② 语音回答并继续' : '② 语音查找并指引';
+    element('screen-voice-find').textContent = cloudAuthorizing ? '正在等待分析授权…' : pending.has('dictate') && voiceFindMode ? '正在本机听写…' : state.analysis.state === 'capture_retry' ? '正在刷新本地画面…' : state.task.kind !== 'text' && state.task.state === 'analyzing' ? '正在分析当前画面…' : clarificationContext() ? '② 语音回答并继续' : state.screenshotFree ? '② 语音查找并指引（无需选择屏幕）' : '② 语音查找并指引';
     for (const button of document.querySelectorAll('[data-tool]')) button.disabled = !ready || pending.has('open-tool');
 
     element('task-status').textContent = ready && task.kind === 'text' ? task.state === 'analyzing' ? '正在请求文字模型' : task.result === 'answered' ? '文字回答已返回（未核验屏幕）' : task.result === 'failed' ? '文字回答未完成' : '文字提问已结束' : (ready && Object.hasOwn(taskLabels, task.state) ? taskLabels[task.state] : '') || '等待教学状态';
@@ -536,16 +559,19 @@
     element('finish-lesson').textContent = pending.has('guidance.finish') ? '正在请求结束…' : '结束教学';
     element('auto-step-start').disabled = !state.canAutoStepRequest;
     element('auto-step-start').textContent = pending.has('guidance.auto-start') ? '正在开启自动步进…'
-      : task.autoStep === true ? `自动步进进行中 · 第 ${Number.isSafeInteger(task.stepIndex) && task.stepIndex > 0 ? task.stepIndex : 1} 步` : '③ 自动步进指引（共享后自动截帧）';
+      : task.autoStep === true ? `自动步进进行中 · 第 ${Number.isSafeInteger(task.stepIndex) && task.stepIndex > 0 ? task.stepIndex : 1} 步`
+        : state.screenshotFree ? '③ 自动步进指引（无需截屏，每步重读控件清单）' : '③ 自动步进指引（共享后自动截帧）';
     const autoStepHint = element('auto-step-hint');
     const autoStepReason = task.autoStep === true ? ''
       : !state.canAutoStepRequest ? !ready ? '正在确认运行核心，稍后再试。'
-        : !state.safeObserving ? '需要先点“① 选择屏幕与授权”开启并保持屏幕共享。'
-          : state.blocked ? '当前安全状态不允许自动步进，请先按提示处理。'
-            : state.taskBusy ? '正在分析或核验，请稍候。'
-              : '正在处理上一项请求，请稍候。'
-        : state.observation.cloudConsent !== true ? '点击后会先请你确认“按需分析脱敏画面”；同意后立即开始，不同意则保持仅本地观察。'
-          : '';
+        : state.blocked ? '当前安全状态不允许自动步进，请先按提示处理。'
+          : state.taskBusy ? '正在分析或核验，请稍候。'
+            : state.screenshotFree ? '正在处理上一项请求，请稍候。'
+              : !state.safeObserving ? '需要先点“① 选择屏幕与授权”开启并保持屏幕共享。'
+                : '正在处理上一项请求，请稍候。'
+        : state.screenshotFree ? '点击后会先请你确认“把前台窗口的控件名称发给模型”；同意后立即开始，不同意则不会外发任何控件文本。'
+          : state.observation.cloudConsent !== true ? '点击后会先请你确认“按需分析脱敏画面”；同意后立即开始，不同意则保持仅本地观察。'
+            : '';
     autoStepHint.hidden = !autoStepReason;
     autoStepHint.textContent = autoStepReason;
     element('auto-step-start').title = autoStepReason;
@@ -553,14 +579,15 @@
     autoStepProgress.hidden = task.autoStep !== true;
     if (task.autoStep === true) autoStepProgress.textContent = task.state === 'awaiting_action'
       ? '箭头已显示：请亲手点击目标；箭头消失后点“我点好了，请核验”继续下一步。'
-      : task.state === 'awaiting_verify' ? '箭头已隐藏：请点“我点好了，请核验”，模型会再截一帧分析下一步。'
+      : task.state === 'awaiting_verify' ? (state.screenshotFree ? '箭头已隐藏：请点“我点好了，请核验”，本机重读控件清单后判断下一步。' : '箭头已隐藏：请点“我点好了，请核验”，模型会再截一帧分析下一步。')
         : task.state === 'needs_help' ? '模型需要补充信息：请查看说明并回答后继续。'
           : task.state === 'completed' ? '目标已找到或打开，自动步进已结束。'
             : '正在本机遮盖并由模型分析本步画面…';
     element('send-question').disabled = !state.canAsk || !element('question').value.trim();
     element('send-question').textContent = cloudAuthorizing ? '正在等待分析授权…' : pending.has('ask') ? '正在发送…' : state.analysis.state === 'capture_retry' ? '正在刷新画面…' : task.state === 'analyzing' ? task.kind === 'text' ? '正在等待回答…' : '正在分析画面…' : activeSection === 'guidance' ? '查找并指引 ↗' : '问暖暖 ↗';
     element('question-hint').textContent = state.privacyPaused || state.blocked ? '安全状态待处理，可保留草稿，不能发送' : !ready ? '等待连接，可先写下问题' : activeSection === 'guidance'
-      ? state.safeObserving ? observation.cloudConsent === true ? '结合当前已授权画面查找 · Enter 发送' : '屏幕已就绪 · 点击查找后单独确认按需脱敏分析' : '先选择屏幕，再点击查找并确认按需脱敏分析' : '文字发送给已配置模型 · Enter 发送 · Shift + Enter 换行';
+      ? state.screenshotFree ? '无截屏模式：输入问题后点“直接查找并指引”即可，无需选择屏幕或开启共享 · Enter 发送'
+        : state.safeObserving ? observation.cloudConsent === true ? '结合当前已授权画面查找 · Enter 发送' : '屏幕已就绪 · 点击查找后单独确认按需脱敏分析' : '先选择屏幕，再点击查找并确认按需脱敏分析' : '文字发送给已配置模型 · Enter 发送 · Shift + Enter 换行';
     const dictationPending = pending.has('dictate');
     element('start-dictation').disabled = !state.canAsk || voice.active === true || typeof bridge?.dictate !== 'function' || typeof bridge?.cancelDictation !== 'function';
     element('start-dictation').textContent = dictationPending ? '本次听写中…' : '语音输入';
@@ -860,9 +887,68 @@
     }, () => sendVoiceFind(question, observationGeneration, clarification), true);
   }
 
+  // 无截屏模式的语音查找：文本同意 → 听写（沿用既有本机/云听写配置，不带观察代次）→ ask(text, undefined, true)。
+  // 全程不选屏幕、不开共享、不截帧；单帧/持续观察的 startVoiceFind 路径保持原样。
+  async function sendScreenshotFreeFind(question) {
+    voiceFindMode = true;
+    await perform('ask', '查找未完成', async () => {
+      try {
+        const reply = await bridge.ask(question, undefined, true);
+        checkReply(reply);
+        if (!disposed) {
+          const task = record(record(reply).snapshot?.task);
+          dictationNotice = task.state === 'awaiting_action' ? '已按无截屏模式给出箭头：本机从控件清单取坐标，请看高亮并亲手操作。'
+            : task.result === 'risk_blocked' ? '本次请求涉及受限操作，已停止指引，没有生成箭头。'
+              : task.state === 'analyzing' ? '查找请求已受理，请在上方查看分析进度与箭头指引。'
+                : '本次没有获得可核验的目标位置；请查看教学说明或换一种说法。';
+        }
+        return reply;
+      } finally { voiceFindMode = false; }
+    }, () => sendScreenshotFreeFind(question), true);
+  }
+
+  async function startVoiceFindScreenshotFree() {
+    const request = ++dictationGeneration;
+    dictationNotice = '';
+    dictationTranscript = '';
+    clearError();
+    try {
+      // 只取得"发送控件文本"的同意；不需要画面分析授权，也不开启屏幕共享。
+      if (!await ensureGuidanceTextConsent()) return;
+      if (disposed || request !== dictationGeneration || !flags().canVoiceFind) return;
+      voiceFindMode = true;
+      pending.add('dictate');
+      render();
+      const result = await bridge.dictate();
+      if (disposed || request !== dictationGeneration) return;
+      if (!result || result.localOnly !== true || !['complete', 'uncertain', 'cancelled'].includes(result.status)) throw new Error('本地听写结果未确认');
+      if (result.status === 'cancelled') { dictationNotice = '本次语音查找已取消，没有发送文字或控件清单。'; return; }
+      if (result.status === 'uncertain' && result.microphoneActive !== false) throw new Error('本地听写结果未确认');
+      if (result.status === 'uncertain') { dictationNotice = '这次没有听清，未发送问题。请靠近麦克风、说慢一点后重试。'; return; }
+      if (result.microphoneActive !== false || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 500) throw new Error('本地听写结果未确认');
+      const recognized = result.text.trim();
+      dictationTranscript = recognized;
+      pending.delete('dictate');
+      if (!flags().canVoiceFind) { dictationNotice = '听写已完成，但当前状态不允许发送；识别文字已保留在下方。'; return; }
+      dictationNotice = '本机听写已完成，麦克风已关闭；正在按无截屏模式查找目标。';
+      render();
+      await sendScreenshotFreeFind(recognized);
+    } catch (error) {
+      if (!disposed && request === dictationGeneration) showError('语音查找未完成', error, ready ? startVoiceFind : connect);
+    } finally {
+      if (request === dictationGeneration) {
+        pending.delete('dictate');
+        voiceFindMode = false;
+      }
+      render();
+    }
+  }
+
   async function startVoiceFind() {
     const initial = flags();
     if (disposed || !initial.canVoiceFind) return;
+    // 默认无截屏：不需要屏幕共享与画面授权，只把听写文字交给模型选控件。
+    if (initial.screenshotFree) { await startVoiceFindScreenshotFree(); return; }
     const observationGeneration = initial.observation.generation;
     const clarification = clarificationContext();
     const request = ++dictationGeneration;
@@ -997,6 +1083,21 @@
       return bridge.command({ type: 'guidance.auto-start', ...(goal ? { goal } : {}) });
     };
     void perform('guidance.auto-start', '自动步进未确认', operation, startAutoStep, true);
+  }
+
+  // 无截屏模式的显式入口：把输入框里的文字直接交给无截屏查找（不再只靠"发送"这一条隐性路径）。
+  // 空草稿时保持按钮可用并提示先输入，避免用户以为按钮坏了。
+  function directTextFind() {
+    if (disposed || !flags().canTextFind) return;
+    const draft = element('question').value.trim();
+    if (!draft) {
+      dictationNotice = '请先在下方输入要查找的目标（例如“帮我找到设置”），再点“直接查找并指引”；无需选择屏幕或开启共享。';
+      element('question').focus();
+      render();
+      return;
+    }
+    clearError();
+    sendQuestion();
   }
 
   function sendQuestion() {
@@ -1406,6 +1507,7 @@
     requestCommand(type, 'guidance-start-observation');
   });
   bind(element('screen-voice-find'), 'click', () => { void startVoiceFind(); });
+  bind(element('guidance-text-find'), 'click', () => { directTextFind(); });
   bind(element('auto-step-start'), 'click', () => startAutoStep());
   bind(element('pet-voice-mute'), 'click', () => requestCommand(record(runtime.voice).state === 'muted' ? 'voice.unmute' : 'voice.mute', 'pet-voice-mute'));
   bind(element('toggle-wake'), 'click', () => requestCommand(record(runtime.wake).state === 'enabled' ? 'wake.disable' : 'wake.enable', 'toggle-wake'));

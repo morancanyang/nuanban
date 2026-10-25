@@ -38,6 +38,25 @@
 - 核验路径跑到完成或明确失败，失败透出真实原因（`target_not_in_current_frame`、`completion_not_verified`、`previous_step_not_verified`、`stale_analysis_frame`、`invalid_analysis*`、非本人取消的 `ANALYSIS_CANCELLED`），兜底文案只作最后手段；采集范围变化或新画面无可核验控件时明确作废（`analysis_abandoned`）而不是静默停在“正在分析画面”。
 - 真机验收未完成（`deviceVerified=false`）：需要用户在整屏共享下点“我点好了，请核验”，确认不再卡住并拿到箭头或真实失败原因；本轮只有假时钟 + 假 provider 的合成单测（`tests/platform/desktop-guidance-analysis-recheck.test.ts`）与 trace 事件写入断言。
 
+## 2026-10-25 无截屏模式下的界面入口与按钮可用性（`deviceVerified=false`）
+
+现场问题：默认无截屏模式下，所有者点不了“查找并指引”——指引页上的按钮仍由旧的观察/画面授权门槛决定可用性，全部是灰的，用户以为功能不存在（只剩“输入框回车”这一条隐性入口）。修正后：
+
+- **可用性规则**（`apps/desktop/pet.js` 的 `flags()`）：
+  - `screenshotFree === true` 时，`#screen-voice-find`（语音查找并指引）只需 `guidanceUsable = screenshotFree && bridge`，**不再要求** `safeObserving` 或画面分析授权；点击后依次为「本人同意发送控件文本」→ 听写 → `ask(text, undefined, true)`（不带观察代次）。
+  - 新增显式入口 `#guidance-text-find`（“直接查找并指引（无需截屏）”）：用输入框文字走同一条 `ask(text, undefined, true)` 文本路径；空草稿时按钮仍可用，点击后提示先输入并聚焦输入框（避免再次出现“按钮是灰的”）。
+  - `screenshotFree !== true`（单帧/持续观察）时两个入口的旧门槛**完全不变**：语音查找仍需 `safeObserving` + 画面授权，`#guidance-text-find` 不可用；观察中就绪后仍走原路径 `dictate(generation)` → `ask(text, generation)`。
+  - 无截屏语音使用的是**普通听写**（`bridge.dictate()` 不带 `purpose: 'screen-guidance'`），因此不经过屏幕观察校验；本机/云听写配置沿用既有设置，未开启屏幕共享也能听写。
+- **界面文案**：
+  - 指引页顶部（`#guidance-status`）静态文案与运行时文案都写明用法：默认无截屏，在下方输入问题并点击“直接查找并指引”即可，**无需选择屏幕或开启共享**；并显示当前模式、已读取 N 个控件（前台上限 M、是否截断）与文本发送同意状态。
+  - 流程提示按模式区分：无截屏时隐藏“选择屏幕 → 说出目标 → 看箭头”那套 `#guidance-workflow`，改用 `#guidance-workflow-screenshot-free`（输入/说出目标 → 本机读控件清单、模型只选序号 → 看箭头亲手操作）；`#guidance-start-observation` 文案改为“① 选择屏幕与授权（仅在需要单帧或持续观察时使用）”，并显示 `#guidance-screenshot-only-note` 说明。
+  - `#auto-step-start` 在无截屏模式下文案为“③ 自动步进指引（无需截屏，每步重读控件清单）”、提示改为确认“把前台窗口的控件名称发给模型”，核验进度文案也改为“重读控件清单”；不再出现“共享后自动截帧”这类误导。
+  - `#question-hint` 在无截屏指引页提示“无需选择屏幕或开启共享 · Enter 发送”。
+  - 控件清单为空/不可读时沿用既有规则提示“当前软件没有可读控件树：这次需要你允许截一帧”，并保留可点击的“① 选择屏幕与授权”作为切换入口。
+- **与任务卡的一处偏差（如实记录）**：任务要求把“③ 自动步进”标为“仅在需要单帧或持续观察时使用”。实际上无截屏自动步进已经可用（`guidance.auto-start` 在无截屏路径下逐步重读控件清单），把它标成单帧专属会与功能相反，因此仅“① 选择屏幕与授权”标注了该限定，③ 改为说明“无需截屏”。如所有者要求改回，需要先决定是否停用无截屏自动步进。
+- **测试**：`tests/platform/desktop-guidance-screenshot-free.test.ts`（假 bridge，11 项）覆盖：无截屏下两个入口可用、点击后只走文本路径（断言 `ask` 第三参为 `true`、`dictate` 不带代次、无任何 `observation.*`/single-frame 调用）、未同意文本发送时立刻停住（不听写、不发送）、单帧/持续观察门槛回归不变、无控件树提示与切换入口、截断信息与文案、以及“无截屏路径不出现截屏/观察调用”的源码守卫。既有 `desktop-pet-ui.test.ts` 225 项保持通过；`pnpm typecheck` 0。
+- **真机验收未完成（`deviceVerified=false`）**：需要所有者在真实桌宠窗口里确认默认无截屏模式下两个按钮可点、点击后弹出“发送控件文本”确认框、出箭头或给出真实原因；本轮只有假 bridge 的合成单测，没有真机点击、没有真麦克风听写、没有真实 UIA 清单。
+
 ## 验证与边界
 
 定向单测覆盖授权来源、坐标映射、名称清洗（不再限于白名单）、未请求结果拒绝、附件隔离、脱敏布局、敏感内容以及回复/捕获间隙。真实 Windows 检测使用内存画面，只输出固定计数、耗时和原因，不落盘私有画面或 OCR 正文。
