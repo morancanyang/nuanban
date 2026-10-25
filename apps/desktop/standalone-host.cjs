@@ -26,6 +26,7 @@ const { createLiliHost } = require('./lili-host.cjs');
 const { createSingleFrameGuidance } = require('./single-frame-guidance.cjs');
 const { createUiaInventoryReader } = require('./observation/uia-inventory.cjs');
 const { createUiaGuidanceSession, DEFAULT_GUIDANCE_MODE, GUIDANCE_MODES, MODE_LABELS, reasonInfo } = require('./observation/uia-guidance.cjs');
+const { createForegroundTargetTracker } = require('./observation/foreground-target.cjs');
 const { physicalToDipRect } = require('./observation/uia-coordinates.cjs');
 const { createControlChoiceAnalysisClient } = require('./provider-analysis.cjs');
 const { isRestrictedText } = require('./observation-policy.cjs');
@@ -145,10 +146,20 @@ function createStandaloneHost(options) {
     } catch {}
     return [...new Set(ids)];
   }
+  // 目标窗口 = 最近一次出现在前台的第三方窗口。为什么需要：用户必须先点桌宠才能提问，
+// 提问瞬间的前台必然是本应用自己，所以无截屏指引只能面向"最近操作过的软件窗口"。
+  // 只读 hwnd/进程名/窗口标题，不截屏、不读像素、不枚举控件；无截屏模式下随桌宠常驻运行，退出/撤回同意即停止。
+  const foregroundTarget = options.foregroundTarget ?? createForegroundTargetTracker({
+    spawn: options.spawnProcess, intervalMs: options.foregroundIntervalMs,
+    ownProcessIds, isSelfProcessId: processId => ownProcessIds().includes(processId), trace: traceGuidance,
+  });
+  // 无截屏指引要在本机把 UIA 的物理像素矩形证明成屏幕 DIP 坐标（fail closed）。
+  // 真实环境里该几何来自 observation source；测试夹具则通过 options.screen 注入。
+  const guidanceScreen = typeof source?.dipToScreenRect === 'function' ? source : options.screen;
   const guidanceSession = options.createUiaGuidanceSession ?? createUiaGuidanceSession({
     inventory: options.uiaInventory ?? createUiaInventoryReader({ spawn: options.spawnProcess, platform: process.platform, excludedProcessIds: ownProcessIds }),
     chooser: options.controlChooser ?? createControlChoiceAnalysisClient({ provider: options.questioner, relaxedSafety }),
-    isRestrictedText, hasConsent: () => textConsent, trace: traceGuidance,
+    isRestrictedText, hasConsent: () => textConsent, trace: traceGuidance, targetWindow: foregroundTarget, screen: guidanceScreen,
   });
   // 无截屏指引的"文本发送同意"：只覆盖"把前台窗口的控件名称/类型/位置文本发给已配置模型"，
   // 不覆盖屏幕共享、不覆盖麦克风。默认未同意 → 一个字都不外发；本人可随时撤回。
@@ -161,12 +172,17 @@ function createStandaloneHost(options) {
       buttons: ['同意（本次运行内有效）', '取消'], defaultId: 1, cancelId: 1, noLink: true });
     if (answer?.response !== 0) return { textConsent: false };
     textConsent = true;
+    // 同意后（重新）开始低频跟踪最近的非自身前台窗口：用户很可能已经点过目标软件。
+    foregroundTarget.start();
     traceGuidance('uia_text_consent', { granted: true });
     publish();
     return { textConsent: true };
   }
   function revokeGuidanceText() {
     textConsent = false;
+    // 本人撤回同意：立刻停止跟踪并忘掉目标窗口（不保留跨同意的窗口记录）。
+    foregroundTarget.stop();
+    foregroundTarget.clear();
     traceGuidance('uia_text_consent', { granted: false });
     publish();
     return { textConsent: false };
@@ -322,6 +338,18 @@ function createStandaloneHost(options) {
 
   // 界面（管理窗指引页 / 桌宠）要看到的是"当前模式 + 这次为什么没给箭头 + 读到几个控件"，
   // 全部是文本元数据：没有控件名原文、没有像素、没有帧。
+  // 目标窗口只投递元数据：hwnd、窗口标题、进程名、记录时间与"是否仍在前台"；
+  // 绝不投递控件名原文、像素或路径。
+  function guidanceTargetWindow(target) {
+    if (!target || !Number.isSafeInteger(target.hwnd) || target.hwnd <= 0) return null;
+    const title = typeof target.title === 'string' ? target.title.slice(0, 160) : '';
+    const processName = typeof target.processName === 'string' ? target.processName.slice(0, 80) : '';
+    const label = typeof target.label === 'string' && target.label ? target.label.slice(0, 200) : (title || processName);
+    if (!label) return null;
+    return Object.freeze({ hwnd: target.hwnd, title, processName, label, at: Number.isSafeInteger(target.at) ? target.at : 0,
+      foreground: target.foreground === true ? true : target.foreground === false ? false : null });
+  }
+
   function guidanceState() {
     const base = typeof guidanceSession?.snapshot === 'function' ? guidanceSession.snapshot() : {};
     const mode = Object.hasOwn(MODE_LABELS, guidanceMode) ? guidanceMode : DEFAULT_GUIDANCE_MODE;
@@ -335,6 +363,7 @@ function createStandaloneHost(options) {
       severity: base.severity === 'blocked' ? 'blocked' : 'info',
       suggestSingleFrame: base.suggestSingleFrame === true,
       textConsent: base.textConsent === true,
+      target: guidanceTargetWindow(base.target),
       counts: { count: Number.isSafeInteger(base.counts?.count) ? base.counts.count : 0,
         limit: Number.isSafeInteger(base.counts?.limit) ? base.counts.limit : 0, truncated: base.counts?.truncated === true },
       review: base.review && typeof base.review.verdict === 'string' ? { verdict: base.review.verdict, code: String(base.review.code ?? ''), detail: String(base.review.detail ?? '') } : null,
@@ -344,7 +373,9 @@ function createStandaloneHost(options) {
 
   function guidanceTarget(step) {
     if (step?.status !== 'ready' || !step.target) return null;
-    const rect = physicalToDipRect(step.target.rect, { screen });
+    // 必须用同一个能证明物理原点的几何端口；此前误用 electron 的 screen，
+    // 它没有 dipToScreenRect，于是把已成功的会话结果又改写成 coordinates_unverified。
+    const rect = physicalToDipRect(step.target.rect, { screen: guidanceScreen });
     if (!rect) return { blocked: 'coordinates_unverified' };
     return { target: { visible: true, rect, label: step.target.name, instruction: step.instruction ?? '', presentation: 'confirmed', expiresAt: Date.now() + 15000 } };
   }
@@ -1445,6 +1476,8 @@ function createStandaloneHost(options) {
     });
     if (options.liliEnabled === true) lili.setEnabled(true);
     lili.start();
+    // 无截屏指引会话期间（默认模式）低频跟踪最近的非自身前台窗口；只读元数据，不截屏。
+    if (guidanceMode === GUIDANCE_MODES.screenshotFree) foregroundTarget.start();
     await Promise.all([petWindow.loadFile(petPath), guideWindow.loadFile(guidePath), captionWindow.loadFile(captionPath)]);
     petWindow.showInactive();
     resetIdleTimer();
@@ -1456,6 +1489,8 @@ function createStandaloneHost(options) {
 
   async function dispose(reason) {
     revokeAvatarPermission();
+    foregroundTarget.stop();
+    foregroundTarget.clear();
     singleFrameEpoch += 1;
     clearTimeout(idleTimer);
     idleTimer = null;

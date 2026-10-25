@@ -510,8 +510,13 @@
                   : '点击并确认后说出目标；音频仅在本机识别，文字与必要的脱敏画面只为本次查找发送。';
     const observationScope = state.safeObserving && source ? `观察范围：${source}。` : '';
     const guidanceCounts = record(state.guidance?.counts);
+    // 目标窗口 = 最近一次操作过的第三方窗口（提问瞬间的前台必然是桌宠自己，所以不能按那一刻判定）。
+    const guidanceTarget = record(state.guidance?.target);
+    const guidanceTargetLine = Number.isSafeInteger(guidanceTarget.hwnd) && guidanceTarget.hwnd > 0
+      ? `正在按：${text(guidanceTarget.label, text(guidanceTarget.title, text(guidanceTarget.processName, '上次操作的窗口')))} 指引${guidanceTarget.foreground === false ? '（它现在不在前台，仍按最近记录的窗口）' : ''}。如果不对，点一下你要操作的软件窗口再回来提问。`
+      : '还没有记录到目标窗口：请先点一下你要操作的软件窗口，再回来提问。';
     const guidanceModeLine = state.screenshotFree
-      ? `当前模式：${text(state.guidance?.modeLabel, '无截屏（默认）')}。在下方输入问题并点击“直接查找并指引”或“查找并指引”即可，无需选择屏幕或开启共享。已读取 ${Number.isSafeInteger(guidanceCounts.count) ? guidanceCounts.count : 0} 个控件（前台上限 ${Number.isSafeInteger(guidanceCounts.limit) ? guidanceCounts.limit : 0}${guidanceCounts.truncated === true ? '，清单已截断' : '，未截断'}）。${state.textConsent ? '文本发送同意：已同意（可在菜单里撤回）。' : '文本发送同意：未同意；点击查找时由本人在弹窗中确认，未同意前不会外发任何控件文本。'}`
+      ? `当前模式：${text(state.guidance?.modeLabel, '无截屏（默认）')}。在下方输入问题并点击“直接查找并指引”或“查找并指引”即可，无需选择屏幕或开启共享。${guidanceTargetLine}已读取 ${Number.isSafeInteger(guidanceCounts.count) ? guidanceCounts.count : 0} 个控件（前台上限 ${Number.isSafeInteger(guidanceCounts.limit) ? guidanceCounts.limit : 0}${guidanceCounts.truncated === true ? '，清单已截断' : '，未截断'}）。${state.textConsent ? '文本发送同意：已同意（可在菜单里撤回）。' : '文本发送同意：未同意；点击查找时由本人在弹窗中确认，未同意前不会外发任何控件文本。'}`
       : '';
     element('guidance-status').textContent = state.screenshotFree
       ? `${guidanceModeLine}${state.guidance?.reasonMessage ? `\n${text(state.guidance.reasonMessage)}` : ''}${state.guidance?.suggestSingleFrame === true ? '\n当前软件没有可读控件树：这次需要你允许截一帧（下方“① 选择屏幕与授权”走原来的单帧/持续观察确认流程）。' : ''}`

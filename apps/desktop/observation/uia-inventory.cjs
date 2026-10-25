@@ -109,11 +109,15 @@ function createUiaInventoryReader({ spawn, timeoutMs = 5000, platform = process.
     return Object.freeze({ status: 'unavailable', reason, windowKey: null, truncated: false, counts: Object.freeze({ total: 0, limit: limits.maxControls }), controls: Object.freeze([]) });
   }
 
-  async function read({ signal } = {}) {
+  // hwnd 省略时读当前前台窗口（兼容旧调用方）；传入时读"最近操作过的目标窗口"，
+  // 窗口已关闭会得到 reason='target_window_gone'，绝不改读别的窗口。
+  async function read({ signal, hwnd } = {}) {
     const excluded = typeof excludedProcessIds === 'function' ? excludedProcessIds() : excludedProcessIds;
+    const targetHwnd = Number.isSafeInteger(hwnd) && hwnd > 0 && hwnd <= 2147483647 ? hwnd : undefined;
     let reply;
     try {
       reply = await helper.run({ protocol: 1, operation: 'inventory', maxDepth: limits.maxDepth, maxControls: limits.maxControls,
+        ...(targetHwnd === undefined ? {} : { targetHwnd }),
         timeBudgetMs: Math.min(3000, timeoutMs - 500), ...(Array.isArray(excluded) && excluded.length
           ? { excludedProcessIds: excluded.filter(value => Number.isSafeInteger(value) && value > 0).slice(0, 8) } : {}) }, { signal });
     } catch (error) {
@@ -132,6 +136,8 @@ function createUiaInventoryReader({ spawn, timeoutMs = 5000, platform = process.
     }
     const counts = Object.freeze({ total: controls.length, limit: limits.maxControls });
     return Object.freeze({ status: 'complete', windowKey: windowKey(reply.window), focusedIndex: Number.isSafeInteger(reply.focusedIndex) ? reply.focusedIndex : 0,
+      targetHwnd: Number.isSafeInteger(reply.hwnd) && reply.hwnd > 0 ? reply.hwnd : null,
+      foreground: reply.foreground !== false,
       truncated: reply.truncated === true || reply.depthLimited === true || reply.deadlineReached === true,
       counts, controls: Object.freeze(controls) });
   }

@@ -13,6 +13,9 @@ const MODE_LABELS = Object.freeze({
 const GUIDANCE_REASONS = Object.freeze({
   ok: { code: 'ok', severity: 'info', suggestSingleFrame: false, message: '本机已读出前台窗口的控件清单；模型只选序号，箭头位置由本机 UIA 给出。' },
   foreground_is_self: { code: 'foreground_is_self', severity: 'blocked', suggestSingleFrame: false, message: '当前前台窗口是微光指引自己。请先点一下你要操作的软件窗口，再回来提问。' },
+  // 目标窗口 = 最近一次出现在前台的第三方窗口（不是提问瞬间的前台窗口，因为那时前台必然是本应用自己）。
+  target_window_missing: { code: 'target_window_missing', severity: 'blocked', suggestSingleFrame: false, message: '还没记录到你要操作的窗口。请先点一下那个软件窗口，再回来提问；本机会记住最近点过的窗口。' },
+  target_window_gone: { code: 'target_window_gone', severity: 'blocked', suggestSingleFrame: false, message: '上次操作的窗口已关闭，请重新点一下目标软件再提问。' },
   no_uia_controls: { code: 'no_uia_controls', severity: 'blocked', suggestSingleFrame: true, message: '这个软件没有可读的控件树（自绘界面常见）。无截屏模式无法定位控件：这次需要你允许截一帧，或先在软件里打开有标准控件的界面。' },
   names_unreadable: { code: 'names_unreadable', severity: 'blocked', suggestSingleFrame: true, message: '读到的控件都没有可读名称，做不成"选择题"。这次需要你允许截一帧，或换一个界面再试。' },
   sensitive_name_redacted: { code: 'sensitive_name_redacted', severity: 'info', suggestSingleFrame: false, message: '个别控件名称可能含隐私，已在本机隐藏后再发送；模型看不到名称原文。' },
@@ -125,13 +128,33 @@ function choicePrompt({ question, list, truncated }) {
     + '找不到时输出 {"kind":"no_match","reason":"简短原因"}。不要输出 x/y/rect/坐标字段。';
 }
 
-function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () => false, hasConsent = () => true, now = Date.now, trace = () => {}, maxLines = 200 } = {}) {
+function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () => false, hasConsent = () => true, now = Date.now, trace = () => {}, maxLines = 200,
+  targetWindow } = {}) {
   if (!inventory || typeof inventory.read !== 'function') throw new TypeError('UIA 控件清单读取端口不完整');
   let generation = 0;
   let busy = false;
   let last = null;
   let lastVerdict = null;
   let lastQuestion = '';
+  let lastHwnd = null;
+
+  // 目标窗口：由宿主注入的低频跟踪器提供（最近的非自身前台窗口）。
+  // 没有注入跟踪器时退化为旧的"读当前前台窗口"，只用于兼容调用方与旧测试；宿主始终注入。
+  function currentTarget() {
+    if (!targetWindow || typeof targetWindow.target !== 'function') return null;
+    const value = targetWindow.target();
+    if (!value || !Number.isSafeInteger(value.hwnd) || value.hwnd <= 0) return null;
+    return Object.freeze({ hwnd: value.hwnd, title: typeof value.title === 'string' ? value.title : '', processName: typeof value.processName === 'string' ? value.processName : '',
+      at: Number.isSafeInteger(value.at) ? value.at : 0 });
+  }
+
+  function targetSummary(target, { foreground = null } = {}) {
+    if (!target) return null;
+    return Object.freeze({ hwnd: target.hwnd, title: target.title, processName: target.processName, at: target.at,
+      label: target.title || target.processName || '未知窗口',
+      // 三态：true=此刻仍在前台；false=已不在前台（按最近记录继续指引并在界面说明）；null=这次没读到该信息。
+      foreground: foreground === true ? true : foreground === false ? false : null });
+  }
 
   function record(state) {
     last = Object.freeze(state);
@@ -148,20 +171,23 @@ function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () =>
     const mode = modeInfo(DEFAULT_GUIDANCE_MODE);
     const info = last ? reasonInfo(last.code) : reasonInfo('ok');
     const consented = typeof hasConsent === 'function' ? hasConsent() === true : true;
+    const tracked = currentTarget();
+    const observed = last?.targetWindow && tracked && last.targetWindow.hwnd === tracked.hwnd ? last.targetWindow : null;
     return Object.freeze({
       mode: mode.mode, modeLabel: mode.label, screenshotFree: mode.screenshotFree,
       active: Boolean(last && last.status === 'ready'),
       reasonCode: last ? info.code : null, reasonMessage: last ? info.message : null,
       severity: last ? info.severity : 'info', suggestSingleFrame: Boolean(last && last.suggestSingleFrame),
       textConsent: consented,
+      target: targetSummary(tracked, { foreground: observed ? observed.foreground : null }),
       counts: last?.counts ? { ...last.counts } : { count: 0, limit: 0, truncated: false },
       review: lastVerdict ? { verdict: lastVerdict.verdict, code: lastVerdict.code, detail: lastVerdict.detail } : null,
     });
   }
 
-  async function readInventory({ signal } = {}) {
+  async function readInventory({ signal } = {}, hwnd = null) {
     try {
-      const result = await inventory.read({ signal });
+      const result = hwnd === null ? await inventory.read({ signal }) : await inventory.read({ signal, hwnd });
       if (!result || typeof result !== 'object' || !['complete', 'unavailable'].includes(result.status)) return null;
       return result;
     } catch { return null; }
@@ -180,22 +206,33 @@ function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () =>
     busy = true;
     lastQuestion = question.trim();
     try {
-      const first = await readInventory({ signal });
+      // 目标窗口必须是"最近一次操作的第三方窗口"：提问瞬间的前台必然是本应用自己（用户刚点过桌宠），
+      // 所以先取跟踪器记录的目标，再只读它的控件清单；没有注入跟踪器时才退回读当前前台窗口。
+      const target = currentTarget();
+      if (targetWindow && typeof targetWindow.target === 'function' && !target) {
+        return blocked('target_window_missing', { counts: { count: 0, limit: 0, truncated: false }, targetWindow: null });
+      }
+      const hwnd = target ? target.hwnd : null;
+      lastHwnd = hwnd;
+      const first = await readInventory({ signal }, hwnd);
       const stale = () => current !== generation;
       if (stale()) return blocked('provider_failed', { detail: 'superseded' });
       if (!first || first.status !== 'complete') {
-        const reason = first?.reason === 'foreground_is_self' ? 'foreground_is_self' : 'inventory_unavailable';
-        return blocked(reason, { counts: { count: 0, limit: first?.counts?.limit ?? 0, truncated: false } });
+        const gone = first?.reason === 'target_window_gone';
+        const reason = gone ? 'target_window_gone'
+          : first?.reason === 'foreground_is_self' ? 'foreground_is_self' : 'inventory_unavailable';
+        return blocked(reason, { counts: { count: 0, limit: first?.counts?.limit ?? 0, truncated: false },
+          targetWindow: targetSummary(target, { foreground: gone ? false : null }) });
       }
       const usable = first.controls.filter(control => control.enabled && !control.offscreen && control.rect !== null);
       const candidates = uiaCandidates(first.controls);
       const counts = { count: candidates.length, limit: first.counts.limit, truncated: first.truncated === true };
       trace('uia_inventory', { count: counts.count, limit: counts.limit, truncated: counts.truncated, usable: usable.length, reason: first.truncated ? 'list_truncated' : 'ok' });
       // 有可用控件但没有可读名称（自绘界面）与"根本没有可用控件"是两种不同的原因，分别如实告知。
-      if (!usable.length) return blocked('no_uia_controls', { counts });
-      if (!counts.count) return blocked('names_unreadable', { counts });
+      if (!usable.length) return blocked('no_uia_controls', { counts, targetWindow: targetSummary(target) });
+      if (!counts.count) return blocked('names_unreadable', { counts, targetWindow: targetSummary(target) });
       const list = buildControlList(candidates, { isRestrictedText, maxLines });
-      if (!list.readableNames) return blocked('names_unreadable', { counts });
+      if (!list.readableNames) return blocked('names_unreadable', { counts, targetWindow: targetSummary(target) });
       trace('uia_choice_request', { count: list.count, truncated: counts.truncated, redactedNames: list.redactedNames, questionLength: question.trim().length });
       let reply;
       try {
@@ -217,20 +254,26 @@ function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () =>
       const chosen = list.byNumber.get(parsed.number);
       if (!chosen) return blocked('element_gone', { counts });
       // 画箭头前再次本地校验：控件仍存在、可用、在屏且矩形仍有效（fail closed）。
-      const confirm = await readInventory({ signal });
+      const confirm = await readInventory({ signal }, hwnd);
       if (stale()) return blocked('provider_failed', { detail: 'superseded', counts });
+      // 目标窗口在这中间被关掉：明确失败，不给箭头，也不改读别的窗口。
+      if (confirm && confirm.status !== 'complete' && confirm.reason === 'target_window_gone') {
+        trace('uia_target_rejected', { code: 'target_window_gone', number: parsed.number });
+        return blocked('target_window_gone', { counts, targetWindow: targetSummary(target, { foreground: false }) });
+      }
       const stillThere = confirm?.status === 'complete'
         ? uiaCandidates(confirm.controls).find(candidate => sameTarget(candidate, { nameKey: nameKey(chosen), controlType: chosen.controlType }))
         : null;
       if (!stillThere) {
         trace('uia_target_rejected', { code: 'element_gone', number: parsed.number });
-        return blocked('element_gone', { counts });
+        return blocked('element_gone', { counts, targetWindow: targetSummary(target) });
       }
       trace('uia_target', { number: parsed.number, controlType: chosen.controlType, depth: chosen.depth, moved: rectWithin(stillThere.rect, chosen.rect, 2) ? 'same' : 'moved' });
       const informational = list.redactedNames ? 'sensitive_name_redacted' : counts.truncated ? 'list_truncated' : 'ok';
       const info = reasonInfo(informational);
       return record({ status: 'ready', code: info.code, severity: info.severity, message: info.message, suggestSingleFrame: false,
-        counts, target: Object.freeze({ number: parsed.number, name: chosen.name, nameKey: nameKey(chosen), controlType: chosen.controlType,
+        counts, targetWindow: targetSummary(target, { foreground: first.foreground === true ? true : first.foreground === false ? false : null }),
+        target: Object.freeze({ number: parsed.number, name: chosen.name, nameKey: nameKey(chosen), controlType: chosen.controlType,
           label: chosen.label, rect: { ...stillThere.rect } }), instruction: parsed.instruction,
         previous: { windowKey: confirm.windowKey, focusedIndex: confirm.focusedIndex, candidateCount: uiaCandidates(confirm.controls).length,
           target: { nameKey: nameKey(chosen), controlType: chosen.controlType, rect: { ...stillThere.rect }, focused: stillThere.focus } },
@@ -245,14 +288,21 @@ function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () =>
     if (!state || state.status !== 'ready' || !state.previous) {
       return record({ status: 'unverifiable', ...reasonInfo('review_unverifiable'), detail: 'no_step', counts: { count: 0, limit: 0, truncated: false } });
     }
-    const current = await readInventory({ signal });
+    const current = await readInventory({ signal }, lastHwnd);
+    if (current && current.status !== 'complete' && current.reason === 'target_window_gone') {
+      lastVerdict = Object.freeze({ verdict: 'unverifiable', code: 'target_window_gone', detail: 'target_window_gone' });
+      trace('uia_review', { verdict: 'unverifiable', code: 'target_window_gone', detail: 'target_window_gone' });
+      return record({ status: 'unverifiable', ...reasonInfo('target_window_gone'), detail: 'target_window_gone',
+        counts: state.counts, targetWindow: null, target: state.target, instruction: state.instruction });
+    }
     const verdict = classifyReview({ previous: state.previous, current });
     lastVerdict = verdict;
     trace('uia_review', { verdict: verdict.verdict, code: verdict.code, detail: verdict.detail });
     if (verdict.verdict !== 'advanced') {
       // 保留上一步，便于本人再点一次"核验"；不猜、不画箭头。
       return record({ status: verdict.verdict === 'unchanged' ? 'unchanged' : 'unverifiable', ...reasonInfo(verdict.code), detail: verdict.detail,
-        counts: state.counts, verdict: Object.freeze({ ...verdict }), previous: state.previous, target: state.target, instruction: state.instruction });
+        counts: state.counts, verdict: Object.freeze({ ...verdict }), previous: state.previous, target: state.target,
+        targetWindow: state.targetWindow ?? null, instruction: state.instruction });
     }
     // 已经前进：按新读到的控件树再问一次模型，拿到下一步（仍然只选序号，坐标本机给）。
     const next = lastQuestion ? await ask(lastQuestion, { signal }) : null;
@@ -265,6 +315,7 @@ function createUiaGuidanceSession({ inventory, chooser, isRestrictedText = () =>
     last = null;
     lastVerdict = null;
     lastQuestion = '';
+    lastHwnd = null;
     try { await inventory.stop?.(); } catch {}
   }
 

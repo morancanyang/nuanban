@@ -219,6 +219,17 @@ function projectSnapshot(value) {
       && String(review.code ?? '').length <= 48 && String(review.detail ?? '').length <= 48) {
       guidance.review = { verdict: review.verdict, code: review.code, detail: review.detail };
     }
+    // 目标窗口只投影元数据（hwnd/标题/进程名/时间/是否仍在前台）；控件名原文、像素与路径一律不投影。
+    const target = projectRecord(rawGuidance.target, { hwnd: 'number', title: 'string', processName: 'string', label: 'string', at: 'number', foreground: 'boolean' });
+    if (target && Number.isSafeInteger(target.hwnd) && target.hwnd > 0 && target.hwnd <= 2147483647) {
+      const title = typeof target.title === 'string' ? target.title.slice(0, 160) : '';
+      const processName = typeof target.processName === 'string' ? target.processName.slice(0, 80) : '';
+      const label = (typeof target.label === 'string' && target.label ? target.label : (title || processName)).slice(0, 200);
+      if (label) guidance.target = { hwnd: target.hwnd, title, processName, label, at: Number.isSafeInteger(target.at) ? target.at : 0,
+        ...(typeof target.foreground === 'boolean' ? { foreground: target.foreground } : {}) };
+    } else {
+      delete guidance.target;
+    }
     result.observation.guidance = guidance;
   }
   if (result.voice?.presentation === 'pet' && (result.voice.active === true || result.voice.microphoneActive === true)) {

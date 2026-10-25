@@ -1,3 +1,5 @@
+import type { ForegroundTargetSummary } from './foreground-target.cjs';
+
 import type { UiaControlList, UiaInventoryResult } from './uia-inventory.cjs';
 
 export interface UiaRect { x: number; y: number; width: number; height: number }
@@ -8,11 +10,13 @@ export interface GuidanceReviewVerdict { verdict: 'advanced' | 'unchanged' | 'un
 export interface GuidanceStep { status: 'ready' | 'blocked' | 'unchanged' | 'unverifiable' | 'advanced'; code: string;
   severity: 'info' | 'blocked'; message: string; suggestSingleFrame: boolean; counts: GuidanceCounts;
   detail?: string; verdict?: GuidanceReviewVerdict; target?: GuidanceTarget; instruction?: string;
+  targetWindow?: ForegroundTargetSummary | null;
   previous?: { windowKey: string | null; focusedIndex: number; candidateCount: number; target: { nameKey: string; controlType: string; rect: UiaRect; focused: boolean } };
   at?: number; next?: GuidanceStep | null }
 export interface GuidanceSnapshot { mode: string; modeLabel: string; screenshotFree: boolean; active: boolean;
   reasonCode: string | null; reasonMessage: string | null; severity: string; suggestSingleFrame: boolean; textConsent: boolean;
-  counts: GuidanceCounts; review: { verdict: string; code: string; detail: string } | null }
+  counts: GuidanceCounts; review: { verdict: string; code: string; detail: string } | null;
+  target?: ForegroundTargetSummary | null }
 export interface UiaGuidanceSession {
   ask(question: string, options?: { signal?: AbortSignal }): Promise<GuidanceStep>;
   review(options?: { signal?: AbortSignal }): Promise<GuidanceStep>;

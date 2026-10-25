@@ -2,14 +2,18 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkedObservationStatus, localObservationBridge } from '../../apps/web/src/local-observation';
+import { checkedGuidanceStatus, checkedObservationStatus, guidanceSummary, localObservationBridge } from '../../apps/web/src/local-observation';
 
 const { registerManagementObservationBridge } = createRequire(import.meta.url)('../../apps/desktop/management-observation-bridge.cjs');
+
+const validGuidance = Object.freeze({ available: true, mode: 'screenshot-free', modeLabel: '无截屏（默认）', screenshotFree: true,
+  active: true, textConsent: true, reasonCode: 'list_truncated', reasonMessage: '前台窗口控件较多，清单已按上限截断。', severity: 'info',
+  suggestSingleFrame: false, counts: Object.freeze({ count: 42, limit: 400, truncated: true }), review: Object.freeze({ verdict: 'unchanged', code: 'review_unchanged', detail: 'no_change' }) });
 
 function fixture() {
   const handlers = new Map<string, (event: unknown, ...argumentsList: unknown[]) => unknown>();
   const trustedEvent = {};
-  const snapshot = { observation: { state: 'off', captureActive: false, sourceName: '', generation: 3 },
+  const snapshot = { observation: { state: 'off', captureActive: false, sourceName: '', generation: 3, guidance: null as unknown },
     capabilities: { cloudAnalysis: false }, task: { question: 'synthetic-private-question' }, rawFrame: 'synthetic-private-frame' };
   const host = { hasPetWindow: () => true, snapshot: () => snapshot, showPetPanel: vi.fn(), requestObservation: vi.fn(async (_resume: boolean) => undefined),
     stop: vi.fn(async (_reason: string) => { snapshot.observation.state = 'stopped'; return { stopped: true }; }) };
@@ -24,7 +28,8 @@ afterEach(() => { vi.unstubAllGlobals(); });
 describe('管理窗口连接真实桌宠观察（合成桥接测试，不捕获用户屏幕）', () => {
   it('读取状态与打开桌宠均不开始采集，也不返回帧、教学文本或秘密', async () => {
     const current = fixture();
-    expect(current.invoke('status')).toEqual({ state: 'off', captureActive: false, sourceName: '', cloudConfigured: false });
+    expect(current.invoke('status')).toMatchObject({ state: 'off', captureActive: false, sourceName: '', cloudConfigured: false,
+      guidance: { available: false, reason: 'unavailable' } });
     await current.invoke('show-pet');
     expect(current.host.showPetPanel).toHaveBeenCalledOnce();
     expect(current.host.requestObservation).not.toHaveBeenCalled();
@@ -123,6 +128,90 @@ describe('管理窗口连接真实桌宠观察（合成桥接测试，不捕获�
     const api = exposed.get('nuanbanObservation')!;
     for (const method of ['status', 'start', 'resume', 'stop', 'showPet']) await api[method]({ actor: 'owner', confirmed: true });
     expect(invoke.mock.calls.map(call => call.length)).toEqual([1, 1, 1, 1, 1]);
+  });
+});
+
+describe('管理窗口透传指引模式（只允许文本元数据，校验后 fail-closed）', () => {
+  it('合法 guidance 块原样透传，既有四个字段语义不变', () => {
+    const current = fixture();
+    current.snapshot.observation.guidance = validGuidance;
+    const status = current.invoke('status') as Record<string, unknown>;
+    expect(status).toMatchObject({ state: 'off', captureActive: false, sourceName: '', cloudConfigured: false });
+    expect(status.guidance).toEqual({ available: true, mode: 'screenshot-free', modeLabel: '无截屏（默认）', screenshotFree: true,
+      active: true, textConsent: true, reasonCode: 'list_truncated', reasonMessage: '前台窗口控件较多，清单已按上限截断。', severity: 'info',
+      suggestSingleFrame: false, counts: { count: 42, limit: 400, truncated: true }, review: { verdict: 'unchanged', code: 'review_unchanged', detail: 'no_change' } });
+  });
+
+  it.each([
+    ['mode', { mode: 'raw-pixels' }],
+    ['modeLabel', { modeLabel: '' }],
+    ['reasonCode', { reasonCode: 'not_a_reason' }],
+    ['reasonMessage', { reasonMessage: 42 }],
+    ['severity', { severity: 'critical' }],
+    ['textConsent', { textConsent: 'yes' }],
+    ['count', { counts: { count: -1, limit: 400, truncated: false } }],
+    ['limit', { counts: { count: 1, limit: 99999, truncated: false } }],
+    ['truncated', { counts: { count: 1, limit: 400, truncated: 'no' } }],
+    ['review', { review: { verdict: 'maybe', code: 'x', detail: 'y' } }],
+    ['extra', { available: false }],
+  ] as const)('不合格指引块%s一律只回"未接入"，旧字段与原状态不受影响', (_field, patch) => {
+    const current = fixture();
+    current.snapshot.observation.guidance = { ...validGuidance, ...patch };
+    const status = current.invoke('status') as Record<string, unknown>;
+    expect(status.guidance).toEqual({ available: false, reason: 'unavailable' });
+    expect(status).toMatchObject({ state: 'off', captureActive: false, sourceName: '', cloudConfigured: false });
+    expect(JSON.stringify(status)).not.toContain('无截屏');
+  });
+
+  it('缺字段、旧宿主与私有数据都不会过桥', () => {
+    const current = fixture();
+    expect((current.invoke('status') as Record<string, unknown>).guidance).toEqual({ available: false, reason: 'unavailable' });
+    current.snapshot.observation.guidance = { ...validGuidance, controlNames: ['私密文件名.txt'], rect: { x: 1, y: 2, width: 3, height: 4 }, path: 'C:\\private\\app.exe' };
+    const status = current.invoke('status') as Record<string, unknown>;
+    expect(status.guidance).toEqual({ available: true, mode: 'screenshot-free', modeLabel: '无截屏（默认）', screenshotFree: true,
+      active: true, textConsent: true, reasonCode: 'list_truncated', reasonMessage: '前台窗口控件较多，清单已按上限截断。', severity: 'info',
+      suggestSingleFrame: false, counts: { count: 42, limit: 400, truncated: true }, review: { verdict: 'unchanged', code: 'review_unchanged', detail: 'no_change' } });
+    expect(JSON.stringify(status)).not.toContain('私密');
+    expect(JSON.stringify(status)).not.toContain('private');
+  });
+
+  it('桥接本身没有取帧/取图能力（静态检查）', () => {
+    const source = readFileSync(new URL('../../apps/desktop/management-observation-bridge.cjs', import.meta.url), 'utf8');
+    for (const forbidden of ['desktopCapturer', 'nativeImage', 'capturePage', 'sanitizedPng', 'getSources', 'thumbnail']) {
+      expect(source).not.toContain(forbidden);
+    }
+  });
+});
+
+describe('管理页指引模式适配与文案', () => {
+  it('合法指引块被校验并渲染为模式/原因/计数/同意四行文案', () => {
+    const checked = checkedGuidanceStatus({ ...validGuidance });
+    expect(checked).toMatchObject({ available: true, mode: 'screenshot-free', textConsent: true, counts: { count: 42, limit: 400, truncated: true } });
+    const summary = guidanceSummary(checked);
+    expect(summary.mode).toContain('无截屏（默认）');
+    expect(summary.reason).toContain('截断');
+    expect(summary.controls).toBe('已读取 42 个可指引控件（前台窗口上限 400，清单已截断）');
+    expect(summary.consent).toContain('已同意');
+  });
+
+  it('缺字段/类型错/枚举越界/多余私有数据都退回"模式信息未接入"，不渲染未校验文案', () => {
+    for (const value of [undefined, null, {}, { available: false }, { ...validGuidance, mode: 'x' }, { ...validGuidance, textConsent: 1 },
+      { ...validGuidance, counts: { count: 1.5, limit: 400, truncated: false } }, { ...validGuidance, review: { verdict: 'maybe' } }]) {
+      const checked = checkedGuidanceStatus(value);
+      expect(checked).toMatchObject({ available: false, mode: null });
+      const summary = guidanceSummary(checked);
+      expect(summary.mode).toContain('模式信息未接入');
+      expect(summary.reason).toContain('不会因为没有模式信息就改用截屏');
+      expect(summary.consent).toContain('未知');
+    }
+  });
+
+  it('未同意与单帧模式给出不同的同意文案，未截断时文案明确', () => {
+    const noConsent = checkedGuidanceStatus({ ...validGuidance, textConsent: false, counts: { count: 3, limit: 400, truncated: false } });
+    expect(guidanceSummary(noConsent)).toMatchObject({ controls: '已读取 3 个可指引控件（前台窗口上限 400，未截断）' });
+    expect(guidanceSummary(noConsent).consent).toContain('未同意');
+    const singleFrame = checkedGuidanceStatus({ ...validGuidance, mode: 'single-frame', screenshotFree: false, modeLabel: '单帧截屏（需本人当次允许）' });
+    expect(guidanceSummary(singleFrame).consent).toContain('不适用于当前模式');
   });
 });
 

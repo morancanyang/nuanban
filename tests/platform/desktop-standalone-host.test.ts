@@ -190,6 +190,108 @@ afterEach(async () => {
   await Promise.all(hosts.splice(0).map(host => host.dispose('test')));
 });
 
+describe('默认无截屏指引：模式可见、同意前置、原有路径不被放宽', () => {
+  const { checkedControlItems, UIA_LIMITS } = createRequire(import.meta.url)('../../apps/desktop/observation/uia-inventory.cjs');
+  const display = { id: 1, bounds: { x: -800, y: 0, width: 800, height: 640, displayId: '1' }, workArea: { x: -800, y: 0, width: 800, height: 620 }, scaleFactor: 1 };
+  const ownScreen = () => Object.assign(new EventEmitter(), { getPrimaryDisplay: () => display, getDisplayMatching: () => display,
+    getDisplayNearestPoint: () => display, getCursorScreenPoint: () => ({ x: 0, y: 0 }), getAllDisplays: () => [display],
+    dipToScreenRect: (_window: null, rect: Bounds) => ({ ...rect, displayId: '1' }) });
+
+  function guidanceFixture(overrides: Record<string, unknown> = {}) {
+    const inventory = { read: vi.fn(async () => ({ status: 'complete', windowKey: 'window-a', focusedIndex: 0, truncated: false,
+      counts: { total: 2, limit: 400 }, controls: checkedControlItems([
+        { index: 1, name: '设置', controlType: 'ControlType.Button', enabled: true, offscreen: false, focus: false, depth: 2, x: -700, y: 200, width: 80, height: 30 },
+        { index: 2, name: '文件', controlType: 'ControlType.MenuItem', enabled: true, offscreen: false, focus: false, depth: 2, x: 10, y: 10, width: 60, height: 24 },
+      ], { ...UIA_LIMITS }) })), stop: vi.fn(async () => undefined) };
+    const chooser = vi.fn(async () => ({ text: JSON.stringify({ kind: 'control', control: 1, instruction: '请亲手单击“设置”。' }) }));
+    // 目标窗口端口（"最近的非自身前台窗口"）：本用例只提供元数据，绝不启动真实跟踪。
+    const foregroundTarget = { target: () => ({ hwnd: 4242, title: '合成目标窗口', processName: 'synthetic.exe', label: '合成目标窗口', at: 1, foreground: true }),
+      start: vi.fn(), stop: vi.fn(), clear: vi.fn() };
+    return { ...fixture({ screen: ownScreen(), uiaInventory: inventory, controlChooser: chooser, foregroundTarget, ...overrides }), inventory, chooser, foregroundTarget };
+  }
+
+  it('默认模式是 screenshot-free，并在快照里可见；不需要屏幕共享', async () => {
+    const current = guidanceFixture();
+    await current.host.initialize();
+    const guidance = current.host.snapshot().observation.guidance;
+    expect(guidance).toMatchObject({ available: true, mode: 'screenshot-free', modeLabel: '无截屏（默认）', screenshotFree: true, textConsent: false });
+    expect(current.host.snapshot().observation.state).toBe('off');
+    expect(current.source.capture).not.toHaveBeenCalled();
+  });
+
+  it('没有本人对"发送控件文本"的同意时停住：读清单与外发都不发生', async () => {
+    const current = guidanceFixture();
+    await current.host.initialize();
+    current.dialog.showMessageBox.mockResolvedValue({ response: 1, checkboxChecked: false });
+    const blocked = await current.invoke('nuanban:pet:ask', { text: '帮我找到设置', screenshotFree: true }) as { guidance: Record<string, unknown> };
+    expect(blocked.guidance).toMatchObject({ status: 'blocked', code: 'consent_required' });
+    expect(current.inventory.read).not.toHaveBeenCalled();
+    expect(current.chooser).not.toHaveBeenCalled();
+    expect(current.windows[1].webContents.send).toHaveBeenCalledWith('nuanban:guide:state', { visible: false });
+    // 取消同意不会留下任何"已同意"状态。
+    expect(current.host.snapshot().observation.guidance).toMatchObject({ textConsent: false });
+  });
+
+  it('本人在原生确认框同意后走无截屏路径：不截屏、不发文，坐标由本机给出', async () => {
+    const current = guidanceFixture();
+    await current.host.initialize();
+    current.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false });
+    const consent = await current.invoke('nuanban:pet:command', { type: 'guidance.authorize-text' }) as { snapshot: Record<string, unknown> };
+    expect(consent.snapshot).toMatchObject({ observation: { guidance: { textConsent: true } } });
+    expect(current.host.snapshot().observation.guidance).toMatchObject({ textConsent: true });
+    const reply = await current.invoke('nuanban:pet:ask', { text: '帮我找到设置', screenshotFree: true }) as { guidance: Record<string, unknown> };
+    expect(reply.guidance).toMatchObject({ status: 'ready', code: 'ok' });
+    expect(current.chooser).toHaveBeenCalledOnce();
+    expect(current.inventory.read).toHaveBeenCalledTimes(2);
+    expect(current.source.capture).not.toHaveBeenCalled();
+    expect(current.questioner.answer).not.toHaveBeenCalled();
+    // 指南窗拿到的是**相对该显示器**的矩形：本机证出的 DIP 绝对矩形是 x=-700，而该显示器 bounds.x=-800，
+    // 所以投递给绘制窗口的是 100（与既有单帧路径的约定一致）。
+    expect(reply.guidance.target).toMatchObject({ rect: { x: -700, y: 200, width: 80, height: 30 } });
+    expect(current.windows[1].webContents.send).toHaveBeenCalledWith('nuanban:guide:state',
+      expect.objectContaining({ visible: true, label: '设置', rect: expect.objectContaining({ x: 100, y: 200, width: 80, height: 30, displayId: '1' }) }));
+  });
+
+  it('撤回同意后立即停止外发；核验走本机控件树复核而不是截帧', async () => {
+    const current = guidanceFixture();
+    await current.host.initialize();
+    current.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false });
+    await current.invoke('nuanban:pet:command', { type: 'guidance.authorize-text' });
+    const asked = await current.invoke('nuanban:pet:ask', { text: '帮我找到设置', screenshotFree: true }) as { guidance?: Record<string, unknown> };
+    expect(asked.guidance).toMatchObject({ status: 'ready' });
+    const reviewed = await current.invoke('nuanban:pet:command', { type: 'guidance.verify' }) as { snapshot: Record<string, unknown> };
+    // 复核结论挂在 observation.guidance.review（与既有的 reasonCode/counts 同一层），不是状态顶层。
+    expect(reviewed.snapshot).toMatchObject({ observation: { guidance: { review: { verdict: 'unchanged', code: 'review_unchanged' } } } });
+    expect(current.source.capture).not.toHaveBeenCalled();
+    await current.invoke('nuanban:pet:command', { type: 'guidance.revoke-text' });
+    expect(current.host.snapshot().observation.guidance).toMatchObject({ textConsent: false });
+    const chooserCalls = current.chooser.mock.calls.length;
+    const blocked = await current.invoke('nuanban:pet:ask', { text: '帮我找到设置', screenshotFree: true }) as { guidance: Record<string, unknown> };
+    expect(blocked.guidance).toMatchObject({ code: 'consent_required' });
+    expect(current.chooser.mock.calls.length).toBe(chooserCalls);
+  });
+
+  it('显式选 single-frame 时保持原有文本/截帧路径，不受无截屏默认影响', async () => {
+    const current = guidanceFixture({ guidanceMode: 'single-frame' });
+    await current.host.initialize();
+    expect(current.host.snapshot().observation.guidance).toMatchObject({ mode: 'single-frame', modeLabel: '单帧截屏（需本人当次允许）', screenshotFree: false });
+    const reply = await current.invoke('nuanban:pet:ask', { text: '如何打开显示设置' }) as { guidance?: unknown };
+    expect(reply.guidance).toBeUndefined();
+    expect(current.chooser).not.toHaveBeenCalled();
+    expect(current.host.snapshot().task.question).toBe('如何打开显示设置');
+  });
+
+  it('无截屏提问参数只接受 true，且不影响普通文字提问', async () => {
+    const current = guidanceFixture();
+    await current.host.initialize();
+    await expect(current.invoke('nuanban:pet:ask', { text: '帮我找到设置', screenshotFree: 'yes' })).rejects.toThrow('提问参数无效');
+    await expect(current.invoke('nuanban:pet:ask', { text: '帮我找到设置', screenshotFree: true, actor: 'owner' })).rejects.toThrow('提问参数无效');
+    await current.invoke('nuanban:pet:ask', { text: '如何打开显示设置' });
+    expect(current.host.snapshot().task.question).toBe('如何打开显示设置');
+    expect(current.chooser).not.toHaveBeenCalled();
+  });
+});
+
 describe('独立桌宠不默认弹出遮挡视野的大字窗口', () => {
   it('回答保留在桌宠中；只有本人开字幕才显示，关闭后新回答也不弹出', async () => {
     const current = fixture();

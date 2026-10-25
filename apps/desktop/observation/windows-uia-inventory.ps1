@@ -3,7 +3,7 @@ function Get-ForegroundControlInventory {
     $previousDpi = [IntPtr]::Zero
     try {
         if (-not ('NuanbanUiaInventoryNative' -as [type])) {
-            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class NuanbanUiaInventoryNative { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context); }'
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class NuanbanUiaInventoryNative { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context); }'
         }
         $previousDpi = [NuanbanUiaInventoryNative]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
         if ($previousDpi -eq [IntPtr]::Zero) { return @{ protocol = 1; status = 'unavailable'; reason = 'dpi_context_unavailable' } }
@@ -17,10 +17,26 @@ function Get-ForegroundControlInventory {
         if ($null -ne $Request.excludedProcessIds) { foreach ($value in @($Request.excludedProcessIds)) { try { $excludedProcessIds += [int]$value } catch {} } }
         Add-Type -AssemblyName UIAutomationClient
         Add-Type -AssemblyName UIAutomationTypes
-        $handle = [NuanbanUiaInventoryNative]::GetForegroundWindow()
+        # Target window = the third-party window the owner used most recently (hwnd passed in by the
+        # Node-side low frequency tracker). Without targetHwnd the old behaviour (current foreground
+        # window) is kept, only for backward compatible callers and older tests.
+        $targetHwnd = 0
+        if ($null -ne $Request.targetHwnd) { try { $candidate = [int64]$Request.targetHwnd } catch { $candidate = 0 }; if ($candidate -gt 0 -and $candidate -le 2147483647) { $targetHwnd = [int64]$candidate } }
+        $foregroundHandle = [NuanbanUiaInventoryNative]::GetForegroundWindow()
+        if ($targetHwnd -gt 0) {
+            $handle = [IntPtr]::new($targetHwnd)
+            # Window closed / hwnd invalid: fail explicitly. Never fall back to the current foreground
+            # window and never guess another window.
+            if (-not [NuanbanUiaInventoryNative]::IsWindow($handle)) { return @{ protocol = 1; status = 'unavailable'; reason = 'target_window_gone' } }
+        } else {
+            $handle = $foregroundHandle
+        }
         if ($handle -eq [IntPtr]::Zero) { return @{ protocol = 1; status = 'unavailable'; reason = 'foreground_window_unavailable' } }
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-        if ($null -eq $root) { return @{ protocol = 1; status = 'unavailable'; reason = 'foreground_window_unavailable' } }
+        if ($null -eq $root) {
+            if ($targetHwnd -gt 0) { return @{ protocol = 1; status = 'unavailable'; reason = 'target_window_gone' } }
+            return @{ protocol = 1; status = 'unavailable'; reason = 'foreground_window_unavailable' }
+        }
         # The foreground window can be Nuanban's own pet/panel window; in that case the list would only
         # describe our own UI, not the software the owner wants to operate. Report it explicitly and let
         # the owner click the target window first - never guess and never silently fall back.
@@ -88,8 +104,10 @@ function Get-ForegroundControlInventory {
         }
 
         Add-Children $root 1
+        $isForeground = ($targetHwnd -le 0) -or ($foregroundHandle -eq $handle)
         return @{ protocol = 1; status = 'complete'; truncated = $state.truncated; depthLimited = $state.depthLimited;
             deadlineReached = $state.deadlineReached; focusedIndex = $state.focusedIndex;
+            hwnd = [int64]$handle; foreground = [bool]$isForeground;
             window = @{ processId = $foregroundProcessId; className = $className; title = $title };
             count = $controls.Count; maxDepth = $maxDepth; maxControls = $maxControls; controls = @($controls.ToArray()) }
     } catch {
